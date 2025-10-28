@@ -1,5 +1,6 @@
 // pages/folder_detail_page.dart
 import 'package:flutter/material.dart';
+import 'package:flutter_svg/svg.dart';
 import 'dart:io';
 import 'package:video_thumbnail/video_thumbnail.dart';
 import 'package:path_provider/path_provider.dart';
@@ -7,20 +8,19 @@ import '../widgets/side_navigation.dart';
 import '../widgets/custom_title_bar.dart';
 import '../models/folder_info.dart';
 import '../models/file_item.dart';
+import '../services/thumbnail_helper.dart';
 
 class FolderDetailPage extends StatefulWidget {
   final FolderInfo folder;
 
-  const FolderDetailPage({
-    super.key,
-    required this.folder,
-  });
+  const FolderDetailPage({super.key, required this.folder});
 
   @override
   State<FolderDetailPage> createState() => _FolderDetailPageState();
 }
 
 class _FolderDetailPageState extends State<FolderDetailPage> {
+  final ThumbnailHelper _helper = ThumbnailHelper();
   List<FileItem> fileItems = [];
   List<String> pathSegments = [];
   String currentPath = '';
@@ -31,6 +31,7 @@ class _FolderDetailPageState extends State<FolderDetailPage> {
     super.initState();
     currentPath = widget.folder.path;
     _initPathSegments();
+    _initializeHelper();
     _loadFiles(currentPath);
   }
 
@@ -39,6 +40,22 @@ class _FolderDetailPageState extends State<FolderDetailPage> {
     final parts = widget.folder.path.split(Platform.pathSeparator);
     if (parts.isNotEmpty) {
       pathSegments = [parts[0], widget.folder.name];
+    }
+  }
+  /// 初始化 C# 辅助程序并处理可能出现的错误。
+  Future<void> _initializeHelper() async {
+    try {
+      await _helper.initializeHelper();
+    } catch (e) {
+      // 捕获并显示错误信息
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('缩略图功能不可用：请确保 ThumbnailGenerator.exe 在 assets 目录'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
     }
   }
 
@@ -57,11 +74,13 @@ class _FolderDetailPageState extends State<FolderDetailPage> {
       for (var entity in entities) {
         if (entity is Directory) {
           // 添加文件夹
-          items.add(FileItem(
-            name: entity.path.split(Platform.pathSeparator).last,
-            path: entity.path,
-            type: FileItemType.folder,
-          ));
+          items.add(
+            FileItem(
+              name: entity.path.split(Platform.pathSeparator).last,
+              path: entity.path,
+              type: FileItemType.folder,
+            ),
+          );
         } else if (entity is File) {
           final ext = entity.path.split('.').last.toLowerCase();
           FileItemType? type;
@@ -76,12 +95,14 @@ class _FolderDetailPageState extends State<FolderDetailPage> {
           // 只添加文件夹、图片和视频
           if (type != null) {
             final stat = await entity.stat();
-            items.add(FileItem(
-              name: entity.path.split(Platform.pathSeparator).last,
-              path: entity.path,
-              type: type,
-              size: stat.size,
-            ));
+            items.add(
+              FileItem(
+                name: entity.path.split(Platform.pathSeparator).last,
+                path: entity.path,
+                type: type,
+                size: stat.size,
+              ),
+            );
           }
         }
       }
@@ -140,7 +161,9 @@ class _FolderDetailPageState extends State<FolderDetailPage> {
 
     // 重建路径
     final parts = widget.folder.path.split(Platform.pathSeparator);
-    final basePath = parts.sublist(0, parts.length - 1).join(Platform.pathSeparator);
+    final basePath = parts
+        .sublist(0, parts.length - 1)
+        .join(Platform.pathSeparator);
     final additionalPath = segments.sublist(2).join(Platform.pathSeparator);
 
     if (additionalPath.isEmpty) {
@@ -215,22 +238,10 @@ class _FolderDetailPageState extends State<FolderDetailPage> {
             ),
           ),
           // 操作按钮
-          IconButton(
-            icon: const Icon(Icons.copy),
-            onPressed: () {},
-          ),
-          IconButton(
-            icon: const Icon(Icons.sort),
-            onPressed: () {},
-          ),
-          IconButton(
-            icon: const Icon(Icons.grid_view),
-            onPressed: () {},
-          ),
-          IconButton(
-            icon: const Icon(Icons.list),
-            onPressed: () {},
-          ),
+          IconButton(icon: const Icon(Icons.copy), onPressed: () {}),
+          IconButton(icon: const Icon(Icons.sort), onPressed: () {}),
+          IconButton(icon: const Icon(Icons.grid_view), onPressed: () {}),
+          IconButton(icon: const Icon(Icons.list), onPressed: () {}),
         ],
       ),
     );
@@ -241,10 +252,7 @@ class _FolderDetailPageState extends State<FolderDetailPage> {
       return const Center(
         child: Text(
           '此文件夹为空',
-          style: TextStyle(
-            fontSize: 16,
-            color: Colors.grey,
-          ),
+          style: TextStyle(fontSize: 16, color: Colors.grey),
         ),
       );
     }
@@ -256,9 +264,9 @@ class _FolderDetailPageState extends State<FolderDetailPage> {
           const itemWidth = 140.0;
           const spacing = 20.0;
           final crossAxisCount =
-          ((constraints.maxWidth + spacing) / (itemWidth + spacing))
-              .floor()
-              .clamp(1, 10);
+              ((constraints.maxWidth + spacing) / (itemWidth + spacing))
+                  .floor()
+                  .clamp(1, 10);
 
           return GridView.builder(
             gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
@@ -292,10 +300,7 @@ class _FileItemCard extends StatefulWidget {
   final FileItem item;
   final VoidCallback onTap;
 
-  const _FileItemCard({
-    required this.item,
-    required this.onTap,
-  });
+  const _FileItemCard({required this.item, required this.onTap});
 
   @override
   State<_FileItemCard> createState() => _FileItemCardState();
@@ -324,15 +329,20 @@ class _FileItemCardState extends State<_FileItemCard> {
     try {
       print('Generating thumbnail for: ${widget.item.path}');
 
-      final thumbnailPath = await VideoThumbnail.thumbnailFile(
-        video: widget.item.path,
-        thumbnailPath: (await getTemporaryDirectory()).path,
-        imageFormat: ImageFormat.PNG,
-        maxHeight: 160,
-        maxWidth: 160,
-        quality: 75,
-        timeMs: 0, // 获取第0毫秒的帧
+      // final thumbnailPath = await VideoThumbnail.thumbnailFile(
+      //   video: widget.item.path,
+      //   thumbnailPath: (await getTemporaryDirectory()).path,
+      //   imageFormat: ImageFormat.PNG,
+      //   maxHeight: 160,
+      //   maxWidth: 160,
+      //   quality: 75,
+      //   timeMs: 0, // 获取第0毫秒的帧
+      // );
+
+      final thumbnailPath = await ThumbnailHelper.generateThumbnail(
+        widget.item.path,
       );
+
 
       print('Thumbnail generated at: $thumbnailPath');
 
@@ -422,10 +432,7 @@ class _FileItemCardState extends State<_FileItemCard> {
                 const SizedBox(height: 4),
                 Text(
                   widget.item.formattedSize,
-                  style: TextStyle(
-                    fontSize: 11,
-                    color: Colors.grey.shade600,
-                  ),
+                  style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
                 ),
               ],
             ],
@@ -438,13 +445,16 @@ class _FileItemCardState extends State<_FileItemCard> {
   Widget _buildIcon() {
     switch (widget.item.type) {
       case FileItemType.folder:
-        return Icon(
-          Icons.folder,
-          size: 64,
-          color: Colors.orange.shade300,
+        return SizedBox(
+          width: 80,
+          height: 64,
+          child: SvgPicture.asset(
+            'assets/icons/folder_icon.svg',
+            fit: BoxFit.contain,
+          ),
         );
       case FileItemType.image:
-      // 显示图片缩略图
+        // 显示图片缩略图
         return Container(
           width: 80,
           height: 80,
@@ -458,11 +468,7 @@ class _FileItemCardState extends State<_FileItemCard> {
               File(widget.item.path),
               fit: BoxFit.cover,
               errorBuilder: (context, error, stackTrace) {
-                return const Icon(
-                  Icons.image,
-                  size: 32,
-                  color: Colors.grey,
-                );
+                return const Icon(Icons.image, size: 32, color: Colors.grey);
               },
               frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
                 if (wasSynchronouslyLoaded) {
@@ -479,7 +485,7 @@ class _FileItemCardState extends State<_FileItemCard> {
           ),
         );
       case FileItemType.video:
-      // 显示视频首帧缩略图
+        // 显示视频首帧缩略图
         return Container(
           width: 80,
           height: 80,
@@ -493,10 +499,7 @@ class _FileItemCardState extends State<_FileItemCard> {
               fit: StackFit.expand,
               children: [
                 if (videoThumbnailPath != null)
-                  Image.file(
-                    File(videoThumbnailPath!),
-                    fit: BoxFit.cover,
-                  )
+                  Image.file(File(videoThumbnailPath!), fit: BoxFit.cover)
                 else if (isLoadingThumbnail)
                   Center(
                     child: SizedBox(
@@ -509,11 +512,7 @@ class _FileItemCardState extends State<_FileItemCard> {
                     ),
                   )
                 else
-                  Icon(
-                    Icons.videocam,
-                    size: 32,
-                    color: Colors.grey.shade600,
-                  ),
+                  Icon(Icons.videocam, size: 32, color: Colors.grey.shade600),
                 // 播放按钮叠加层
                 Center(
                   child: Container(

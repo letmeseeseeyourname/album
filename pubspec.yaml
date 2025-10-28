@@ -38,15 +38,22 @@ dependencies:
   window_manager: ^0.3.7
 
   # 文件选择器
-  file_picker: ^6.1.1
+  file_picker: ^8.0.0
 
   # 视频缩略图
   video_thumbnail: ^0.5.3
 
-  # 临时目录访问
-  path_provider: ^2.1.1
+  # Windows API 支持
+  path_provider: ^2.1.0
+  ffi: ^2.1.4
+  win32: ^5.15.0
 
-  ffmpeg_kit_flutter: ^6.0.0
+  # 路径处理
+  path: ^1.8.3
+
+  # 可选：可见性检测（用于懒加载）
+  visibility_detector: ^0.4.0
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -77,6 +84,7 @@ flutter:
     - assets/images/
     - assets/icons/
     - assets/data/
+    - assets/ThumbnailGenerator.exe
 
 
   # An image asset can refer to one or more resolution-specific "variants", see
