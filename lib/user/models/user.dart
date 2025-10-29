@@ -17,12 +17,12 @@ class User {
   String? cityCode;
   String? districtCode;
   String? address;
-  final dynamic? headUrl;
+  final dynamic headUrl;
   final String? createdDate;
   final String? updatedDate;
-  final dynamic? createdBy;
-  final dynamic? updatedBy;
-  final dynamic? deletedFlag;
+  final dynamic createdBy;
+  final dynamic updatedBy;
+  final dynamic deletedFlag;
   final String? username;
   final int? status;
   final bool? enabled;
@@ -66,24 +66,24 @@ class User {
 
   User copyWith({
     int? id,
-    dynamic? nickName,
+    dynamic nickName,
     String? mobile,
-    dynamic? email,
+    dynamic email,
     String? password,
-    dynamic? configCodeId,
-    dynamic? birthDate,
-    dynamic? sex,
-    dynamic? countryCode,
-    dynamic? provinceCode,
-    dynamic? cityCode,
-    dynamic? districtCode,
-    dynamic? address,
-    dynamic? headUrl,
+    dynamic configCodeId,
+    dynamic birthDate,
+    dynamic sex,
+    dynamic countryCode,
+    dynamic provinceCode,
+    dynamic cityCode,
+    dynamic districtCode,
+    dynamic address,
+    dynamic headUrl,
     String? createdDate,
     String? updatedDate,
-    dynamic? createdBy,
-    dynamic? updatedBy,
-    dynamic? deletedFlag,
+    dynamic createdBy,
+    dynamic updatedBy,
+    dynamic deletedFlag,
     String? username,
     int? status,
     bool? enabled,

@@ -17,15 +17,15 @@ class DeviceUser {
     final String? deletedFlag;
     final String? deviceCode;
     final int? deviceId;
-    final dynamic? membershipName;
+    final dynamic membershipName;
     final int? shipStatus;
     final String? userName;
-    final dynamic? menufacturerId;
-    final dynamic? address;
+    final dynamic menufacturerId;
+    final dynamic address;
     final String? headUrl;
     final String? nickName;
     final String? groupName;
-    final dynamic? menufacturerName;
+    final dynamic menufacturerName;
 
     const DeviceUser({
         required this.id,
@@ -70,15 +70,15 @@ class DeviceUser {
         String? deletedFlag,
         String? deviceCode,
         int? deviceId,
-        dynamic? membershipName,
+        dynamic membershipName,
         int? shipStatus,
         String? userName,
-        dynamic? menufacturerId,
-        dynamic? address,
+        dynamic menufacturerId,
+        dynamic address,
         String? headUrl,
         String? nickName,
         String? groupName,
-        dynamic? menufacturerName,
+        dynamic menufacturerName,
     }) {
         return DeviceUser(
             id: id ?? this.id,

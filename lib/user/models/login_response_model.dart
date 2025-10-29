@@ -10,7 +10,7 @@ class LoginResponseModel {
     final String? tokenType;
     final int? expiresIn;
       User? user;
-    final dynamic? groupDeviceUser;
+    final dynamic groupDeviceUser;
     final int? groupMemberCount;
     final String? p2pUsername;
     final List<dynamic>? mgroupDeviceUsers;
