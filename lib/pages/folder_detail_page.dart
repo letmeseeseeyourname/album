@@ -93,9 +93,9 @@ class _FolderDetailPageState extends State<FolderDetailPage> {
           FileItemType? type;
 
           // 判断文件类型
-          if (['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp'].contains(ext)) {
+          if ([ 'bmp', 'gif', 'jpg', 'jpeg', 'png', 'webp', 'wbmp', 'heic'].contains(ext)) {
             type = FileItemType.image;
-          } else if (['mp4', 'avi', 'mov', 'mkv', 'flv', 'wmv'].contains(ext)) {
+          } else if (['mp4', 'mov', 'avi', '3gp', 'mkv', '3gp2'].contains(ext)) {
             type = FileItemType.video;
           }
 

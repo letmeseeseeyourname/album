@@ -2,6 +2,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/svg.dart';
 import 'package:window_manager/window_manager.dart';
+import 'package:ablumwin/user/my_instance.dart';
+import '../network/constant_sign.dart';
 
 class CustomTitleBar extends StatefulWidget {
   final Widget? child;
@@ -40,6 +42,56 @@ class _CustomTitleBarState extends State<CustomTitleBar> {
     }
   }
 
+  // 获取用户头像URL
+  String? _getUserAvatarUrl() {
+    final user = MyInstance().user?.user;
+    if (user?.headUrl != null && user!.headUrl!.isNotEmpty) {
+      return '${AppConfig.avatarURL()}/${user.headUrl}';
+    }
+    return null;
+  }
+
+  // 构建头像Widget
+  Widget _buildAvatar() {
+    final avatarUrl = _getUserAvatarUrl();
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(20), // 圆形头像
+      child: avatarUrl != null
+          ? Image.network(
+        avatarUrl,
+        width: 40,
+        height: 40,
+        fit: BoxFit.cover,
+        errorBuilder: (context, error, stackTrace) {
+          // 加载失败时显示默认头像
+          return Image.asset(
+            'assets/images/avatar.png',
+            width: 40,
+            height: 40,
+            fit: BoxFit.cover,
+          );
+        },
+        loadingBuilder: (context, child, loadingProgress) {
+          if (loadingProgress == null) return child;
+          // 加载中显示默认头像
+          return Image.asset(
+            'assets/images/avatar.png',
+            width: 40,
+            height: 40,
+            fit: BoxFit.cover,
+          );
+        },
+      )
+          : Image.asset(
+        'assets/images/avatar.png',
+        width: 40,
+        height: 40,
+        fit: BoxFit.cover,
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Column(
@@ -70,11 +122,11 @@ class _CustomTitleBarState extends State<CustomTitleBar> {
                         ),
                       ),
                       const SizedBox(width: 10),
-                      // Logo
+                      // Logo/用户头像
                       SizedBox(
                         width: 40,
                         height: 40,
-                        child: Image.asset('assets/images/avatar.png'),
+                        child: _buildAvatar(),
                       ),
                     ],
                   ),
