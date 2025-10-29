@@ -16,23 +16,17 @@ class EmptyState extends StatelessWidget {
             width: 300,
             height: 300,
             decoration: BoxDecoration(
-              color: Colors.grey.shade100,
               borderRadius: BorderRadius.circular(12),
             ),
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Image.network(
-                  'https://via.placeholder.com/200x150/F5E8DC/808080?text=Family',
-                  width: 200,
-                  height: 150,
-                ),
+                Image(image: const AssetImage('assets/images/start_page.png'),width: 200,height: 250,),
                 const SizedBox(height: 20),
                 const Text(
                   '一键导入照片，移至亲选相册着手定制',
                   style: TextStyle(
                     fontSize: 16,
-                    color: Colors.grey,
                   ),
                 ),
               ],

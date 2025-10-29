@@ -227,6 +227,8 @@ class _MainFolderPageState extends State<MainFolderPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       body: CustomTitleBar(
+        backgroundColor: Color(0xFFF5E8DC),
+        rightTitleBgColor: Colors.white,
         showToolbar: true,
         onAddFolder: _pickFolder,
         child: Row(

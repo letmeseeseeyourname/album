@@ -25,7 +25,7 @@ class VerifyCodeLogin extends StatelessWidget {
           decoration: InputDecoration(
             hintText: '请输入手机号',
             filled: true,
-            fillColor: Colors.white,
+            fillColor: Color(0x22666666),
             border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(8),
               borderSide: BorderSide.none,
@@ -49,7 +49,7 @@ class VerifyCodeLogin extends StatelessWidget {
                 decoration: InputDecoration(
                   hintText: '请输入验证码',
                   filled: true,
-                  fillColor: Colors.white,
+                  fillColor: Color(0x22666666),
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(8),
                     borderSide: BorderSide.none,

@@ -1,14 +1,14 @@
 // pages/folder_detail_page.dart
+import 'dart:io';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/svg.dart';
-import 'dart:io';
-import 'package:video_thumbnail/video_thumbnail.dart';
-import 'package:path_provider/path_provider.dart';
-import '../widgets/side_navigation.dart';
-import '../widgets/custom_title_bar.dart';
-import '../models/folder_info.dart';
 import '../models/file_item.dart';
+import '../models/folder_info.dart';
 import '../services/thumbnail_helper.dart';
+import '../widgets/custom_title_bar.dart';
+import '../widgets/side_navigation.dart';
 
 class FolderDetailPage extends StatefulWidget {
   final FolderInfo folder;
@@ -176,6 +176,8 @@ class _FolderDetailPageState extends State<FolderDetailPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       body: CustomTitleBar(
+        backgroundColor: Color(0xFFF5E8DC),
+        rightTitleBgColor: Colors.white,
         showToolbar: true,
         child: Row(
           children: [
@@ -362,7 +364,9 @@ class _FileItemCardState extends State<_FileItemCard> {
           });
         }
       } else {
-        print('Thumbnail path is null or widget disposed');
+        if (kDebugMode) {
+          print('Thumbnail path is null or widget disposed');
+        }
         if (mounted) {
           setState(() {
             isLoadingThumbnail = false;
@@ -370,8 +374,10 @@ class _FileItemCardState extends State<_FileItemCard> {
         }
       }
     } catch (e, stackTrace) {
-      print('Error generating video thumbnail: $e');
-      print('Stack trace: $stackTrace');
+      if (kDebugMode) {
+        print('Error generating video thumbnail: $e');
+        print('Stack trace: $stackTrace');
+      }
       if (mounted) {
         setState(() {
           isLoadingThumbnail = false;

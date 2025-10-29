@@ -5,6 +5,7 @@ import '../widgets/qr_code_login.dart';
 import '../widgets/password_login.dart';
 import '../widgets/verify_code_login.dart';
 import '../widgets/custom_title_bar.dart';
+import '../services/login_service.dart';
 import 'home_page.dart';
 
 class LoginPage extends StatefulWidget {
@@ -58,7 +59,7 @@ class _LoginPageState extends State<LoginPage> {
     });
   }
 
-  void handleGetVerifyCode() {
+  void handleGetVerifyCode() async {
     final phone = phoneController.text.trim();
 
     if (!isValidPhone(phone)) {
@@ -66,9 +67,19 @@ class _LoginPageState extends State<LoginPage> {
       return;
     }
 
-    // 模拟获取验证码
-    startCountdown();
-    showSuccessDialog('验证码已发送');
+    // 调用真实的发送验证码接口
+    try {
+      final result = await LoginService.sendVerifyCode(phone);
+
+      if (result.success) {
+        startCountdown();
+        showSuccessDialog(result.message);
+      } else {
+        showErrorDialog(result.message);
+      }
+    } catch (e) {
+      showErrorDialog('验证码发送失败，请稍后重试');
+    }
   }
 
   void handleLogin() async {
@@ -99,23 +110,56 @@ class _LoginPageState extends State<LoginPage> {
       return;
     }
 
-    // 模拟登录请求
+    // 调用真实的登录接口
     setState(() {
       isLoading = true;
     });
 
-    await Future.delayed(const Duration(seconds: 2));
+    try {
+      LoginResult result;
 
-    setState(() {
-      isLoading = false;
-    });
+      if (selectedTab == 1) {
+        // 密码登录
+        result = await LoginService.loginWithPassword(
+          phone,
+          passwordController.text,
+        );
+      } else {
+        // 验证码登录
+        result = await LoginService.loginWithVerifyCode(
+          phone,
+          verifyCodeController.text,
+        );
+      }
 
-    // 登录成功，跳转到主页面
-    if (mounted) {
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (context) => const HomePage()),
-      );
+      setState(() {
+        isLoading = false;
+      });
+
+      if (result.success) {
+        // 登录成功，跳转到主页面
+        if (mounted) {
+          showSuccessDialog('登录成功');
+
+          // 延迟一下再跳转，让用户看到成功提示
+          await Future.delayed(const Duration(milliseconds: 500));
+
+          if (mounted) {
+            Navigator.pushReplacement(
+              context,
+              MaterialPageRoute(builder: (context) => const HomePage()),
+            );
+          }
+        }
+      } else {
+        // 登录失败，显示错误信息
+        showErrorDialog(result.message);
+      }
+    } catch (e) {
+      setState(() {
+        isLoading = false;
+      });
+      showErrorDialog('登录失败，请稍后重试');
     }
   }
 
@@ -148,57 +192,36 @@ class _LoginPageState extends State<LoginPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       body: CustomTitleBar(
+        rightTitleBgColor: const Color(0xFFF5F5F5),
+        backgroundColor:  const Color(0xFFF5F5F5),
         showToolbar: false, // 登录页面不显示工具栏
         child: Row(
           children: [
-            // 左侧扫码登录区域
+            // 左侧扫码登录区域 - flex: 2
             Expanded(
-              child: QRCodeLogin(),
+              flex: 2,
+              child: Container(
+                color: const Color(0xFFF5F5F5),
+                child: QRCodeLogin(),
+              ),
             ),
 
-            // 中间分割线
+            // 中间分割线 - 不占满整个高度
             Container(
+              margin: const EdgeInsets.symmetric(vertical: 80),
               width: 1,
               color: Colors.grey.shade300,
             ),
 
-            // 右侧密码/验证码登录区域
+            // 右侧密码/验证码登录区域 - flex: 3
             Expanded(
+              flex: 3,
               child: Container(
                 color: const Color(0xFFF5F5F5),
-                padding: const EdgeInsets.symmetric(horizontal: 60),
+                padding: const EdgeInsets.symmetric(horizontal: 100),
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    // Logo
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Container(
-                          width: 50,
-                          height: 50,
-                          decoration: const BoxDecoration(
-                            color: Colors.orange,
-                            shape: BoxShape.circle,
-                          ),
-                          child: const Icon(
-                            Icons.home,
-                            color: Colors.white,
-                            size: 30,
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        const Text(
-                          '亲选相册',
-                          style: TextStyle(
-                            fontSize: 24,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ],
-                    ),
-
-                    const SizedBox(height: 60),
 
                     // 标签切换
                     Row(
@@ -280,15 +303,23 @@ class _LoginPageState extends State<LoginPage> {
                           },
                           activeColor: Colors.orange,
                         ),
-                        const Text('我已阅读并同意 '),
-                        const Text(
-                          '用户协议',
-                          style: TextStyle(color: Colors.orange),
-                        ),
-                        const Text(' 和 '),
-                        const Text(
-                          '隐私政策',
-                          style: TextStyle(color: Colors.orange),
+                        Flexible(
+                          child: Wrap(
+                            alignment: WrapAlignment.center,
+                            crossAxisAlignment: WrapCrossAlignment.center,
+                            children: [
+                              const Text('我已阅读并同意 '),
+                              const Text(
+                                '用户协议',
+                                style: TextStyle(color: Colors.orange),
+                              ),
+                              const Text(' 和 '),
+                              const Text(
+                                '隐私政策',
+                                style: TextStyle(color: Colors.orange),
+                              ),
+                            ],
+                          ),
                         ),
                       ],
                     ),

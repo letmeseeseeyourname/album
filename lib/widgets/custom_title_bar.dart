@@ -7,12 +7,15 @@ class CustomTitleBar extends StatefulWidget {
   final Widget? child;
   final bool showToolbar; // 是否显示工具栏内容
   final VoidCallback? onAddFolder; // 添加文件夹回调
-
+  final Color? backgroundColor;
+  final Color? rightTitleBgColor;
   const CustomTitleBar({
     super.key,
     this.child,
     this.showToolbar = false,
     this.onAddFolder,
+    this.backgroundColor =  Colors.white,
+    this.rightTitleBgColor =  Colors.white,
   });
 
   @override
@@ -44,13 +47,13 @@ class _CustomTitleBarState extends State<CustomTitleBar> {
         // 自定义标题栏
         Container(
           height: widget.showToolbar ? 80 : 40,
-          decoration: const BoxDecoration(color: Color(0xFFF5E8DC)),
+          decoration:  BoxDecoration(color: widget.backgroundColor),//0xFFF5E8DC
           child: Row(
             children: [
               // 左侧区域 - 与侧边栏同宽，背景色相同
               Container(
                 width: 220,
-                color: const Color(0xFFF5E8DC),
+                color: Colors.transparent,//0xFFF5E8DC
                 child: widget.showToolbar
                     ? Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 20),
@@ -117,7 +120,7 @@ class _CustomTitleBarState extends State<CustomTitleBar> {
               // 右侧区域 - 可拖动区域和功能按钮
               Expanded(
                 child: Container(
-                  color: Colors.white,
+                  color: widget.rightTitleBgColor,//Colors.white
                   child: Row(
                     children: [
                       // 可拖动区域或工具栏内容

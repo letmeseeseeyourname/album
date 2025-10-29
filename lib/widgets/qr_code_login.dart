@@ -7,7 +7,7 @@ class QRCodeLogin extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      color: Colors.white,
+      color: const Color(0xFFF5F5F5),
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
@@ -20,8 +20,8 @@ class QRCodeLogin extends StatelessWidget {
           ),
           const SizedBox(height: 40),
           Container(
-            width: 280,
-            height: 280,
+            width: 200,
+            height: 200,
             decoration: BoxDecoration(
               border: Border.all(color: Colors.grey.shade300, width: 2),
               borderRadius: BorderRadius.circular(8),
