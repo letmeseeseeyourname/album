@@ -1,28 +1,38 @@
 // widgets/side_navigation.dart
 import 'package:flutter/material.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 
 class SideNavigation extends StatelessWidget {
-  const SideNavigation({super.key});
+  final int selectedIndex;
+  final Function(int) onNavigationChanged;
+
+  const SideNavigation({
+    super.key,
+    required this.selectedIndex,
+    required this.onNavigationChanged,
+  });
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: 220,
+      width: 170,
       color: const Color(0xFFF5E8DC),
       child: Column(
         children: [
           const SizedBox(height: 8),
-          // 导航按钮
-          const NavButton(
-            icon: Icons.home,
+          // 导航按钮 - 使用 SVG 图标
+          NavButton(
+            svgPath: 'assets/icons/local_icon.svg',  // 本地图库 SVG 图标
             label: '本地图库',
-            isSelected: true,
+            isSelected: selectedIndex == 0,
+            onTap: () => onNavigationChanged(0),
           ),
 
-          const NavButton(
-            icon: Icons.cloud,
+          NavButton(
+            svgPath: 'assets/icons/grid_icon.svg',  // 相册图库 SVG 图标
             label: '相册图库',
-            isSelected: false,
+            isSelected: selectedIndex == 1,
+            onTap: () => onNavigationChanged(1),
           ),
         ],
       ),
@@ -31,15 +41,17 @@ class SideNavigation extends StatelessWidget {
 }
 
 class NavButton extends StatelessWidget {
-  final IconData icon;
+  final String svgPath;
   final String label;
   final bool isSelected;
+  final VoidCallback onTap;
 
   const NavButton({
     super.key,
-    required this.icon,
+    required this.svgPath,
     required this.label,
     required this.isSelected,
+    required this.onTap,
   });
 
   @override
@@ -51,9 +63,18 @@ class NavButton extends StatelessWidget {
         borderRadius: BorderRadius.circular(8),
       ),
       child: ListTile(
-        leading: Icon(
-          icon,
-          color: isSelected ? Colors.white : Colors.black,
+        leading: SizedBox(
+          width: 15,
+          height: 15,
+          child: SvgPicture.asset(
+            svgPath,
+            colorFilter: ColorFilter.mode(
+              isSelected ? Colors.white : Colors.black,
+              BlendMode.srcIn,
+            ),
+            width: 15,
+            height: 15,
+          ),
         ),
         title: Text(
           label,
@@ -62,7 +83,7 @@ class NavButton extends StatelessWidget {
             fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
           ),
         ),
-        onTap: () {},
+        onTap: onTap,
       ),
     );
   }

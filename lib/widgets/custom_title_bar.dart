@@ -52,7 +52,7 @@ class _CustomTitleBarState extends State<CustomTitleBar> {
             children: [
               // 左侧区域 - 与侧边栏同宽，背景色相同
               Container(
-                width: 220,
+                width: 170,
                 color: Colors.transparent,//0xFFF5E8DC
                 child: widget.showToolbar
                     ? Padding(

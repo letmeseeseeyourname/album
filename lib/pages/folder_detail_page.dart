@@ -12,8 +12,15 @@ import '../widgets/side_navigation.dart';
 
 class FolderDetailPage extends StatefulWidget {
   final FolderInfo folder;
+  final int selectedNavIndex;
+  final Function(int)? onNavigationChanged;
 
-  const FolderDetailPage({super.key, required this.folder});
+  const FolderDetailPage({
+    super.key,
+    required this.folder,
+    this.selectedNavIndex = 0,  // 默认值
+    this.onNavigationChanged,  // 可选参数
+  });
 
   @override
   State<FolderDetailPage> createState() => _FolderDetailPageState();
@@ -51,7 +58,7 @@ class _FolderDetailPageState extends State<FolderDetailPage> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('缩略图功能不可用：请确保 ThumbnailGenerator.exe 在 assets 目录'),
+            content: Text('缩略图功能不可用:请确保 ThumbnailGenerator.exe 在 assets 目录'),
             backgroundColor: Colors.red,
           ),
         );
@@ -181,7 +188,13 @@ class _FolderDetailPageState extends State<FolderDetailPage> {
         showToolbar: true,
         child: Row(
           children: [
-            const SideNavigation(),
+            // 如果提供了导航回调，使用可交互的导航；否则使用静态导航
+            widget.onNavigationChanged != null
+                ? SideNavigation(
+              selectedIndex: widget.selectedNavIndex,
+              onNavigationChanged: widget.onNavigationChanged!,
+            )
+                : const _StaticSideNavigation(),
             Expanded(
               child: Container(
                 color: Colors.white,
@@ -266,10 +279,9 @@ class _FolderDetailPageState extends State<FolderDetailPage> {
           const itemWidth = 140.0;
           const spacing = 20.0;
           final crossAxisCount =
-              ((constraints.maxWidth + spacing) / (itemWidth + spacing))
-                  .floor()
-                  .clamp(1, 10);
-
+          ((constraints.maxWidth + spacing) / (itemWidth + spacing))
+              .floor()
+              .clamp(1, 10);
           return GridView.builder(
             gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
               crossAxisCount: crossAxisCount,
@@ -293,6 +305,49 @@ class _FolderDetailPageState extends State<FolderDetailPage> {
             },
           );
         },
+      ),
+    );
+  }
+}
+
+// 静态导航组件（不可交互）- 用于向后兼容
+class _StaticSideNavigation extends StatelessWidget {
+  const _StaticSideNavigation();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 170,
+      color: const Color(0xFFF5E8DC),
+      child: Column(
+        children: [
+          const SizedBox(height: 8),
+          _buildNavButton(Icons.home, '本地图库', true),
+          _buildNavButton(Icons.cloud, '相册图库', false),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildNavButton(IconData icon, String label, bool isSelected) {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(
+        color: isSelected ? const Color(0xFF2C2C2C) : Colors.transparent,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: ListTile(
+        leading: Icon(
+          icon,
+          color: isSelected ? Colors.white : Colors.black,
+        ),
+        title: Text(
+          label,
+          style: TextStyle(
+            color: isSelected ? Colors.white : Colors.black,
+            fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+          ),
+        ),
       ),
     );
   }
@@ -331,20 +386,9 @@ class _FileItemCardState extends State<_FileItemCard> {
     try {
       print('Generating thumbnail for: ${widget.item.path}');
 
-      // final thumbnailPath = await VideoThumbnail.thumbnailFile(
-      //   video: widget.item.path,
-      //   thumbnailPath: (await getTemporaryDirectory()).path,
-      //   imageFormat: ImageFormat.PNG,
-      //   maxHeight: 160,
-      //   maxWidth: 160,
-      //   quality: 75,
-      //   timeMs: 0, // 获取第0毫秒的帧
-      // );
-
       final thumbnailPath = await ThumbnailHelper.generateThumbnail(
         widget.item.path,
       );
-
 
       print('Thumbnail generated at: $thumbnailPath');
 
@@ -460,7 +504,7 @@ class _FileItemCardState extends State<_FileItemCard> {
           ),
         );
       case FileItemType.image:
-        // 显示图片缩略图
+      // 显示图片缩略图
         return Container(
           width: 80,
           height: 80,
@@ -491,7 +535,7 @@ class _FileItemCardState extends State<_FileItemCard> {
           ),
         );
       case FileItemType.video:
-        // 显示视频首帧缩略图
+      // 显示视频首帧缩略图
         return Container(
           width: 80,
           height: 80,

@@ -10,7 +10,14 @@ import '../models/folder_info.dart';
 import 'folder_detail_page.dart';
 
 class MainFolderPage extends StatefulWidget {
-  const MainFolderPage({super.key});
+  final int selectedNavIndex;
+  final Function(int)? onNavigationChanged;
+
+  const MainFolderPage({
+    super.key,
+    this.selectedNavIndex = 0,
+    this.onNavigationChanged,
+  });
 
   @override
   State<MainFolderPage> createState() => _MainFolderPageState();
@@ -136,13 +143,13 @@ class _MainFolderPageState extends State<MainFolderPage> {
               // 显示删除成功提示
               _showSuccessSnackBar('已删除 $count 个文件夹');
             },
-            child: const Text(
-              '确定',
-              style: TextStyle(color: Colors.white),
-            ),
             style: TextButton.styleFrom(
               backgroundColor: const Color(0xFF2C2C2C),
               padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+            ),
+            child: const Text(
+              '确定',
+              style: TextStyle(color: Colors.white),
             ),
           ),
         ],
@@ -233,7 +240,12 @@ class _MainFolderPageState extends State<MainFolderPage> {
         onAddFolder: _pickFolder,
         child: Row(
           children: [
-            const SideNavigation(),
+            widget.onNavigationChanged != null
+                ? SideNavigation(
+              selectedIndex: widget.selectedNavIndex,
+              onNavigationChanged: widget.onNavigationChanged!,
+            )
+                : _buildStaticNavigation(),
             Expanded(
               child: Container(
                 color: Colors.white,
@@ -243,6 +255,43 @@ class _MainFolderPageState extends State<MainFolderPage> {
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStaticNavigation() {
+    return Container(
+      width: 220,
+      color: const Color(0xFFF5E8DC),
+      child: Column(
+        children: [
+          const SizedBox(height: 8),
+          _buildStaticNavButton(Icons.home, '本地图库', true),
+          _buildStaticNavButton(Icons.cloud, '相册图库', false),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStaticNavButton(IconData icon, String label, bool isSelected) {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(
+        color: isSelected ? const Color(0xFF2C2C2C) : Colors.transparent,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: ListTile(
+        leading: Icon(
+          icon,
+          color: isSelected ? Colors.white : Colors.black,
+        ),
+        title: Text(
+          label,
+          style: TextStyle(
+            color: isSelected ? Colors.white : Colors.black,
+            fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+          ),
         ),
       ),
     );
@@ -317,6 +366,8 @@ class _MainFolderPageState extends State<MainFolderPage> {
                   MaterialPageRoute(
                     builder: (context) => FolderDetailPage(
                       folder: folders[index],
+                      selectedNavIndex: widget.selectedNavIndex,
+                      onNavigationChanged: widget.onNavigationChanged,
                     ),
                   ),
                 );
