@@ -29,7 +29,7 @@ class SideNavigation extends StatelessWidget {
           ),
 
           NavButton(
-            svgPath: 'assets/icons/grid_icon.svg',  // 相册图库 SVG 图标
+            svgPath: 'assets/icons/cloud_icon.svg',  // 相册图库 SVG 图标
             label: '相册图库',
             isSelected: selectedIndex == 1,
             onTap: () => onNavigationChanged(1),

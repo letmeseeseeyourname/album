@@ -7,6 +7,7 @@ import '../widgets/custom_title_bar.dart';
 import '../widgets/folder_grid_component.dart';
 import '../widgets/empty_state.dart';
 import '../models/folder_info.dart';
+import '../services/folder_manager.dart';
 import 'folder_detail_page.dart';
 
 class MainFolderPage extends StatefulWidget {
@@ -24,14 +25,41 @@ class MainFolderPage extends StatefulWidget {
 }
 
 class _MainFolderPageState extends State<MainFolderPage> {
+  final FolderManager _folderManager = FolderManager();
   List<FolderInfo> folders = [];
   Set<int> selectedIndices = {};
   bool isSelectionMode = false;
   int? hoveredIndex;
+  bool _isLoading = true;
 
   @override
   void initState() {
     super.initState();
+    _loadFolders();
+  }
+
+  /// 从持久化存储加载本地图库文件夹列表
+  Future<void> _loadFolders() async {
+    setState(() {
+      _isLoading = true;
+    });
+
+    try {
+      final loadedFolders = await _folderManager.getLocalFolders();
+      if (mounted) {
+        setState(() {
+          folders = loadedFolders;
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      print('Error loading local folders: $e');
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
+    }
   }
 
   Future<void> _pickFolder() async {
@@ -71,14 +99,18 @@ class _MainFolderPageState extends State<MainFolderPage> {
           print('Error scanning directory: $e');
         }
 
-        setState(() {
-          folders.add(FolderInfo(
-            name: folderName,
-            path: selectedDirectory,
-            imageCount: imageCount,
-            videoCount: videoCount,
-          ));
-        });
+        final newFolder = FolderInfo(
+          name: folderName,
+          path: selectedDirectory,
+          fileCount: imageCount,
+          totalSize: videoCount,
+        );
+
+        // 保存到持久化存储
+        await _folderManager.addLocalFolder(newFolder);
+
+        // 重新加载列表以确保UI更新
+        await _loadFolders();
 
         _showSuccessSnackBar('已添加文件夹 "$folderName"');
       }
@@ -129,17 +161,28 @@ class _MainFolderPageState extends State<MainFolderPage> {
             ),
           ),
           TextButton(
-            onPressed: () {
+            onPressed: () async {
               Navigator.pop(context);
+
               // 执行删除操作
-              setState(() {
-                final sortedIndices = selectedIndices.toList()..sort((a, b) => b.compareTo(a));
-                for (var index in sortedIndices) {
-                  folders.removeAt(index);
+              final sortedIndices = selectedIndices.toList()..sort((a, b) => b.compareTo(a));
+
+              // 从持久化存储中删除
+              for (var index in sortedIndices) {
+                if (index < folders.length) {
+                  await _folderManager.removeLocalFolder(folders[index].path);
                 }
+              }
+
+              // 重新加载列表
+              await _loadFolders();
+
+              // 清除选择状态
+              setState(() {
                 selectedIndices.clear();
                 isSelectionMode = false;
               });
+
               // 显示删除成功提示
               _showSuccessSnackBar('已删除 $count 个文件夹');
             },
@@ -158,11 +201,11 @@ class _MainFolderPageState extends State<MainFolderPage> {
   }
 
   int _getTotalImageCount() {
-    return folders.fold(0, (sum, folder) => sum + folder.imageCount);
+    return folders.fold(0, (sum, folder) => sum + folder.fileCount);
   }
 
   int _getTotalVideoCount() {
-    return folders.fold(0, (sum, folder) => sum + folder.videoCount);
+    return folders.fold(0, (sum, folder) => sum + folder.totalSize);
   }
 
   double _getTotalSize() {
@@ -249,9 +292,11 @@ class _MainFolderPageState extends State<MainFolderPage> {
             Expanded(
               child: Container(
                 color: Colors.white,
-                child: folders.isEmpty
+                child: _isLoading
+                    ? const Center(child: CircularProgressIndicator())
+                    : (folders.isEmpty
                     ? EmptyState(onImport: _pickFolder)
-                    : _buildFolderList(),
+                    : _buildFolderList()),
               ),
             ),
           ],
@@ -360,15 +405,24 @@ class _MainFolderPageState extends State<MainFolderPage> {
               if (isSelectionMode) {
                 _toggleSelection(index);
               } else {
-                // 打开文件夹详情
+                // 打开文件夹详情 - 使用淡入淡出动画，避免缩放效果
                 Navigator.push(
                   context,
-                  MaterialPageRoute(
-                    builder: (context) => FolderDetailPage(
+                  PageRouteBuilder(
+                    pageBuilder: (context, animation, secondaryAnimation) => FolderDetailPage(
                       folder: folders[index],
                       selectedNavIndex: widget.selectedNavIndex,
                       onNavigationChanged: widget.onNavigationChanged,
                     ),
+                    transitionDuration: const Duration(milliseconds: 200),
+                    reverseTransitionDuration: const Duration(milliseconds: 200),
+                    transitionsBuilder: (context, animation, secondaryAnimation, child) {
+                      // 使用淡入淡出效果
+                      return FadeTransition(
+                        opacity: animation,
+                        child: child,
+                      );
+                    },
                   ),
                 );
               }
@@ -377,55 +431,6 @@ class _MainFolderPageState extends State<MainFolderPage> {
             onCheckboxToggle: (index) {
               _toggleSelection(index);
             },
-          ),
-        ),
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 20),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            border: Border(
-              top: BorderSide(color: Colors.grey.shade300),
-            ),
-          ),
-          child: Row(
-            children: [
-              Text(
-                '已选：${_getTotalSize()}MB · ${_getTotalImageCount()}张照片/${_getTotalVideoCount()}条视频',
-                style: TextStyle(
-                  fontSize: 14,
-                  color: Colors.grey.shade600,
-                ),
-              ),
-              const Spacer(),
-              Text(
-                '设备剩余空间：320GB',
-                style: TextStyle(
-                  fontSize: 14,
-                  color: Colors.grey.shade600,
-                ),
-              ),
-              const SizedBox(width: 30),
-              ElevatedButton(
-                onPressed: () {},
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF2C2C2C),
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 40,
-                    vertical: 16,
-                  ),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                ),
-                child: const Text(
-                  '同步',
-                  style: TextStyle(
-                    fontSize: 16,
-                    color: Colors.white,
-                  ),
-                ),
-              ),
-            ],
           ),
         ),
       ],
