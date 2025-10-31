@@ -38,3 +38,23 @@ target_include_directories(${BINARY_NAME} PRIVATE "${CMAKE_SOURCE_DIR}")
 
 # Run the Flutter tool portions of the build. This must not be removed.
 add_dependencies(${BINARY_NAME} flutter_assemble)
+
+# P2P SDK DLL自动部署
+#set(P2P_DLL_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/pgDllTunnel.dll")
+#
+#if(EXISTS ${P2P_DLL_SOURCE})
+#    # 复制到构建输出目录
+#    add_custom_command(
+#            TARGET ${BINARY_NAME} POST_BUILD
+#            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+#            "${P2P_DLL_SOURCE}"
+#            "$<TARGET_FILE_DIR:${BINARY_NAME}>"
+#            COMMENT "Copying P2P DLL to output directory"
+#    )
+
+    # 配置安装（用于flutter build windows）
+#    install(FILES "${P2P_DLL_SOURCE}"
+#            DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
+#            COMPONENT Runtime
+#    )
+#endif()
