@@ -1,6 +1,7 @@
 // pages/folder_detail_page.dart
 import 'dart:io';
 
+import 'package:ablumwin/user/my_instance.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/svg.dart';
@@ -587,6 +588,14 @@ class _FolderDetailPageState extends State<FolderDetailPage> {
         .length;
   }
 
+  /// P6剩余空间
+  double _getDeviceStorageUsed(){
+    double used = MyInstance().p6deviceInfoModel?.ttlUsed?? 0;
+    double scaled = used * 100.0;
+    int usedPercent = scaled.round();
+    return usedPercent/100.0;
+  }
+
   /// 计算选中项目的总大小（MB）
   double _getSelectedTotalSize() {
     int totalBytes = selectedIndices
@@ -603,6 +612,8 @@ class _FolderDetailPageState extends State<FolderDetailPage> {
     if (selectedIndices.isEmpty) {
       return const SizedBox.shrink();
     }
+
+
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 20),
@@ -623,7 +634,7 @@ class _FolderDetailPageState extends State<FolderDetailPage> {
           ),
           const Spacer(),
           Text(
-            '设备剩余空间：320GB',
+            '设备剩余空间：${_getDeviceStorageUsed()}G',
             style: TextStyle(
               fontSize: 14,
               color: Colors.grey.shade600,

@@ -1,13 +1,30 @@
 // pages/home_page.dart
 import 'package:flutter/material.dart';
-import '../p2p/p2p_tunnel_service.dart';
-import 'main_folder_page.dart';
+import '../eventbus/event_bus.dart';
+import '../user/models/p6device_info_model.dart';
+import '../user/my_instance.dart';
+import '../user/provider/mine_provider.dart';
 import 'album_library_page.dart';
+import 'main_folder_page.dart';
 
+
+
+class P6loginEvent {
+  P6loginEvent();
+}
+
+class HomePageReloadEvent {
+  HomePageReloadEvent();
+}
+
+class GroupChangedEvent {
+  GroupChangedEvent();
+}
 
 class HomePage extends StatefulWidget {
-  const HomePage({super.key});
+    HomePage({super.key});
 
+  var mineProvider = MyNetworkProvider();
   @override
   State<HomePage> createState() => _HomePageState();
 }
@@ -15,23 +32,35 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> {
   int _selectedIndex = 0; // 0: 本地图库, 1: 相册图库
 
-  // ========== P2P相关代码开始 ==========
-  // final P2PTunnelService _p2pService = P2PTunnelService();
-  bool _isP2PConnected = false;
 
   @override
   void initState() {
     super.initState();
-    // _checkP2PStatus();  // 检查P2P状态
+
+    MCEventBus.on<P6loginEvent>().listen((event) {
+      _p6loginAction();
+    });
+
+    _onPeriodicCallback();
   }
 
-  // 检查P2P连接状态
-  // void _checkP2PStatus() {
-  //   setState(() {
-  //     _isP2PConnected = _p2pService.isLoggedIn;
-  //   });
-  // }
-  // ========== P2P相关代码结束 ==========
+  void _onPeriodicCallback() {
+    // This method will be called every 5 minutes
+    print('Periodic callback triggered - ${DateTime.now()}');
+    // widget.mineProvider.refreshToken();
+    _refreshDeviceStorage();
+  }
+  _p6loginAction() async {
+    await widget.mineProvider.doP6login();
+  }
+  _refreshDeviceStorage() async {
+    var deviceRsp = await widget.mineProvider.getStorageInfo();
+    if (deviceRsp.isSuccess) {
+      P6DeviceInfoModel? storageInfo = deviceRsp.model;
+      debugPrint("storageInfo $storageInfo");
+      MyInstance().p6deviceInfoModel = storageInfo;
+    }
+  }
 
   void _onNavigationChanged(int index) {
     setState(() {
@@ -61,25 +90,7 @@ class _HomePageState extends State<HomePage> {
 
   @override
   Widget build(BuildContext context) {
-    // ========== 原始版本（不显示P2P状态）==========
     return _getCurrentPage();
 
-    // ========== 新版本（显示P2P状态指示器）==========
-    // return Stack(
-    //   children: [
-    //     _getCurrentPage(),
-    //
-    //     // P2P状态指示器（右上角小图标）
-    //     Positioned(
-    //       top: 8,
-    //       right: 8,
-    //       child: Icon(
-    //         _isP2PConnected ? Icons.cloud_done : Icons.cloud_off,
-    //         size: 18,
-    //         color: _isP2PConnected ? Colors.green : Colors.grey,
-    //       ),
-    //     ),
-    //   ],
-    // );
   }
 }

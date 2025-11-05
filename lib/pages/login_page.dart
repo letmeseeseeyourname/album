@@ -28,6 +28,16 @@ class _LoginPageState extends State<LoginPage> {
   Timer? countdownTimer;
 
   @override
+  void initState() {
+    super.initState();
+    Future.delayed(Duration(seconds: 1), () {
+      phoneController.text = "15323783167";
+      passwordController.text = "123456";
+    });
+  }
+
+
+  @override
   void dispose() {
     phoneController.dispose();
     passwordController.dispose();
@@ -147,7 +157,7 @@ class _LoginPageState extends State<LoginPage> {
           if (mounted) {
             Navigator.pushReplacement(
               context,
-              MaterialPageRoute(builder: (context) => const HomePage()),
+              MaterialPageRoute(builder: (context) =>  HomePage()),
             );
           }
         }

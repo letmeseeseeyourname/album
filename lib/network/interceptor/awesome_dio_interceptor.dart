@@ -4,6 +4,9 @@ import 'dart:developer';
 import 'package:colorize/colorize.dart';
 import 'package:dio/dio.dart';
 
+import '../../eventbus/event_bus.dart';
+import '../../pages/home_page.dart';
+
 
 /// A simple dio log interceptor (mainly inspired by the built-in dio
 /// `LogInterceptor`), which has coloring features and json formatting
@@ -126,39 +129,6 @@ class AwesomeDioInterceptor implements Interceptor {
     _log(key: '[Request] ->', value: '', style: _requestStyle);
     _log(key: 'Uri: ', value: options.uri.toString(), style: _requestStyle);
     _log(key: 'Method: ', value: options.method, style: _requestStyle);
-    // _log(
-    //   key: 'Response Type: ',
-    //   value: options.responseType.toString(),
-    //   style: style,
-    // );
-    // _log(
-    //   key: 'Follow Redirects: ',
-    //   value: options.followRedirects.toString(),
-    //   style: style,
-    // );
-    // if (_logRequestTimeout) {
-    //   _log(
-    //     key: 'Connection Timeout: ',
-    //     value: options.connectTimeout.toString(),
-    //     style: style,
-    //   );
-    //   _log(
-    //     key: 'Send Timeout: ',
-    //     value: options.sendTimeout.toString(),
-    //     style: style,
-    //   );
-    //   _log(
-    //     key: 'Receive Timeout: ',
-    //     value: options.receiveTimeout.toString(),
-    //     style: style,
-    //   );
-    // }
-    // _log(
-    //   key: 'Receive Data When Status Error: ',
-    //   value: options.receiveDataWhenStatusError.toString(),
-    //   style: style,
-    // );
-    // _log(key: 'Extra: ', value: options.extra.toString(), style: style);
     _logHeaders(headers: options.headers, style: style);
     _logJson(key: 'Request Body:\n', value: options.data, style: style);
   }
@@ -237,7 +207,7 @@ class AwesomeDioInterceptor implements Interceptor {
     _logNewLine();
     final body = json.decode(response.data);
     if (body["code"] == 208) {
-      // MCEventBus.fire(P6loginEvent());
+      MCEventBus.fire(P6loginEvent());
     }
 
     handler.next(response);

@@ -2,8 +2,10 @@ import 'dart:convert' as convert;
 
 import 'package:ablumwin/user/provider/mine_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'models/device_model.dart';
 import 'models/group.dart';
 import 'models/login_response_model.dart';
+import 'models/p6device_info_model.dart';
 
 class MyInstance {
   static final MyInstance _singleton = MyInstance._internal();
@@ -11,7 +13,8 @@ class MyInstance {
   // int? selectGroupId;
   String? myCookie;
   String deviceCode = "";
-
+  DeviceModel? deviceModel;
+  P6DeviceInfoModel? p6deviceInfoModel;
   bool isExternalStorage = false;
   MyNetworkProvider mineProvider = MyNetworkProvider();
   Group? group;
