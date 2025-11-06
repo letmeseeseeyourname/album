@@ -1,6 +1,7 @@
 // pages/home_page.dart
 import 'package:flutter/material.dart';
 import '../eventbus/event_bus.dart';
+import '../minio/minio_service.dart';
 import '../user/models/p6device_info_model.dart';
 import '../user/my_instance.dart';
 import '../user/provider/mine_provider.dart';
@@ -31,7 +32,7 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   int _selectedIndex = 0; // 0: 本地图库, 1: 相册图库
-
+  final minioService = MinioService.instance;
 
   @override
   void initState() {
