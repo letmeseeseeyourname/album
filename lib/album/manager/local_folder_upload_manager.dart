@@ -242,11 +242,63 @@ class LocalFolderUploadManager extends ChangeNotifier {
         return;
       }
 
+      // 3.5. MD5去重：如果多个文件MD5相同，只保留第一个文件上传
+      final uniqueFiles = <MapEntry<LocalFileInfo, String>>[];
+      final md5ToFilesMap = <String, List<LocalFileInfo>>{};
+      final duplicateFilesCount = <String, int>{};
+
+      for (var entry in newFiles) {
+        final md5 = entry.value;
+        final fileInfo = entry.key;
+
+        if (!md5ToFilesMap.containsKey(md5)) {
+          // 首次遇到此MD5，加入上传列表
+          md5ToFilesMap[md5] = [fileInfo];
+          uniqueFiles.add(entry);
+        } else {
+          // MD5重复，记录重复文件但不上传
+          md5ToFilesMap[md5]!.add(fileInfo);
+          duplicateFilesCount[md5] = (duplicateFilesCount[md5] ?? 1) + 1;
+
+          // 将重复文件计入已上传（因为不需要实际上传）
+          uploadedFiles++;
+          LogUtil.log("Duplicate file (MD5: $md5): ${fileInfo.fileName}");
+        }
+      }
+
+      // 输出去重统计信息
+      if (duplicateFilesCount.isNotEmpty) {
+        final totalDuplicates = duplicateFilesCount.values.fold(0, (sum, count) => sum + count);
+        LogUtil.log("MD5 Deduplication: Found $totalDuplicates duplicate files");
+        LogUtil.log("Unique MD5s to upload: ${uniqueFiles.length} (from ${newFiles.length} files)");
+
+        // 详细日志：显示每组重复文件
+        duplicateFilesCount.forEach((md5, count) {
+          final fileList = md5ToFilesMap[md5]!;
+          LogUtil.log("  MD5 $md5 has ${count + 1} copies:");
+          for (var i = 0; i < fileList.length && i < 3; i++) {
+            LogUtil.log("    - ${fileList[i].fileName}");
+          }
+          if (fileList.length > 3) {
+            LogUtil.log("    ... and ${fileList.length - 3} more");
+          }
+        });
+      }
+
+      // 使用去重后的文件列表继续处理
+      final filesToUpload = uniqueFiles;
+
+      if (filesToUpload.isEmpty) {
+        LogUtil.log("All files are duplicates within this batch");
+        onComplete?.call(true, "所有文件已存在或重复，无需上传");
+        return;
+      }
+
       _updateProgress(totalFiles, uploadedFiles, failedFiles);
       onProgress?.call(_currentProgress!);
 
-      // 4. 分批处理
-      final chunks = _splitIntoChunks(newFiles, LocalUploadConfig.imageChunkSize);
+      // 4. 分批处理（使用去重后的文件列表）
+      final chunks = _splitIntoChunks(filesToUpload, LocalUploadConfig.imageChunkSize);
 
       for (var chunk in chunks) {
         // 检查存储空间
