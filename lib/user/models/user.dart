@@ -17,6 +17,7 @@ class User {
   String? cityCode;
   String? districtCode;
   String? address;
+  String? deviceCode;
   final dynamic headUrl;
   final String? createdDate;
   final String? updatedDate;
@@ -44,6 +45,7 @@ class User {
     this.provinceCode,
     this.cityCode,
     this.districtCode,
+    this.deviceCode,
     this.address,
     this.headUrl,
     required this.createdDate,
@@ -77,6 +79,7 @@ class User {
     dynamic provinceCode,
     dynamic cityCode,
     dynamic districtCode,
+    dynamic deviceCode,
     dynamic address,
     dynamic headUrl,
     String? createdDate,
@@ -105,6 +108,7 @@ class User {
       provinceCode: provinceCode ?? this.provinceCode,
       cityCode: cityCode ?? this.cityCode,
       districtCode: districtCode ?? this.districtCode,
+      deviceCode: deviceCode ?? this.deviceCode,
       address: address ?? this.address,
       headUrl: headUrl ?? this.headUrl,
       createdDate: createdDate ?? this.createdDate,

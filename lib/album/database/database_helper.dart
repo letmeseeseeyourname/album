@@ -1,9 +1,6 @@
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:path/path.dart';
-
 import '../models/local_file_item.dart';
-
-
 
 class DatabaseHelper {
   static final DatabaseHelper instance = DatabaseHelper._init();
@@ -155,13 +152,56 @@ class DatabaseHelper {
     );
   }
 
+  /// 根据 MD5、userId 和 deviceCode 查询文件
+  /// 用于本地文件夹上传时的去重判断
+  Future<FileItem?> queryFileByMd5Hash(String userId, String deviceCode, String md5Hash) async {
+    final db = await instance.database;
+    final maps = await db.query(
+      'files',
+      where: 'userId = ? AND deviceCode = ? AND md5Hash = ?',
+      whereArgs: [userId, deviceCode, md5Hash],
+      limit: 1,
+    );
+    if (maps.isNotEmpty) {
+      return FileItem.fromMap(maps.first);
+    }
+    return null;
+  }
+
+  /// 批量查询 MD5 对应的文件（用于性能优化）
+  /// 返回 Map<md5Hash, FileItem>
+  Future<Map<String, FileItem>> queryFilesByMd5HashList(
+      String userId,
+      String deviceCode,
+      List<String> md5HashList
+      ) async {
+    if (md5HashList.isEmpty) return {};
+
+    final db = await instance.database;
+    final placeholders = List.filled(md5HashList.length, '?').join(', ');
+    final maps = await db.query(
+      'files',
+      where: 'userId = ? AND deviceCode = ? AND md5Hash IN ($placeholders)',
+      whereArgs: [userId, deviceCode, ...md5HashList],
+    );
+
+    final result = <String, FileItem>{};
+    for (var map in maps) {
+      final item = FileItem.fromMap(map);
+      if (item.md5Hash != null) {
+        result[item.md5Hash!] = item;
+      }
+    }
+    return result;
+  }
+
   //remove by assetId
-  Future<int> deleteFileByAssetId(String assesetId) async {
+  Future<int> deleteFileByAssetId(String assetId) async {
     final db = await instance.database;
     return await db.delete(
       'files',
       where: 'assetId = ?',
-      whereArgs: [assesetId],
+      whereArgs: [assetId],
     );
   }
 

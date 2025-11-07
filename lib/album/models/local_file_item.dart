@@ -64,7 +64,7 @@ class FileItem {
       fileName: map['fileName'],
       fileType: map['fileType'],
       fileSize: map['fileSize'],
-      assetId: map['assesetId'],
+      assetId: map['assetId'],
       status: map['status'],
       userId: map['userId'],
       deviceCode: map['deviceCode'],

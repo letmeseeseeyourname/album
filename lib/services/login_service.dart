@@ -1,4 +1,6 @@
 // services/login_service.dart
+import 'package:ablumwin/user/my_instance.dart';
+
 import '../user/provider/mine_provider.dart';
 import '../network/response/response_model.dart';
 import '../user/models/login_response_model.dart';
@@ -148,6 +150,7 @@ class LoginService {
       ResponseModel<LoginResponseModel> response) {
     if (response.isSuccess && response.model != null) {
       // 登录成功，用户信息已在 MyNetworkProvider.login() 中保存到 MyInstance
+      MyInstance().deviceCode = response.model!.user!.deviceCode!;
       return LoginResult(
         success: true,
         message: '登录成功',

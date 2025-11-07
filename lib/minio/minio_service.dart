@@ -24,12 +24,14 @@ class MinioService {
   // 初始化 Minio 客户端
   void _initMinio() {
     _minio = Minio(
-      endPoint: MinioConfig.endpoint.split(':')[0],
-      port: int.parse(MinioConfig.endpoint.split(':')[1]),
+      endPoint: MinioConfig.host,        // ✅ 使用 host
+      port: MinioConfig.port,            // ✅ 使用 port
       accessKey: MinioConfig.accessKey,
       secretKey: MinioConfig.secretKey,
       useSSL: MinioConfig.useSSL,
     );
+
+    print('Minio initialized: ${MinioConfig.host}:${MinioConfig.port}');
   }
 
   /// 创建存储桶
@@ -304,9 +306,9 @@ class MinioService {
     }
   }
 
-  /// 获取对象信息
-  /// [bucketName] 存储桶名称
-  /// [objectName] 对象名称
+/// 获取对象信息
+/// [bucketName] 存储桶名称
+/// [objectName] 对象名称
 //   Future<ObjectStat?> getObjectStat(
 //       String bucketName,
 //       String objectName,

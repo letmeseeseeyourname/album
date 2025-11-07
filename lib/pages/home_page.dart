@@ -8,8 +8,6 @@ import '../user/provider/mine_provider.dart';
 import 'album_library_page.dart';
 import 'main_folder_page.dart';
 
-
-
 class P6loginEvent {
   P6loginEvent();
 }
@@ -41,8 +39,10 @@ class _HomePageState extends State<HomePage> {
     MCEventBus.on<P6loginEvent>().listen((event) {
       _p6loginAction();
     });
-
-    _onPeriodicCallback();
+    WidgetsBinding.instance.addPostFrameCallback((_) async{
+      _reloadData();
+      _onPeriodicCallback();
+    });
   }
 
   void _onPeriodicCallback() {
@@ -61,6 +61,12 @@ class _HomePageState extends State<HomePage> {
       debugPrint("storageInfo $storageInfo");
       MyInstance().p6deviceInfoModel = storageInfo;
     }
+  }
+
+  _reloadData() {
+    widget.mineProvider.getAllGroups().then((v) {
+
+    });
   }
 
   void _onNavigationChanged(int index) {
@@ -92,6 +98,5 @@ class _HomePageState extends State<HomePage> {
   @override
   Widget build(BuildContext context) {
     return _getCurrentPage();
-
   }
 }
