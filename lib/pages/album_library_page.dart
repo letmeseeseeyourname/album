@@ -2,15 +2,24 @@
 import 'package:flutter/material.dart';
 import '../widgets/side_navigation.dart';
 import '../widgets/custom_title_bar.dart';
+import '../user/models/group.dart';
 
 class AlbumLibraryPage extends StatelessWidget {
   final int selectedNavIndex;
   final Function(int) onNavigationChanged;
+  final List<Group>? groups;
+  final Group? selectedGroup;
+  final Function(Group)? onGroupSelected;
+  final int? currentUserId;
 
   const AlbumLibraryPage({
     super.key,
     required this.selectedNavIndex,
     required this.onNavigationChanged,
+    this.groups,
+    this.selectedGroup,
+    this.onGroupSelected,
+    this.currentUserId,
   });
 
   @override
@@ -25,6 +34,10 @@ class AlbumLibraryPage extends StatelessWidget {
             SideNavigation(
               selectedIndex: selectedNavIndex,
               onNavigationChanged: onNavigationChanged,
+              groups: groups,
+              selectedGroup: selectedGroup,
+              onGroupSelected: onGroupSelected,
+              currentUserId: currentUserId,
             ),
             Expanded(
               child: Container(

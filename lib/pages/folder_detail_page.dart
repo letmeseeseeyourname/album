@@ -15,6 +15,135 @@ import '../widgets/file_list_item.dart';
 import '../widgets/side_navigation.dart';
 // 导入独立的本地文件夹上传管理器
 
+// MARK: - 辅助模型和静态方法 (用于在后台隔离区运行)
+
+// 用于返回上传分析结果的模型
+class UploadAnalysisResult {
+  final int imageCount;
+  final int videoCount;
+  final int totalBytes;
+
+  UploadAnalysisResult(this.imageCount, this.videoCount, this.totalBytes);
+}
+
+// 递归获取所有媒体文件路径
+Future<List<String>> _getAllMediaFilesRecursive(String path) async {
+  final mediaPaths = <String>[];
+  final directory = Directory(path);
+  if (!await directory.exists()) return mediaPaths;
+
+  // 预定义媒体文件扩展名
+  const mediaExtensions = [
+    'bmp', 'gif', 'jpg', 'jpeg', 'png', 'webp', 'wbmp', 'heic', // Images
+    'mp4', 'mov', 'avi', '3gp', 'mkv', '3gp2' // Videos
+  ];
+
+  try {
+    // 递归遍历
+    await for (var entity in directory.list(recursive: true)) {
+      if (entity is File) {
+        final ext = entity.path.split('.').last.toLowerCase();
+        if (mediaExtensions.contains(ext)) {
+          mediaPaths.add(entity.path);
+        }
+      }
+    }
+  } catch (e) {
+    // 打印错误，但不阻止其他文件的收集
+    print('Error accessing directory $path: $e');
+  }
+
+  return mediaPaths;
+}
+
+// 分析最终上传文件列表的统计数据
+Future<UploadAnalysisResult> _analyzeFilesForUpload(
+    List<String> filePaths) async {
+  int imageCount = 0;
+  int videoCount = 0;
+  int totalBytes = 0;
+
+  const imageExtensions = ['bmp', 'gif', 'jpg', 'jpeg', 'png', 'webp', 'wbmp', 'heic'];
+  const videoExtensions = ['mp4', 'mov', 'avi', '3gp', 'mkv', '3gp2'];
+
+  for (final path in filePaths) {
+    try {
+      final file = File(path);
+      // 异步获取文件状态，避免阻塞
+      final stat = await file.stat();
+      if (stat.type == FileSystemEntityType.file) {
+        final ext = path.split('.').last.toLowerCase();
+
+        if (imageExtensions.contains(ext)) {
+          imageCount++;
+          totalBytes += stat.size;
+        } else if (videoExtensions.contains(ext)) {
+          videoCount++;
+          totalBytes += stat.size;
+        }
+      }
+    } catch (e) {
+      // 忽略无法访问的文件
+    }
+  }
+
+  return UploadAnalysisResult(imageCount, videoCount, totalBytes);
+}
+
+// 文件加载方法 (与原代码一致)
+Future<List<FileItem>> _loadFilesInBackground(String path) async {
+  // ... (方法体不变，与原代码一致)
+  final directory = Directory(path);
+  final entities = await directory.list().toList();
+
+  final items = <FileItem>[];
+
+  for (var entity in entities) {
+    if (entity is Directory) {
+      items.add(
+        FileItem(
+          name: entity.path.split(Platform.pathSeparator).last,
+          path: entity.path,
+          type: FileItemType.folder,
+        ),
+      );
+    } else if (entity is File) {
+      final ext = entity.path.split('.').last.toLowerCase();
+      FileItemType? type;
+
+      if (['bmp', 'gif', 'jpg', 'jpeg', 'png', 'webp', 'wbmp', 'heic'].contains(ext)) {
+        type = FileItemType.image;
+      } else if (['mp4', 'mov', 'avi', '3gp', 'mkv', '3gp2'].contains(ext)) {
+        type = FileItemType.video;
+      }
+
+      if (type != null) {
+        final stat = await entity.stat();
+        items.add(
+          FileItem(
+            name: entity.path.split(Platform.pathSeparator).last,
+            path: entity.path,
+            type: type,
+            size: stat.size,
+          ),
+        );
+      }
+    }
+  }
+
+  items.sort((a, b) {
+    if (a.type == FileItemType.folder && b.type != FileItemType.folder) {
+      return -1;
+    }
+    if (a.type != FileItemType.folder && b.type == FileItemType.folder) {
+      return 1;
+    }
+    return a.name.toLowerCase().compareTo(b.name.toLowerCase());
+  });
+
+  return items;
+}
+// MARK: - FolderDetailPage State
 
 class FolderDetailPage extends StatefulWidget {
   final FolderInfo folder;
@@ -34,26 +163,21 @@ class FolderDetailPage extends StatefulWidget {
 
 class _FolderDetailPageState extends State<FolderDetailPage> {
   final ThumbnailHelper _helper = ThumbnailHelper();
-  // 使用独立的本地文件夹上传管理器
   final LocalFolderUploadManager _uploadManager = LocalFolderUploadManager();
 
   List<FileItem> fileItems = [];
-  List<String> pathSegments = [];
+  List<String> pathSegments = [];  // 显示用的文件夹名称列表
+  List<String> pathHistory = [];   // 完整路径历史记录
   String currentPath = '';
   bool isLoading = true;
 
-  // 选择模式相关
   Set<int> selectedIndices = {};
   bool isSelectionMode = false;
 
-  // 文件类型筛选: 'all', 'image', 'video'
   String filterType = 'all';
   bool isFilterMenuOpen = false;
-
-  // 视图模式: true为grid，false为list
   bool isGridView = true;
 
-  // 上传状态
   bool isUploading = false;
   LocalUploadProgress? uploadProgress;
 
@@ -65,7 +189,6 @@ class _FolderDetailPageState extends State<FolderDetailPage> {
     _initializeHelper();
     _loadFiles(currentPath);
 
-    // 监听上传进度
     _uploadManager.addListener(_onUploadProgressChanged);
   }
 
@@ -84,10 +207,13 @@ class _FolderDetailPageState extends State<FolderDetailPage> {
     }
   }
 
+  // ... (其他不变的私有方法)
+
   void _initPathSegments() {
     final parts = widget.folder.path.split(Platform.pathSeparator);
     if (parts.isNotEmpty) {
       pathSegments = [parts[0], widget.folder.name];
+      pathHistory = [parts[0], widget.folder.path];
     }
   }
 
@@ -133,62 +259,11 @@ class _FolderDetailPageState extends State<FolderDetailPage> {
     }
   }
 
-  static Future<List<FileItem>> _loadFilesInBackground(String path) async {
-    final directory = Directory(path);
-    final entities = await directory.list().toList();
-
-    final items = <FileItem>[];
-
-    for (var entity in entities) {
-      if (entity is Directory) {
-        items.add(
-          FileItem(
-            name: entity.path.split(Platform.pathSeparator).last,
-            path: entity.path,
-            type: FileItemType.folder,
-          ),
-        );
-      } else if (entity is File) {
-        final ext = entity.path.split('.').last.toLowerCase();
-        FileItemType? type;
-
-        if (['bmp', 'gif', 'jpg', 'jpeg', 'png', 'webp', 'wbmp', 'heic'].contains(ext)) {
-          type = FileItemType.image;
-        } else if (['mp4', 'mov', 'avi', '3gp', 'mkv', '3gp2'].contains(ext)) {
-          type = FileItemType.video;
-        }
-
-        if (type != null) {
-          final stat = await entity.stat();
-          items.add(
-            FileItem(
-              name: entity.path.split(Platform.pathSeparator).last,
-              path: entity.path,
-              type: type,
-              size: stat.size,
-            ),
-          );
-        }
-      }
-    }
-
-    items.sort((a, b) {
-      if (a.type == FileItemType.folder && b.type != FileItemType.folder) {
-        return -1;
-      }
-      if (a.type != FileItemType.folder && b.type == FileItemType.folder) {
-        return 1;
-      }
-      return a.name.toLowerCase().compareTo(b.name.toLowerCase());
-    });
-
-    return items;
-  }
-
   void _navigateToFolder(String folderPath, String folderName) {
     setState(() {
       currentPath = folderPath;
       pathSegments.add(folderName);
+      pathHistory.add(folderPath);
     });
     _loadFiles(folderPath);
   }
@@ -199,29 +274,16 @@ class _FolderDetailPageState extends State<FolderDetailPage> {
       return;
     }
 
+    final targetPath = pathHistory[index];
     final targetSegments = pathSegments.sublist(0, index + 1);
-    final targetPath = _buildPathFromSegments(targetSegments);
+    final targetHistory = pathHistory.sublist(0, index + 1);
 
     setState(() {
       pathSegments = targetSegments;
+      pathHistory = targetHistory;
       currentPath = targetPath;
     });
     _loadFiles(targetPath);
-  }
-
-  String _buildPathFromSegments(List<String> segments) {
-    if (segments.length <= 1) return widget.folder.path;
-
-    final parts = widget.folder.path.split(Platform.pathSeparator);
-    final basePath = parts
-        .sublist(0, parts.length - 1)
-        .join(Platform.pathSeparator);
-    final additionalPath = segments.sublist(2).join(Platform.pathSeparator);
-
-    if (additionalPath.isEmpty) {
-      return widget.folder.path;
-    }
-    return '$basePath${Platform.pathSeparator}$additionalPath';
   }
 
   void _handleNavigationChanged(int index) {
@@ -231,11 +293,10 @@ class _FolderDetailPageState extends State<FolderDetailPage> {
     }
   }
 
-  void _toggleSelection(int index) {
-    if (fileItems[index].type == FileItemType.folder) {
-      return;
-    }
+  // MARK: - 修复并启用文件夹选中逻辑
 
+  void _toggleSelection(int index) {
+    // 允许选中文件夹
     setState(() {
       if (selectedIndices.contains(index)) {
         selectedIndices.remove(index);
@@ -250,16 +311,15 @@ class _FolderDetailPageState extends State<FolderDetailPage> {
   }
 
   void _toggleSelectAll() {
+    // 允许全选所有项目（文件和文件夹）
     setState(() {
-      if (selectedIndices.length == _getSelectableCount()) {
+      if (selectedIndices.length == fileItems.length) {
         selectedIndices.clear();
         isSelectionMode = false;
       } else {
         selectedIndices.clear();
         for (int i = 0; i < fileItems.length; i++) {
-          if (fileItems[i].type != FileItemType.folder) {
-            selectedIndices.add(i);
-          }
+          selectedIndices.add(i);
         }
         isSelectionMode = true;
       }
@@ -274,7 +334,8 @@ class _FolderDetailPageState extends State<FolderDetailPage> {
   }
 
   int _getSelectableCount() {
-    return fileItems.where((item) => item.type != FileItemType.folder).length;
+    // 可选数量是所有项目的数量
+    return fileItems.length;
   }
 
   List<FileItem> _getFilteredFiles() {
@@ -292,10 +353,12 @@ class _FolderDetailPageState extends State<FolderDetailPage> {
     return fileItems;
   }
 
+  // MARK: - 递归同步逻辑修改
+
   /// 执行同步上传
   Future<void> _handleSync() async {
     if (selectedIndices.isEmpty) {
-      _showMessage('请先选择要上传的文件', isError: true);
+      _showMessage('请先选择要上传的文件或文件夹', isError: true);
       return;
     }
 
@@ -304,30 +367,52 @@ class _FolderDetailPageState extends State<FolderDetailPage> {
       return;
     }
 
-    // 获取选中的文件路径
-    final selectedFiles = selectedIndices
+    // 1. 获取所有选中的项目
+    final selectedItems = selectedIndices
         .map((index) => fileItems[index])
-        .where((item) => item.type != FileItemType.folder)
-        .map((item) => item.path)
         .toList();
 
-    if (selectedFiles.isEmpty) {
-      _showMessage('没有可上传的文件', isError: true);
+    // 2. 分离文件和文件夹
+    final selectedFiles = selectedItems.where((item) => item.type != FileItemType.folder).toList();
+    final selectedFolders = selectedItems.where((item) => item.type == FileItemType.folder).toList();
+
+    // 3. 构建最终待上传文件列表
+    final List<String> allFilesToUpload = [];
+
+    // 添加单独选中的文件路径 (确保是媒体文件)
+    allFilesToUpload.addAll(selectedFiles.map((item) => item.path));
+
+    // 递归处理选中的文件夹
+    if (selectedFolders.isNotEmpty) {
+      _showMessage('正在扫描选中的文件夹，请稍候...', isError: false);
+      for (final folder in selectedFolders) {
+        // 在后台线程递归获取所有媒体文件路径
+        final filesInFolder = await compute(_getAllMediaFilesRecursive, folder.path);
+        allFilesToUpload.addAll(filesInFolder);
+      }
+    }
+
+    // 移除重复路径，并转为列表
+    final finalUploadList = allFilesToUpload.toSet().toList();
+
+    // 检查是否有文件需要上传
+    if (finalUploadList.isEmpty) {
+      _showMessage('没有可上传的媒体文件', isError: true);
       return;
     }
 
-    // 显示确认对话框
-    final confirmed = await _showConfirmDialog(selectedFiles.length);
+    // 4. 显示确认对话框 (传递实际的待上传文件列表进行准确统计)
+    // 注意：我们将 _showConfirmDialog 的参数改为文件路径列表
+    final confirmed = await _showConfirmDialog(finalUploadList);
     if (!confirmed) return;
 
-    // 开始上传
+    // 5. 开始上传
     setState(() {
       isUploading = true;
     });
 
-    // 使用独立的本地文件夹上传管理器
     await _uploadManager.uploadLocalFiles(
-      selectedFiles,
+      finalUploadList, // 传递实际的文件路径列表
       onProgress: (progress) {
         // 进度在 listener 中自动更新
       },
@@ -349,10 +434,13 @@ class _FolderDetailPageState extends State<FolderDetailPage> {
   }
 
   /// 显示确认对话框
-  Future<bool> _showConfirmDialog(int fileCount) async {
-    final imageCount = _getSelectedImageCount();
-    final videoCount = _getSelectedVideoCount();
-    final totalSize = _getSelectedTotalSize();
+  Future<bool> _showConfirmDialog(List<String> filePaths) async {
+    // 在后台线程中运行文件统计分析
+    final analysis = await compute(_analyzeFilesForUpload, filePaths);
+
+    final imageCount = analysis.imageCount;
+    final videoCount = analysis.videoCount;
+    final totalSizeMB = analysis.totalBytes / (1024 * 1024);
 
     return await showDialog<bool>(
       context: context,
@@ -362,11 +450,12 @@ class _FolderDetailPageState extends State<FolderDetailPage> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('即将上传 $fileCount 个文件：'),
+            // 使用准确的统计数据
+            Text('即将上传 ${filePaths.length} 个文件：'),
             const SizedBox(height: 8),
-            Text('• $imageCount 张照片'),
-            Text('• $videoCount 个视频'),
-            Text('• 总大小：${totalSize.toStringAsFixed(2)} MB'),
+            Text('• ${imageCount} 张照片'),
+            Text('• ${videoCount} 个视频'),
+            Text('• 总大小：${totalSizeMB.toStringAsFixed(2)} MB'),
             const SizedBox(height: 16),
             const Text(
               '上传过程中请勿关闭窗口',
@@ -405,6 +494,8 @@ class _FolderDetailPageState extends State<FolderDetailPage> {
     );
   }
 
+  // MARK: - 底部栏统计信息 (基于当前页面选中的项目，不递归)
+
   int _getSelectedImageCount() {
     return selectedIndices
         .where((index) => index < fileItems.length && fileItems[index].type == FileItemType.image)
@@ -425,6 +516,7 @@ class _FolderDetailPageState extends State<FolderDetailPage> {
   }
 
   double _getSelectedTotalSize() {
+    // 只计算选中的文件（不包括文件夹本身的大小）
     int totalBytes = selectedIndices
         .where((index) => index < fileItems.length)
         .map((index) => fileItems[index])
@@ -643,25 +735,26 @@ class _FolderDetailPageState extends State<FolderDetailPage> {
                 item: filteredFiles[index],
                 isSelected: selectedIndices.contains(actualIndex),
                 showCheckbox: isSelectionMode || selectedIndices.contains(actualIndex),
-                canSelect: filteredFiles[index].type != FileItemType.folder,
+                canSelect: true, // 允许所有项目被选中
                 onTap: isUploading
                     ? () {}
                     : () {
-                  if (filteredFiles[index].type == FileItemType.folder) {
+                  if (isSelectionMode) { // 如果在选择模式，点击切换选中状态
+                    _toggleSelection(actualIndex);
+                  } else if (filteredFiles[index].type == FileItemType.folder) { // 不在选择模式，点击文件夹进入
                     _navigateToFolder(
                       filteredFiles[index].path,
                       filteredFiles[index].name,
                     );
-                  } else {
+                  } else { // 不在选择模式，点击文件切换选中状态（作为触发选择模式的快捷方式）
                     _toggleSelection(actualIndex);
                   }
                 },
                 onLongPress: isUploading
                     ? () {}
                     : () {
-                  if (filteredFiles[index].type != FileItemType.folder) {
-                    _toggleSelection(actualIndex);
-                  }
+                  // 长按总是切换选中状态
+                  _toggleSelection(actualIndex);
                 },
                 onCheckboxToggle: isUploading
                     ? () {}
@@ -683,17 +776,18 @@ class _FolderDetailPageState extends State<FolderDetailPage> {
         return FileListItem(
           item: filteredFiles[index],
           isSelected: selectedIndices.contains(actualIndex),
-          canSelect: filteredFiles[index].type != FileItemType.folder &&
-              (isSelectionMode || selectedIndices.contains(actualIndex)),
+          canSelect: isSelectionMode || selectedIndices.contains(actualIndex), // 允许所有项目显示勾选框
           onTap: isUploading
               ? () {}
               : () {
-            if (filteredFiles[index].type == FileItemType.folder) {
+            if (isSelectionMode) { // 如果在选择模式，点击切换选中状态
+              _toggleSelection(actualIndex);
+            } else if (filteredFiles[index].type == FileItemType.folder) { // 不在选择模式，点击文件夹进入
               _navigateToFolder(
                 filteredFiles[index].path,
                 filteredFiles[index].name,
               );
-            } else {
+            } else { // 不在选择模式，点击文件切换选中状态（作为触发选择模式的快捷方式）
               _toggleSelection(actualIndex);
             }
           },
@@ -720,7 +814,7 @@ class _FolderDetailPageState extends State<FolderDetailPage> {
       ),
       child: Row(
         children: [
-          // 左侧信息
+          // 左侧信息 (仅显示当前页面选中的项目统计，不进行递归计算以避免 UI 卡顿)
           if (selectedIndices.isNotEmpty) ...[
             Text(
               '已选：${_getSelectedTotalSize().toStringAsFixed(2)}MB · ${_getSelectedImageCount()}张照片/${_getSelectedVideoCount()}条视频',
@@ -850,6 +944,3 @@ class _StaticSideNavigation extends StatelessWidget {
     );
   }
 }
-
-// 注意：这里省略了 _FileItemCard 和 _FileListItem 的实现
-// 它们与原文件保持一致

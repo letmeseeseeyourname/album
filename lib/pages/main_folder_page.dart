@@ -7,17 +7,26 @@ import '../widgets/custom_title_bar.dart';
 import '../widgets/folder_grid_component.dart';
 import '../widgets/empty_state.dart';
 import '../models/folder_info.dart';
+import '../user/models/group.dart';
 import '../services/folder_manager.dart';
 import 'folder_detail_page.dart';
 
 class MainFolderPage extends StatefulWidget {
   final int selectedNavIndex;
   final Function(int)? onNavigationChanged;
+  final List<Group>? groups;
+  final Group? selectedGroup;
+  final Function(Group)? onGroupSelected;
+  final int? currentUserId;
 
   const MainFolderPage({
     super.key,
     this.selectedNavIndex = 0,
     this.onNavigationChanged,
+    this.groups,
+    this.selectedGroup,
+    this.onGroupSelected,
+    this.currentUserId,
   });
 
   @override
@@ -71,15 +80,12 @@ class _MainFolderPageState extends State<MainFolderPage> {
         bool isDuplicate = folders.any((folder) => folder.path == selectedDirectory);
 
         if (isDuplicate) {
-          // 找到已存在的文件夹名称
           final existingFolder = folders.firstWhere((folder) => folder.path == selectedDirectory);
-          // 文件夹已存在，显示提醒
           _showWarningDialog('该文件夹已添加', '文件夹 "${existingFolder.name}" 已经在列表中，无需重复添加。');
           return;
         }
 
         final folderName = selectedDirectory.split(Platform.pathSeparator).last;
-
         final directory = Directory(selectedDirectory);
         int imageCount = 0;
         int videoCount = 0;
@@ -106,12 +112,8 @@ class _MainFolderPageState extends State<MainFolderPage> {
           totalSize: videoCount,
         );
 
-        // 保存到持久化存储
         await _folderManager.addLocalFolder(newFolder);
-
-        // 重新加载列表以确保UI更新
         await _loadFolders();
-
         _showSuccessSnackBar('已添加文件夹 "$folderName"');
       }
     } catch (e) {
@@ -144,7 +146,6 @@ class _MainFolderPageState extends State<MainFolderPage> {
   void _deleteSelected() {
     final count = selectedIndices.length;
 
-    // 显示删除确认对话框
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -164,26 +165,21 @@ class _MainFolderPageState extends State<MainFolderPage> {
             onPressed: () async {
               Navigator.pop(context);
 
-              // 执行删除操作
               final sortedIndices = selectedIndices.toList()..sort((a, b) => b.compareTo(a));
 
-              // 从持久化存储中删除
               for (var index in sortedIndices) {
                 if (index < folders.length) {
                   await _folderManager.removeLocalFolder(folders[index].path);
                 }
               }
 
-              // 重新加载列表
               await _loadFolders();
 
-              // 清除选择状态
               setState(() {
                 selectedIndices.clear();
                 isSelectionMode = false;
               });
 
-              // 显示删除成功提示
               _showSuccessSnackBar('已删除 $count 个文件夹');
             },
             style: TextButton.styleFrom(
@@ -198,18 +194,6 @@ class _MainFolderPageState extends State<MainFolderPage> {
         ],
       ),
     );
-  }
-
-  int _getTotalImageCount() {
-    return folders.fold(0, (sum, folder) => sum + folder.fileCount);
-  }
-
-  int _getTotalVideoCount() {
-    return folders.fold(0, (sum, folder) => sum + folder.totalSize);
-  }
-
-  double _getTotalSize() {
-    return 32.5;
   }
 
   void _showWarningDialog(String title, String message) {
@@ -287,6 +271,10 @@ class _MainFolderPageState extends State<MainFolderPage> {
                 ? SideNavigation(
               selectedIndex: widget.selectedNavIndex,
               onNavigationChanged: widget.onNavigationChanged!,
+              groups: widget.groups,
+              selectedGroup: widget.selectedGroup,
+              onGroupSelected: widget.onGroupSelected,
+              currentUserId: widget.currentUserId,
             )
                 : _buildStaticNavigation(),
             Expanded(
@@ -405,7 +393,6 @@ class _MainFolderPageState extends State<MainFolderPage> {
               if (isSelectionMode) {
                 _toggleSelection(index);
               } else {
-                // 打开文件夹详情 - 使用淡入淡出动画，避免缩放效果
                 Navigator.push(
                   context,
                   PageRouteBuilder(
@@ -417,7 +404,6 @@ class _MainFolderPageState extends State<MainFolderPage> {
                     transitionDuration: const Duration(milliseconds: 200),
                     reverseTransitionDuration: const Duration(milliseconds: 200),
                     transitionsBuilder: (context, animation, secondaryAnimation, child) {
-                      // 使用淡入淡出效果
                       return FadeTransition(
                         opacity: animation,
                         child: child,
