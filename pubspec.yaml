@@ -41,7 +41,9 @@ dependencies:
   provider: ^6.1.2
   material_table_view: ^4.0.2
   cached_network_image: ^3.3.1
-  video_player: ^2.8.3
+  media_kit: ^1.1.10
+  media_kit_video: ^1.2.4
+  media_kit_libs_windows_video: ^1.0.9
   go_router: ^13.2.2
   image: ^4.5.4
   minio: ^3.5.8

@@ -9,6 +9,8 @@ import '../widgets/empty_state.dart';
 import '../models/folder_info.dart';
 import '../user/models/group.dart';
 import '../services/folder_manager.dart';
+import '../album/manager/local_folder_upload_manager.dart';
+import '../user/my_instance.dart';
 import 'folder_detail_page.dart';
 
 class MainFolderPage extends StatefulWidget {
@@ -35,16 +37,35 @@ class MainFolderPage extends StatefulWidget {
 
 class _MainFolderPageState extends State<MainFolderPage> {
   final FolderManager _folderManager = FolderManager();
+  final LocalFolderUploadManager _uploadManager = LocalFolderUploadManager();
   List<FolderInfo> folders = [];
   Set<int> selectedIndices = {};
   bool isSelectionMode = false;
   int? hoveredIndex;
   bool _isLoading = true;
+  bool isUploading = false;
+  LocalUploadProgress? uploadProgress;
 
   @override
   void initState() {
     super.initState();
     _loadFolders();
+    _uploadManager.addListener(_onUploadProgressChanged);
+  }
+
+  @override
+  void dispose() {
+    _uploadManager.removeListener(_onUploadProgressChanged);
+    super.dispose();
+  }
+
+  void _onUploadProgressChanged() {
+    if (mounted) {
+      setState(() {
+        uploadProgress = _uploadManager.currentProgress;
+        isUploading = _uploadManager.isUploading;
+      });
+    }
   }
 
   /// 从持久化存储加载本地图库文件夹列表
@@ -196,6 +217,76 @@ class _MainFolderPageState extends State<MainFolderPage> {
     );
   }
 
+  /// 处理同步操作
+  Future<void> _handleSync() async {
+    if (selectedIndices.isEmpty) {
+      _showErrorDialog('请选择文件夹', '请至少选择一个文件夹进行同步');
+      return;
+    }
+
+    // 收集选中的文件夹路径
+    final selectedFolders = selectedIndices
+        .map((index) => folders[index])
+        .toList();
+
+    // 开始上传
+    try {
+      // await _uploadManager.uploadFolders(selectedFolders);
+      _showSuccessSnackBar('同步完成');
+
+      // 清除选择
+      setState(() {
+        selectedIndices.clear();
+        isSelectionMode = false;
+      });
+    } catch (e) {
+      print('Upload error: $e');
+      _showErrorDialog('同步失败', '上传过程中发生错误：$e');
+    }
+  }
+
+  /// 获取选中项的总大小（MB）
+  double _getSelectedTotalSize() {
+    double totalBytes = 0;
+    for (var index in selectedIndices) {
+      if (index < folders.length) {
+        // 这里需要实际计算文件夹大小，暂时返回估算值
+        totalBytes += folders[index].fileCount * 2 * 1024 * 1024; // 假设每个文件2MB
+      }
+    }
+    return totalBytes / (1024 * 1024);
+  }
+
+  /// 获取选中项的图片数量
+  int _getSelectedImageCount() {
+    int count = 0;
+    for (var index in selectedIndices) {
+      if (index < folders.length) {
+        count += folders[index].fileCount;
+      }
+    }
+    return count;
+  }
+
+  /// 获取选中项的视频数量
+  int _getSelectedVideoCount() {
+    int count = 0;
+    for (var index in selectedIndices) {
+      if (index < folders.length) {
+        count += folders[index].totalSize; // totalSize存储视频数量
+      }
+    }
+    return count;
+  }
+
+  /// 获取设备存储使用情况
+  double _getDeviceStorageUsed() {
+    double used = MyInstance().p6deviceInfoModel?.ttlUsed ?? 0;
+    double scaled = used * 100.0;
+    int usedPercent = scaled.round();
+    return usedPercent / 100.0;
+  }
+
   void _showWarningDialog(String title, String message) {
     showDialog(
       context: context,
@@ -290,6 +381,7 @@ class _MainFolderPageState extends State<MainFolderPage> {
           ],
         ),
       ),
+      bottomNavigationBar: _buildBottomBar(),
     );
   }
 
@@ -420,6 +512,108 @@ class _MainFolderPageState extends State<MainFolderPage> {
           ),
         ),
       ],
+    );
+  }
+
+  Widget _buildBottomBar() {
+    if (selectedIndices.isEmpty && !isUploading) {
+      return const SizedBox.shrink();
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 20),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        border: Border(
+          top: BorderSide(color: Colors.grey.shade300),
+        ),
+      ),
+      child: Row(
+        children: [
+          // 左侧信息
+          if (selectedIndices.isNotEmpty) ...[
+            Text(
+              '已选：${_getSelectedTotalSize().toStringAsFixed(2)}MB · ${_getSelectedImageCount()}张照片/${_getSelectedVideoCount()}条视频',
+              style: TextStyle(
+                fontSize: 14,
+                color: Colors.grey.shade600,
+              ),
+            ),
+          ],
+
+          // 上传进度
+          if (isUploading && uploadProgress != null) ...[
+            const SizedBox(width: 20),
+            Expanded(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: LinearProgressIndicator(
+                          value: uploadProgress!.progress,
+                          backgroundColor: Colors.grey.shade200,
+                          valueColor: const AlwaysStoppedAnimation<Color>(Colors.orange),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Text(
+                        '${(uploadProgress!.progress * 100).toStringAsFixed(0)}%',
+                        style: const TextStyle(fontSize: 12),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    '${uploadProgress!.uploadedFiles}/${uploadProgress!.totalFiles} · ${uploadProgress!.currentFileName ?? ""}',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.grey.shade600,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
+            ),
+          ],
+
+          const Spacer(),
+
+          // 右侧按钮
+          Text(
+            '设备剩余空间：${_getDeviceStorageUsed()}G',
+            style: TextStyle(
+              fontSize: 14,
+              color: Colors.grey.shade600,
+            ),
+          ),
+          const SizedBox(width: 30),
+          ElevatedButton(
+            onPressed: isUploading ? null : _handleSync,
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF2C2C2C),
+              disabledBackgroundColor: Colors.grey,
+              padding: const EdgeInsets.symmetric(
+                horizontal: 40,
+                vertical: 16,
+              ),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+            ),
+            child: Text(
+              isUploading ? '上传中...' : '同步',
+              style: const TextStyle(
+                fontSize: 16,
+                color: Colors.white,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

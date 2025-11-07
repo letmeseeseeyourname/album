@@ -13,6 +13,7 @@ import '../widgets/custom_title_bar.dart';
 import '../widgets/file_item_card.dart';
 import '../widgets/file_list_item.dart';
 import '../widgets/side_navigation.dart';
+import '../widgets/media_viewer_page.dart';
 // 导入独立的本地文件夹上传管理器
 
 // MARK: - 辅助模型和静态方法 (用于在后台隔离区运行)
@@ -284,6 +285,29 @@ class _FolderDetailPageState extends State<FolderDetailPage> {
       currentPath = targetPath;
     });
     _loadFiles(targetPath);
+  }
+
+  void _openMediaViewer(int index) {
+    // 获取所有媒体文件（图片和视频）
+    final mediaItems = fileItems.where((item) =>
+    item.type == FileItemType.image || item.type == FileItemType.video
+    ).toList();
+
+    // 找到当前项在媒体列表中的位置
+    final currentItem = fileItems[index];
+    final mediaIndex = mediaItems.indexOf(currentItem);
+
+    if (mediaIndex >= 0) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) => MediaViewerPage(
+            mediaItems: mediaItems,
+            initialIndex: mediaIndex,
+          ),
+        ),
+      );
+    }
   }
 
   void _handleNavigationChanged(int index) {
@@ -731,34 +755,50 @@ class _FolderDetailPageState extends State<FolderDetailPage> {
             itemCount: filteredFiles.length,
             itemBuilder: (context, index) {
               final actualIndex = fileItems.indexOf(filteredFiles[index]);
-              return FileItemCard(
-                item: filteredFiles[index],
-                isSelected: selectedIndices.contains(actualIndex),
-                showCheckbox: isSelectionMode || selectedIndices.contains(actualIndex),
-                canSelect: true, // 允许所有项目被选中
-                onTap: isUploading
-                    ? () {}
+              return GestureDetector(
+                onDoubleTap: isUploading
+                    ? null
                     : () {
-                  if (isSelectionMode) { // 如果在选择模式，点击切换选中状态
-                    _toggleSelection(actualIndex);
-                  } else if (filteredFiles[index].type == FileItemType.folder) { // 不在选择模式，点击文件夹进入
+                  // 双击打开图片或视频
+                  if (filteredFiles[index].type == FileItemType.image ||
+                      filteredFiles[index].type == FileItemType.video) {
+                    _openMediaViewer(actualIndex);
+                  } else if (filteredFiles[index].type == FileItemType.folder) {
                     _navigateToFolder(
                       filteredFiles[index].path,
                       filteredFiles[index].name,
                     );
-                  } else { // 不在选择模式，点击文件切换选中状态（作为触发选择模式的快捷方式）
-                    _toggleSelection(actualIndex);
                   }
                 },
-                onLongPress: isUploading
-                    ? () {}
-                    : () {
-                  // 长按总是切换选中状态
-                  _toggleSelection(actualIndex);
-                },
-                onCheckboxToggle: isUploading
-                    ? () {}
-                    : () => _toggleSelection(actualIndex),
+                child: FileItemCard(
+                  item: filteredFiles[index],
+                  isSelected: selectedIndices.contains(actualIndex),
+                  showCheckbox: isSelectionMode || selectedIndices.contains(actualIndex),
+                  canSelect: true, // 允许所有项目被选中
+                  onTap: isUploading
+                      ? () {}
+                      : () {
+                    if (isSelectionMode) { // 如果在选择模式，点击切换选中状态
+                      _toggleSelection(actualIndex);
+                    } else if (filteredFiles[index].type == FileItemType.folder) { // 不在选择模式，点击文件夹进入
+                      _navigateToFolder(
+                        filteredFiles[index].path,
+                        filteredFiles[index].name,
+                      );
+                    } else { // 不在选择模式，点击文件切换选中状态（作为触发选择模式的快捷方式）
+                      _toggleSelection(actualIndex);
+                    }
+                  },
+                  onLongPress: isUploading
+                      ? () {}
+                      : () {
+                    // 长按总是切换选中状态
+                    _toggleSelection(actualIndex);
+                  },
+                  onCheckboxToggle: isUploading
+                      ? () {}
+                      : () => _toggleSelection(actualIndex),
+                ),
               );
             },
           );
@@ -773,27 +813,43 @@ class _FolderDetailPageState extends State<FolderDetailPage> {
       itemCount: filteredFiles.length,
       itemBuilder: (context, index) {
         final actualIndex = fileItems.indexOf(filteredFiles[index]);
-        return FileListItem(
-          item: filteredFiles[index],
-          isSelected: selectedIndices.contains(actualIndex),
-          canSelect: isSelectionMode || selectedIndices.contains(actualIndex), // 允许所有项目显示勾选框
-          onTap: isUploading
-              ? () {}
+        return GestureDetector(
+          onDoubleTap: isUploading
+              ? null
               : () {
-            if (isSelectionMode) { // 如果在选择模式，点击切换选中状态
-              _toggleSelection(actualIndex);
-            } else if (filteredFiles[index].type == FileItemType.folder) { // 不在选择模式，点击文件夹进入
+            // 双击打开图片或视频
+            if (filteredFiles[index].type == FileItemType.image ||
+                filteredFiles[index].type == FileItemType.video) {
+              _openMediaViewer(actualIndex);
+            } else if (filteredFiles[index].type == FileItemType.folder) {
               _navigateToFolder(
                 filteredFiles[index].path,
                 filteredFiles[index].name,
               );
-            } else { // 不在选择模式，点击文件切换选中状态（作为触发选择模式的快捷方式）
-              _toggleSelection(actualIndex);
             }
           },
-          onCheckboxToggle: isUploading
-              ? () {}
-              : () => _toggleSelection(actualIndex),
+          child: FileListItem(
+            item: filteredFiles[index],
+            isSelected: selectedIndices.contains(actualIndex),
+            canSelect: isSelectionMode || selectedIndices.contains(actualIndex), // 允许所有项目显示勾选框
+            onTap: isUploading
+                ? () {}
+                : () {
+              if (isSelectionMode) { // 如果在选择模式，点击切换选中状态
+                _toggleSelection(actualIndex);
+              } else if (filteredFiles[index].type == FileItemType.folder) { // 不在选择模式，点击文件夹进入
+                _navigateToFolder(
+                  filteredFiles[index].path,
+                  filteredFiles[index].name,
+                );
+              } else { // 不在选择模式，点击文件切换选中状态（作为触发选择模式的快捷方式）
+                _toggleSelection(actualIndex);
+              }
+            },
+            onCheckboxToggle: isUploading
+                ? () {}
+                : () => _toggleSelection(actualIndex),
+          ),
         );
       },
     );
