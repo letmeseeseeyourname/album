@@ -1,10 +1,13 @@
 // widgets/media_viewer_page.dart
 // 使用 media_kit 替代 video_player，完美支持 Windows 桌面
+// 修复版本：解决信息弹窗动画和播放速率选择崩溃问题
 import 'dart:io';
+import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
+import 'package:window_manager/window_manager.dart';
 import '../models/file_item.dart';
 
 class MediaViewerPage extends StatefulWidget {
@@ -186,13 +189,22 @@ class _MediaViewerPageState extends State<MediaViewerPage> {
     }
   }
 
+  // 修复后的播放速率更改方法
   void _changePlaybackSpeed(double speed) {
+    // 立即更新播放器速率
     if (_player != null && _isVideoInitialized) {
       _player!.setRate(speed);
-      setState(() {
-        _playbackSpeed = speed;
-      });
     }
+
+    // 延迟更新 UI 状态，避免在 PopupMenu 关闭时调用 setState 导致崩溃
+    // 使用较长的延迟确保 PopupMenu 完全关闭
+    Future.delayed(const Duration(milliseconds: 150), () {
+      if (mounted) {
+        setState(() {
+          _playbackSpeed = speed;
+        });
+      }
+    });
   }
 
   void _changeVolume(double volume) {
@@ -208,6 +220,70 @@ class _MediaViewerPageState extends State<MediaViewerPage> {
     if (_player != null && _isVideoInitialized) {
       _player!.seek(position);
     }
+  }
+
+  void _toggleFullScreen() async {
+    setState(() {
+      _isFullScreen = !_isFullScreen;
+    });
+
+    if (_isFullScreen) {
+      // 进入全屏
+      await windowManager.setFullScreen(true);
+      await SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersive);
+    } else {
+      // 退出全屏
+      await windowManager.setFullScreen(false);
+      await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+    }
+  }
+
+  // 修复后的信息弹窗方法 - 带动画效果
+  void _showMediaInfo() {
+    final currentItem = widget.mediaItems[currentIndex];
+    final file = File(currentItem.path);
+    final fileStats = file.statSync();
+
+    showGeneralDialog(
+      context: context,
+      barrierDismissible: true, // ✅ 点击外部区域关闭
+      barrierLabel: 'Dismiss',
+      barrierColor: Colors.black.withOpacity(0.01), // 半透明遮罩
+      transitionDuration: const Duration(milliseconds: 250),
+      pageBuilder: (context, animation, secondaryAnimation) {
+        return _MediaInfoDialog(
+          item: currentItem,
+          fileSize: fileStats.size,
+          animation: animation,
+        );
+      },
+      transitionBuilder: (context, animation, secondaryAnimation, child) {
+        // 组合动画：滑动 + 淡入淡出
+        final slideAnimation = Tween<Offset>(
+          begin: const Offset(0, -1), // 从顶部滑入
+          end: Offset.zero,
+        ).animate(CurvedAnimation(
+          parent: animation,
+          curve: Curves.easeOutCubic,
+        ));
+
+        final fadeAnimation = Tween<double>(
+          begin: 0.0,
+          end: 1.0,
+        ).animate(CurvedAnimation(
+          parent: animation,
+          curve: Curves.easeOut,
+        ));
+
+        return SlideTransition(
+          position: slideAnimation,
+          child: FadeTransition(
+            opacity: fadeAnimation,
+            child: child,
+          ),
+        );
+      },
+    );
   }
 
   String _formatDuration(Duration duration) {
@@ -357,21 +433,37 @@ class _MediaViewerPageState extends State<MediaViewerPage> {
               onPressed: () => Navigator.of(context).pop(),
             ),
             const SizedBox(width: 16),
+            // 可拖动的标题区域
             Expanded(
-              child: Text(
-                widget.mediaItems[currentIndex].name,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 16,
-                  fontWeight: FontWeight.w500,
+              child: GestureDetector(
+                behavior: HitTestBehavior.translucent,
+                onPanStart: (details) async {
+                  // 开始拖动窗口
+                  if (Platform.isWindows || Platform.isMacOS || Platform.isLinux) {
+                    await windowManager.startDragging();
+                  }
+                },
+                child: MouseRegion(
+                  cursor: SystemMouseCursors.move, // 显示移动光标
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(vertical: 8),
+                    child: Text(
+                      widget.mediaItems[currentIndex].name,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w500,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
                 ),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
               ),
             ),
             IconButton(
               icon: const Icon(Icons.info_outline, color: Colors.white, size: 24),
-              onPressed: () {},
+              onPressed: _showMediaInfo,
             ),
           ],
         ),
@@ -424,136 +516,353 @@ class _MediaViewerPageState extends State<MediaViewerPage> {
       left: 0,
       right: 0,
       bottom: 0,
-      child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.bottomCenter,
-            end: Alignment.topCenter,
-            colors: [
-              Colors.black.withOpacity(0.8),
-              Colors.transparent,
-            ],
-          ),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            // 进度条
-            Row(
-              children: [
-                Text(
-                  _formatDuration(_position),
-                  style: const TextStyle(color: Colors.white, fontSize: 12),
-                ),
-                Expanded(
-                  child: Slider(
-                    value: _position.inMilliseconds.toDouble(),
-                    max: _duration.inMilliseconds.toDouble() > 0
-                        ? _duration.inMilliseconds.toDouble()
-                        : 1.0,
-                    onChanged: (value) {
-                      _seekTo(Duration(milliseconds: value.toInt()));
-                    },
-                    activeColor: Colors.white,
-                    inactiveColor: Colors.white30,
-                  ),
-                ),
-                Text(
-                  _formatDuration(_duration),
-                  style: const TextStyle(color: Colors.white, fontSize: 12),
-                ),
-              ],
+      child: ClipRect(
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.bottomCenter,
+                end: Alignment.topCenter,
+                colors: [
+                  Colors.black.withOpacity(0.6),
+                  Colors.black.withOpacity(0.3),
+                ],
+              ),
             ),
-
-            // 控制按钮
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
               children: [
-                // 播放/暂停
-                IconButton(
-                  icon: Icon(
-                    _isPlaying ? Icons.pause : Icons.play_arrow,
-                    color: Colors.white,
-                    size: 32,
-                  ),
-                  onPressed: _togglePlayPause,
-                ),
-
-                const SizedBox(width: 32),
-
-                // 倍速选择
-                PopupMenuButton<double>(
-                  icon: Row(
-                    children: [
-                      Text(
-                        '${_playbackSpeed}x',
-                        style: const TextStyle(color: Colors.white),
+                // 进度条
+                Row(
+                  children: [
+                    Text(
+                      _formatDuration(_position),
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w500,
                       ),
-                      const Icon(Icons.arrow_drop_down, color: Colors.white),
-                    ],
-                  ),
-                  onSelected: _changePlaybackSpeed,
-                  itemBuilder: (context) => [
-                    const PopupMenuItem(value: 0.5, child: Text('0.5x')),
-                    const PopupMenuItem(value: 0.75, child: Text('0.75x')),
-                    const PopupMenuItem(value: 1.0, child: Text('1.0x')),
-                    const PopupMenuItem(value: 1.25, child: Text('1.25x')),
-                    const PopupMenuItem(value: 1.5, child: Text('1.5x')),
-                    const PopupMenuItem(value: 2.0, child: Text('2.0x')),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: SliderTheme(
+                        data: SliderThemeData(
+                          trackHeight: 3,
+                          thumbShape: const RoundSliderThumbShape(
+                            enabledThumbRadius: 6,
+                          ),
+                          overlayShape: const RoundSliderOverlayShape(
+                            overlayRadius: 12,
+                          ),
+                        ),
+                        child: Slider(
+                          value: _position.inMilliseconds.toDouble(),
+                          max: _duration.inMilliseconds.toDouble() > 0
+                              ? _duration.inMilliseconds.toDouble()
+                              : 1.0,
+                          onChanged: (value) {
+                            _seekTo(Duration(milliseconds: value.toInt()));
+                          },
+                          activeColor: Colors.white,
+                          inactiveColor: Colors.white.withOpacity(0.3),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Text(
+                      _formatDuration(_duration),
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
                   ],
                 ),
 
-                const SizedBox(width: 16),
+                const SizedBox(height: 8),
 
-                // 音量控制
+                // 控制按钮行
                 Row(
                   children: [
+                    // 左侧：播放/暂停按钮
+                    IconButton(
+                      icon: Icon(
+                        _isPlaying ? Icons.pause : Icons.play_arrow,
+                        color: Colors.white,
+                        size: 28,
+                      ),
+                      onPressed: _togglePlayPause,
+                    ),
+
+                    const SizedBox(width: 8),
+
+                    // 音量控制
                     IconButton(
                       icon: Icon(
                         _volume == 0 ? Icons.volume_off : Icons.volume_up,
                         color: Colors.white,
+                        size: 22,
                       ),
                       onPressed: () {
                         _changeVolume(_volume == 0 ? 100.0 : 0.0);
                       },
                     ),
                     SizedBox(
-                      width: 100,
-                      child: Slider(
-                        value: _volume,
-                        max: 100,
-                        onChanged: _changeVolume,
-                        activeColor: Colors.white,
-                        inactiveColor: Colors.white30,
+                      width: 80,
+                      child: SliderTheme(
+                        data: SliderThemeData(
+                          trackHeight: 3,
+                          thumbShape: const RoundSliderThumbShape(
+                            enabledThumbRadius: 5,
+                          ),
+                          overlayShape: const RoundSliderOverlayShape(
+                            overlayRadius: 10,
+                          ),
+                        ),
+                        child: Slider(
+                          value: _volume,
+                          max: 100,
+                          onChanged: _changeVolume,
+                          activeColor: Colors.white,
+                          inactiveColor: Colors.white.withOpacity(0.3),
+                        ),
                       ),
+                    ),
+
+                    const Spacer(),
+
+                    // 右侧：倍速和全屏
+                    _buildSpeedSelector(),
+
+                    const SizedBox(width: 8),
+
+                    // 全屏按钮
+                    IconButton(
+                      icon: Icon(
+                        _isFullScreen ? Icons.fullscreen_exit : Icons.fullscreen,
+                        color: Colors.white,
+                        size: 24,
+                      ),
+                      onPressed: _toggleFullScreen,
                     ),
                   ],
                 ),
-
-                const SizedBox(width: 16),
-
-                // 全屏按钮
-                IconButton(
-                  icon: Icon(
-                    _isFullScreen ? Icons.fullscreen_exit : Icons.fullscreen,
-                    color: Colors.white,
-                  ),
-                  onPressed: () {
-                    setState(() {
-                      _isFullScreen = !_isFullScreen;
-                    });
-                    if (_isFullScreen) {
-                      SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersive);
-                    } else {
-                      SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
-                    }
-                  },
-                ),
               ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // 修复后的播放速率选择器
+  Widget _buildSpeedSelector() {
+    final speeds = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0];
+
+    return PopupMenuButton<double>(
+      key: ValueKey(_playbackSpeed), // 添加 key 防止重建问题
+      tooltip: '播放速度',
+      icon: Container(
+        padding: const EdgeInsets.symmetric(
+          horizontal: 8,
+          vertical: 4,
+        ),
+        decoration: BoxDecoration(
+          color: Colors.white.withOpacity(0.2),
+          borderRadius: BorderRadius.circular(4),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              '${_playbackSpeed}x',
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 13,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+            const SizedBox(width: 4),
+            const Icon(
+              Icons.arrow_drop_down,
+              color: Colors.white,
+              size: 20,
             ),
           ],
         ),
+      ),
+      color: Colors.grey[900],
+      elevation: 8,
+      offset: const Offset(0, -10),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(8),
+      ),
+      // ✅ 关键修复：延迟执行 setState
+      onSelected: (speed) {
+        // 立即更新播放器速率（不触发 UI 重建）
+        if (_player != null && _isVideoInitialized) {
+          _player!.setRate(speed);
+        }
+
+        // 延迟更新 UI 状态，确保 PopupMenu 完全关闭后再 setState
+        Future.delayed(const Duration(milliseconds: 150), () {
+          if (mounted) {
+            setState(() {
+              _playbackSpeed = speed;
+            });
+          }
+        });
+      },
+      itemBuilder: (BuildContext context) {
+        return speeds.map((speed) {
+          final isSelected = (_playbackSpeed - speed).abs() < 0.01;
+          return PopupMenuItem<double>(
+            value: speed,
+            height: 42,
+            child: Row(
+              children: [
+                SizedBox(
+                  width: 60,
+                  child: Text(
+                    '${speed}x',
+                    style: TextStyle(
+                      color: isSelected ? Colors.blue[300] : Colors.white,
+                      fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                      fontSize: 14,
+                    ),
+                  ),
+                ),
+                const Spacer(),
+                if (isSelected)
+                  Icon(
+                    Icons.check,
+                    color: Colors.blue[300],
+                    size: 18,
+                  ),
+              ],
+            ),
+          );
+        }).toList();
+      },
+    );
+  }
+}
+
+// 媒体信息弹框 - 带动画效果
+class _MediaInfoDialog extends StatelessWidget {
+  final FileItem item;
+  final int fileSize;
+  final Animation<double> animation;
+
+  const _MediaInfoDialog({
+    required this.item,
+    required this.fileSize,
+    required this.animation,
+  });
+
+  String _formatFileSize(int bytes) {
+    if (bytes < 1024) {
+      return '$bytes B';
+    } else if (bytes < 1024 * 1024) {
+      return '${(bytes / 1024).toStringAsFixed(1)} KB';
+    } else if (bytes < 1024 * 1024 * 1024) {
+      return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+    } else {
+      return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(2)} GB';
+    }
+  }
+
+  String _getFileExtension() {
+    final name = item.name;
+    final lastDot = name.lastIndexOf('.');
+    if (lastDot != -1 && lastDot < name.length - 1) {
+      return name.substring(lastDot + 1).toUpperCase();
+    }
+    return 'Unknown';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Align(
+      alignment: Alignment.topRight,
+      child: Container(
+        margin: const EdgeInsets.only(top: 80, right: 20),
+        width: 280,
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(12),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.3),
+              blurRadius: 20,
+              offset: const Offset(0, 8),
+            ),
+          ],
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _buildInfoRow('名称', item.name),
+            _buildInfoRow('大小', _formatFileSize(fileSize)),
+            _buildInfoRow('类型', _getFileExtension()),
+            // 如果有分辨率信息
+            // if (item.metadata != null && item.metadata!['resolution'] != null)
+            //   _buildInfoRow('分辨率', item.metadata!['resolution']!),
+            // // 如果有拍摄时间
+            // if (item.metadata != null && item.metadata!['captureTime'] != null)
+            //   _buildInfoRow('拍摄时间', item.metadata!['captureTime']!),
+            // // 如果有拍摄设备
+            // if (item.metadata != null && item.metadata!['device'] != null)
+            //   _buildInfoRow('拍摄设备', item.metadata!['device']!),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildInfoRow(String label, String value) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+      decoration: BoxDecoration(
+        border: Border(
+          bottom: BorderSide(
+            color: Colors.grey[200]!,
+            width: 1,
+          ),
+        ),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 70,
+            child: Text(
+              label,
+              style: TextStyle(
+                fontSize: 14,
+                color: Colors.grey[600],
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              value,
+              style: const TextStyle(
+                fontSize: 14,
+                color: Colors.black87,
+                fontWeight: FontWeight.w400,
+              ),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
       ),
     );
   }

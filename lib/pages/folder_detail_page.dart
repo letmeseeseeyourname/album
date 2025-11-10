@@ -1,10 +1,10 @@
-// pages/folder_detail_page.dart
+// pages/folder_detail_page_backup.dart
 import 'dart:io';
-
 import 'package:ablumwin/user/my_instance.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_svg/svg.dart';
+import 'package:media_kit/media_kit.dart';
+import 'package:media_kit_video/media_kit_video.dart';
 import '../album/manager/local_folder_upload_manager.dart';
 import '../models/file_item.dart';
 import '../models/folder_info.dart';
@@ -13,8 +13,6 @@ import '../widgets/custom_title_bar.dart';
 import '../widgets/file_item_card.dart';
 import '../widgets/file_list_item.dart';
 import '../widgets/side_navigation.dart';
-import '../widgets/media_viewer_page.dart';
-// 导入独立的本地文件夹上传管理器
 
 // MARK: - 辅助模型和静态方法 (用于在后台隔离区运行)
 
@@ -93,7 +91,6 @@ Future<UploadAnalysisResult> _analyzeFilesForUpload(
 
 // 文件加载方法 (与原代码一致)
 Future<List<FileItem>> _loadFilesInBackground(String path) async {
-  // ... (方法体不变，与原代码一致)
   final directory = Directory(path);
   final entities = await directory.list().toList();
 
@@ -144,6 +141,7 @@ Future<List<FileItem>> _loadFilesInBackground(String path) async {
 
   return items;
 }
+
 // MARK: - FolderDetailPage State
 
 class FolderDetailPage extends StatefulWidget {
@@ -182,6 +180,16 @@ class _FolderDetailPageState extends State<FolderDetailPage> {
   bool isUploading = false;
   LocalUploadProgress? uploadProgress;
 
+  // 预览相关状态
+  bool _showPreview = false;
+  int _previewIndex = -1;
+  List<FileItem> _mediaItems = [];
+
+  // 视频播放器相关
+  Player? _videoPlayer;
+  VideoController? _videoController;
+  bool _isPlaying = false;
+
   @override
   void initState() {
     super.initState();
@@ -196,6 +204,7 @@ class _FolderDetailPageState extends State<FolderDetailPage> {
   @override
   void dispose() {
     _uploadManager.removeListener(_onUploadProgressChanged);
+    _disposeVideoPlayer();
     super.dispose();
   }
 
@@ -207,8 +216,6 @@ class _FolderDetailPageState extends State<FolderDetailPage> {
       });
     }
   }
-
-  // ... (其他不变的私有方法)
 
   void _initPathSegments() {
     final parts = widget.folder.path.split(Platform.pathSeparator);
@@ -239,6 +246,8 @@ class _FolderDetailPageState extends State<FolderDetailPage> {
       fileItems.clear();
       selectedIndices.clear();
       isSelectionMode = false;
+      // 关闭预览
+      _closePreview();
     });
 
     try {
@@ -287,7 +296,8 @@ class _FolderDetailPageState extends State<FolderDetailPage> {
     _loadFiles(targetPath);
   }
 
-  void _openMediaViewer(int index) {
+  // 新增：打开预览
+  void _openPreview(int index) {
     // 获取所有媒体文件（图片和视频）
     final mediaItems = fileItems.where((item) =>
     item.type == FileItemType.image || item.type == FileItemType.video
@@ -298,15 +308,87 @@ class _FolderDetailPageState extends State<FolderDetailPage> {
     final mediaIndex = mediaItems.indexOf(currentItem);
 
     if (mediaIndex >= 0) {
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (context) => MediaViewerPage(
-            mediaItems: mediaItems,
-            initialIndex: mediaIndex,
-          ),
-        ),
-      );
+      setState(() {
+        _showPreview = true;
+        _previewIndex = mediaIndex;
+        _mediaItems = mediaItems;
+      });
+      _loadPreviewMedia();
+    }
+  }
+
+  // 新增：关闭预览
+  void _closePreview() {
+    _disposeVideoPlayer();
+    setState(() {
+      _showPreview = false;
+      _previewIndex = -1;
+      _mediaItems = [];
+    });
+  }
+
+  // 新增：加载预览媒体
+  void _loadPreviewMedia() {
+    if (_previewIndex < 0 || _previewIndex >= _mediaItems.length) return;
+
+    final item = _mediaItems[_previewIndex];
+
+    if (item.type == FileItemType.video) {
+      _initVideoPlayer(item.path);
+    } else {
+      _disposeVideoPlayer();
+    }
+  }
+
+  // 新增：初始化视频播放器
+  void _initVideoPlayer(String path) {
+    _disposeVideoPlayer();
+
+    _videoPlayer = Player();
+    _videoController = VideoController(_videoPlayer!);
+
+    _videoPlayer!.open(Media('file:///$path'));
+    _videoPlayer!.stream.playing.listen((playing) {
+      if (mounted) {
+        setState(() {
+          _isPlaying = playing;
+        });
+      }
+    });
+  }
+
+  // 新增：释放视频播放器
+  void _disposeVideoPlayer() {
+    _videoPlayer?.dispose();
+    _videoPlayer = null;
+    _videoController = null;
+    _isPlaying = false;
+  }
+
+  // 新增：切换到上一个文件
+  void _previousMedia() {
+    if (_previewIndex > 0) {
+      setState(() {
+        _previewIndex--;
+      });
+      _loadPreviewMedia();
+    }
+  }
+
+  // 新增：切换到下一个文件
+  void _nextMedia() {
+    if (_previewIndex < _mediaItems.length - 1) {
+      setState(() {
+        _previewIndex++;
+      });
+      _loadPreviewMedia();
+    }
+  }
+
+  // 新增：切换播放/暂停
+  void _togglePlayPause() {
+    if (_videoPlayer != null) {
+      _videoPlayer!.playOrPause();
     }
   }
 
@@ -426,7 +508,6 @@ class _FolderDetailPageState extends State<FolderDetailPage> {
     }
 
     // 4. 显示确认对话框 (传递实际的待上传文件列表进行准确统计)
-    // 注意：我们将 _showConfirmDialog 的参数改为文件路径列表
     final confirmed = await _showConfirmDialog(finalUploadList);
     if (!confirmed) return;
 
@@ -565,24 +646,165 @@ class _FolderDetailPageState extends State<FolderDetailPage> {
             )
                 : const _StaticSideNavigation(),
             Expanded(
-              child: Container(
-                color: Colors.white,
-                child: Column(
-                  children: [
-                    _buildTopBar(),
-                    Expanded(
-                      child: isLoading
-                          ? const Center(child: CircularProgressIndicator())
-                          : _buildFileGrid(),
+              child: Row(
+                children: [
+                  // 主内容区域
+                  Expanded(
+                    flex: _showPreview ? 3 : 1,
+                    child: Container(
+                      color: Colors.white,
+                      child: Column(
+                        children: [
+                          _buildTopBar(),
+                          Expanded(
+                            child: isLoading
+                                ? const Center(child: CircularProgressIndicator())
+                                : _buildFileGrid(),
+                          ),
+                          _buildBottomBar(),
+                        ],
+                      ),
                     ),
-                    _buildBottomBar(),
-                  ],
-                ),
+                  ),
+                  // 预览区域
+                  if (_showPreview)
+                    Expanded(
+                      flex: 2,
+                      child: _buildPreviewPanel(),
+                    ),
+                ],
               ),
             ),
           ],
         ),
       ),
+    );
+  }
+
+  // 新增：构建预览面板
+  Widget _buildPreviewPanel() {
+    if (_previewIndex < 0 || _previewIndex >= _mediaItems.length) {
+      return Container();
+    }
+
+    final item = _mediaItems[_previewIndex];
+    final isVideo = item.type == FileItemType.video;
+
+    return Container(
+      color: Colors.black,
+      child: Stack(
+        children: [
+          // 媒体显示区域
+          Center(
+            child: isVideo ? _buildVideoPreview(item) : _buildImagePreview(item),
+          ),
+
+          // 左侧切换按钮
+          if (_previewIndex > 0)
+            Positioned(
+              left: 20,
+              top: 0,
+              bottom: 0,
+              child: Center(
+                child: IconButton(
+                  icon: const Icon(Icons.chevron_left, size: 48, color: Colors.white),
+                  onPressed: _previousMedia,
+                ),
+              ),
+            ),
+
+          // 右侧切换按钮
+          if (_previewIndex < _mediaItems.length - 1)
+            Positioned(
+              right: 20,
+              top: 0,
+              bottom: 0,
+              child: Center(
+                child: IconButton(
+                  icon: const Icon(Icons.chevron_right, size: 48, color: Colors.white),
+                  onPressed: _nextMedia,
+                ),
+              ),
+            ),
+
+          // 视频播放/暂停按钮
+          if (isVideo)
+            Positioned(
+              left: 0,
+              right: 0,
+              top: 0,
+              bottom: 0,
+              child: Center(
+                child: IconButton(
+                  icon: Icon(
+                    _isPlaying ? Icons.pause_circle_outline : Icons.play_circle_outline,
+                    size: 80,
+                    color: Colors.white.withOpacity(0.8),
+                  ),
+                  onPressed: _togglePlayPause,
+                ),
+              ),
+            ),
+
+          // 关闭按钮
+          Positioned(
+            top: 10,
+            right: 10,
+            child: IconButton(
+              icon: const Icon(Icons.close, size: 32, color: Colors.white),
+              onPressed: _closePreview,
+            ),
+          ),
+
+          // 文件名显示
+          Positioned(
+            bottom: 20,
+            left: 20,
+            right: 20,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              decoration: BoxDecoration(
+                color: Colors.black.withOpacity(0.6),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text(
+                '${_previewIndex + 1}/${_mediaItems.length} - ${item.name}',
+                style: const TextStyle(color: Colors.white, fontSize: 14),
+                textAlign: TextAlign.center,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // 新增：构建图片预览
+  Widget _buildImagePreview(FileItem item) {
+    return Image.file(
+      File(item.path),
+      fit: BoxFit.contain,
+      errorBuilder: (context, error, stackTrace) {
+        return const Center(
+          child: Icon(Icons.error, color: Colors.white, size: 64),
+        );
+      },
+    );
+  }
+
+  // 新增：构建视频预览
+  Widget _buildVideoPreview(FileItem item) {
+    if (_videoController == null) {
+      return const Center(
+        child: CircularProgressIndicator(color: Colors.white),
+      );
+    }
+
+    return Video(
+      controller: _videoController!,
+      controls: NoVideoControls,
     );
   }
 
@@ -759,11 +981,8 @@ class _FolderDetailPageState extends State<FolderDetailPage> {
                 onDoubleTap: isUploading
                     ? null
                     : () {
-                  // 双击打开图片或视频
-                  if (filteredFiles[index].type == FileItemType.image ||
-                      filteredFiles[index].type == FileItemType.video) {
-                    _openMediaViewer(actualIndex);
-                  } else if (filteredFiles[index].type == FileItemType.folder) {
+                  // 双击进入文件夹
+                  if (filteredFiles[index].type == FileItemType.folder) {
                     _navigateToFolder(
                       filteredFiles[index].path,
                       filteredFiles[index].name,
@@ -774,25 +993,25 @@ class _FolderDetailPageState extends State<FolderDetailPage> {
                   item: filteredFiles[index],
                   isSelected: selectedIndices.contains(actualIndex),
                   showCheckbox: isSelectionMode || selectedIndices.contains(actualIndex),
-                  canSelect: true, // 允许所有项目被选中
+                  canSelect: true,
                   onTap: isUploading
                       ? () {}
                       : () {
-                    if (isSelectionMode) { // 如果在选择模式，点击切换选中状态
+                    if (isSelectionMode) {
                       _toggleSelection(actualIndex);
-                    } else if (filteredFiles[index].type == FileItemType.folder) { // 不在选择模式，点击文件夹进入
+                    } else if (filteredFiles[index].type == FileItemType.folder) {
                       _navigateToFolder(
                         filteredFiles[index].path,
                         filteredFiles[index].name,
                       );
-                    } else { // 不在选择模式，点击文件切换选中状态（作为触发选择模式的快捷方式）
-                      _toggleSelection(actualIndex);
+                    } else {
+                      // 单击图片或视频打开预览
+                      _openPreview(actualIndex);
                     }
                   },
                   onLongPress: isUploading
                       ? () {}
                       : () {
-                    // 长按总是切换选中状态
                     _toggleSelection(actualIndex);
                   },
                   onCheckboxToggle: isUploading
@@ -817,11 +1036,8 @@ class _FolderDetailPageState extends State<FolderDetailPage> {
           onDoubleTap: isUploading
               ? null
               : () {
-            // 双击打开图片或视频
-            if (filteredFiles[index].type == FileItemType.image ||
-                filteredFiles[index].type == FileItemType.video) {
-              _openMediaViewer(actualIndex);
-            } else if (filteredFiles[index].type == FileItemType.folder) {
+            // 双击进入文件夹
+            if (filteredFiles[index].type == FileItemType.folder) {
               _navigateToFolder(
                 filteredFiles[index].path,
                 filteredFiles[index].name,
@@ -831,19 +1047,20 @@ class _FolderDetailPageState extends State<FolderDetailPage> {
           child: FileListItem(
             item: filteredFiles[index],
             isSelected: selectedIndices.contains(actualIndex),
-            canSelect: isSelectionMode || selectedIndices.contains(actualIndex), // 允许所有项目显示勾选框
+            canSelect: isSelectionMode || selectedIndices.contains(actualIndex),
             onTap: isUploading
                 ? () {}
                 : () {
-              if (isSelectionMode) { // 如果在选择模式，点击切换选中状态
+              if (isSelectionMode) {
                 _toggleSelection(actualIndex);
-              } else if (filteredFiles[index].type == FileItemType.folder) { // 不在选择模式，点击文件夹进入
+              } else if (filteredFiles[index].type == FileItemType.folder) {
                 _navigateToFolder(
                   filteredFiles[index].path,
                   filteredFiles[index].name,
                 );
-              } else { // 不在选择模式，点击文件切换选中状态（作为触发选择模式的快捷方式）
-                _toggleSelection(actualIndex);
+              } else {
+                // 单击图片或视频打开预览
+                _openPreview(actualIndex);
               }
             },
             onCheckboxToggle: isUploading
@@ -870,7 +1087,7 @@ class _FolderDetailPageState extends State<FolderDetailPage> {
       ),
       child: Row(
         children: [
-          // 左侧信息 (仅显示当前页面选中的项目统计，不进行递归计算以避免 UI 卡顿)
+          // 左侧信息
           if (selectedIndices.isNotEmpty) ...[
             Text(
               '已选：${_getSelectedTotalSize().toStringAsFixed(2)}MB · ${_getSelectedImageCount()}张照片/${_getSelectedVideoCount()}条视频',

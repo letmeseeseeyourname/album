@@ -2,10 +2,11 @@
 import 'package:flutter/material.dart';
 import 'package:window_manager/window_manager.dart';
 import 'pages/login_page.dart';
+import 'package:media_kit/media_kit.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-
+  MediaKit.ensureInitialized();
   // 初始化窗口管理器
   await windowManager.ensureInitialized();
 
