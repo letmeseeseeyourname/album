@@ -4,13 +4,14 @@ import 'package:flutter/material.dart';
 import '../../network/constant_sign.dart';
 import '../../network/network_provider.dart';
 import '../../network/response/response_model.dart';
+import '../../user/models/resource_list_model.dart';
 import '../../user/native_bridge.dart';
 import '../models/file_detail_model.dart';
 import '../models/file_upload_model.dart';
 import '../models/file_upload_response_model.dart';
 
 class AlbumProvider extends ChangeNotifier{
-
+  static final int myPageSize = 100;
 
   //nass/ps/storage/reportSyncTaskFiles
   Future<ResponseModel<bool>> reportSyncTaskFiles(
@@ -58,4 +59,40 @@ class AlbumProvider extends ChangeNotifier{
 
     return responseModel;
   }
+
+  Future<ResponseModel<ResourceListModel>> listResources(int page,
+      {bool isPrivate = false,
+        int? pageSize,
+        String startDate = "",
+        String endDate = "",
+        List<int> locate = const [],
+        List<int> person = const [],
+      }) async {
+    // ...existing code...
+    String url = "${AppConfig.hostUrl()}/nass/ps/photo/listResources";
+    ResponseModel<ResourceListModel> responseModel =
+    await requestAndConvertResponseModel(url,
+        formData: {
+          "pageIndex": page,
+          "pageSize":   pageSize ?? myPageSize,
+          "keyword": "",
+          "startDate": startDate, //搜索开始日期时间戳
+          "endDate":
+          endDate,
+          "locate": locate, //地点
+          "person": person, //人物
+          "sharePerson": [], //分享
+          "extraDevice": [], //设备
+          "scence": [], //场景
+          "resType": "", //媒体格式
+          "fileType": ["P", "V"], //P：图片 V：视频
+          "isFavorite": "",
+          "isPrivate": isPrivate ? "Y" : "N",
+        },
+        netMethod: NetMethod.post);
+
+    return responseModel;
+  }
+
+
 }

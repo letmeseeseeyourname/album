@@ -13,7 +13,8 @@ import '../widgets/custom_title_bar.dart';
 import '../widgets/file_item_card.dart';
 import '../widgets/file_list_item.dart';
 import '../widgets/side_navigation.dart';
-
+import '../models/media_item.dart';
+import '../widgets/media_viewer_page.dart';
 // MARK: - 辅助模型和静态方法 (用于在后台隔离区运行)
 
 // 用于返回上传分析结果的模型
@@ -389,6 +390,34 @@ class _FolderDetailPageState extends State<FolderDetailPage> {
   void _togglePlayPause() {
     if (_videoPlayer != null) {
       _videoPlayer!.playOrPause();
+    }
+  }
+  void _openFullScreenViewer(int index) {
+    final mediaItems = fileItems
+        .where((item) =>
+    item.type == FileItemType.image ||
+        item.type == FileItemType.video)
+        .map((fileItem) => MediaItem.fromFileItem(fileItem))
+        .toList();
+
+    final currentItem = fileItems[index];
+    final mediaFileItems = fileItems
+        .where((item) =>
+    item.type == FileItemType.image ||
+        item.type == FileItemType.video)
+        .toList();
+    final mediaIndex = mediaFileItems.indexOf(currentItem);
+
+    if (mediaIndex >= 0 && mediaItems.isNotEmpty) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) => MediaViewerPage(
+            mediaItems: mediaItems,
+            initialIndex: mediaIndex,
+          ),
+        ),
+      );
     }
   }
 
@@ -987,6 +1016,8 @@ class _FolderDetailPageState extends State<FolderDetailPage> {
                       filteredFiles[index].path,
                       filteredFiles[index].name,
                     );
+                  }else{
+                    _openFullScreenViewer(actualIndex);  // 新增这行
                   }
                 },
                 child: FileItemCard(

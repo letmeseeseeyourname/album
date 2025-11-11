@@ -5,6 +5,7 @@ import '../../user/models/device_model.dart';
 import '../../user/models/login_response_model.dart';
 import '../../user/models/my_all_groups_model.dart';
 import '../../user/models/p6device_info_model.dart';
+import '../../user/models/resource_list_model.dart';
 import '../../user/models/user.dart';
 import '../../user/models/user_model.dart';
 
@@ -25,6 +26,8 @@ class ModelFactory {
     }
     if (type == dataType) return json;
     switch (type) {
+      case "ResourceListModel":
+        return ResourceListModel.fromJson(json) as T;
       case "LoginResponseModel":
         return LoginResponseModel.fromJson(json) as T;
       case "UserModel":
