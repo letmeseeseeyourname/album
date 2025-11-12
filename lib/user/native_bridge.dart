@@ -3,7 +3,7 @@ import 'dart:io';
 import 'package:flutter/services.dart';
 
 class NativeBridge {
-  static const MethodChannel _channel = MethodChannel('album/native');
+  static const MethodChannel _channel = MethodChannel('remote_album/native');
 
   static Future<bool> startp2p(String account) async {
     // await closep2p();

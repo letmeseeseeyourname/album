@@ -6,7 +6,7 @@ import '../user/models/p6device_info_model.dart';
 import '../user/models/group.dart';
 import '../user/my_instance.dart';
 import '../user/provider/mine_provider.dart';
-import 'album_library_page.dart';
+import '../pages/remote_album/pages/album_library_page.dart';
 import 'main_folder_page.dart';
 
 

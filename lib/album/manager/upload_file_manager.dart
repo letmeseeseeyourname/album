@@ -212,7 +212,7 @@ class UploadAllPhotosManager extends ChangeNotifier {
           page++;
         }
 
-        LogUtil.log("Loaded album: ${album.name}, total assets: ${albumList.length}");
+        LogUtil.log("Loaded remote_album: ${album.name}, total assets: ${albumList.length}");
       }
 
       return mediaList;
@@ -538,7 +538,7 @@ class UploadAllPhotosManager extends ChangeNotifier {
   /// 获取城市名称（通过原生桥接）
   Future<String?> _getCityName(double lng, double lat) async {
     try {
-      const platform = MethodChannel('album/native');
+      const platform = MethodChannel('remote_album/native');
       final String? result = await platform.invokeMethod('getCity');
       return result;
     } catch (e) {

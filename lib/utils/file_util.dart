@@ -5,6 +5,8 @@ import 'package:flutter/cupertino.dart';
 import 'package:path_provider/path_provider.dart';
 import '../album/manager/local_folder_upload_manager.dart';
 import '../models/file_item.dart';
+import 'package:flutter/foundation.dart';
+
 
 Future<Directory> getSafeLibraryDir() async {
   if (Platform.isAndroid) {
@@ -102,81 +104,36 @@ Future<VideoMetadata> getVideoMetadata(String videoPath) async {
   return VideoMetadata(duration: 0, width: 0, height: 0);
 }
 
-/// 文件工具类 - 提供文件操作的静态方法
-class FileUtils {
-  FileUtils._(); // 私有构造函数，防止实例化
+/// 文件上传分析结果模型
+class UploadAnalysisResult {
+  final int imageCount;
+  final int videoCount;
+  final int totalBytes;
 
-  /// 支持的图片扩展名
+  const UploadAnalysisResult({
+    required this.imageCount,
+    required this.videoCount,
+    required this.totalBytes,
+  });
+}
+
+/// 文件工具类 - 提供文件操作相关的静态方法
+class FileUtils {
+  // 支持的媒体文件扩展名
   static const imageExtensions = [
     'bmp', 'gif', 'jpg', 'jpeg', 'png', 'webp', 'wbmp', 'heic'
   ];
 
-  /// 支持的视频扩展名
   static const videoExtensions = [
     'mp4', 'mov', 'avi', '3gp', 'mkv', '3gp2'
   ];
 
-  /// 所有媒体扩展名
-  static const mediaExtensions = [...imageExtensions, ...videoExtensions];
+  static const mediaExtensions = [
+    ...imageExtensions,
+    ...videoExtensions,
+  ];
 
-  /// 检查是否为图片文件
-  static bool isImage(String path) {
-    final ext = path.split('.').last.toLowerCase();
-    return imageExtensions.contains(ext);
-  }
-
-  /// 检查是否为视频文件
-  static bool isVideo(String path) {
-    final ext = path.split('.').last.toLowerCase();
-    return videoExtensions.contains(ext);
-  }
-
-  /// 检查是否为媒体文件
-  static bool isMediaFile(String path) {
-    final ext = path.split('.').last.toLowerCase();
-    return mediaExtensions.contains(ext);
-  }
-
-  /// 获取文件类型
-  static FileItemType? getFileType(String path) {
-    final ext = path.split('.').last.toLowerCase();
-
-    if (imageExtensions.contains(ext)) {
-      return FileItemType.image;
-    } else if (videoExtensions.contains(ext)) {
-      return FileItemType.video;
-    }
-
-    return null;
-  }
-
-  /// 格式化文件大小
-  static String formatFileSize(int bytes) {
-    if (bytes < 1024) {
-      return '$bytes B';
-    } else if (bytes < 1024 * 1024) {
-      return '${(bytes / 1024).toStringAsFixed(1)} KB';
-    } else if (bytes < 1024 * 1024 * 1024) {
-      return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
-    } else {
-      return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(2)} GB';
-    }
-  }
-
-  /// 格式化时长
-  static String formatDuration(Duration duration) {
-    final hours = duration.inHours;
-    final minutes = duration.inMinutes.remainder(60);
-    final seconds = duration.inSeconds.remainder(60);
-
-    if (hours > 0) {
-      return '${hours.toString().padLeft(2, '0')}:${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
-    } else {
-      return '${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
-    }
-  }
-
-  /// 递归获取所有媒体文件路径
+  /// 递归获取指定路径下的所有媒体文件
   static Future<List<String>> getAllMediaFilesRecursive(String path) async {
     final mediaPaths = <String>[];
     final directory = Directory(path);
@@ -187,19 +144,60 @@ class FileUtils {
 
     try {
       await for (var entity in directory.list(recursive: true)) {
-        if (entity is File && isMediaFile(entity.path)) {
-          mediaPaths.add(entity.path);
+        if (entity is File) {
+          final ext = entity.path.split('.').last.toLowerCase();
+          if (mediaExtensions.contains(ext)) {
+            mediaPaths.add(entity.path);
+          }
         }
       }
     } catch (e) {
+      // 记录错误但不中断其他文件的收集
       debugPrint('Error accessing directory $path: $e');
     }
 
     return mediaPaths;
   }
 
-  /// 加载指定路径的文件列表
-  static Future<List<FileItem>> loadFiles(String path) async {
+  /// 分析文件列表的统计信息
+  static Future<UploadAnalysisResult> analyzeFilesForUpload(
+      List<String> filePaths,
+      ) async {
+    int imageCount = 0;
+    int videoCount = 0;
+    int totalBytes = 0;
+
+    for (final path in filePaths) {
+      try {
+        final file = File(path);
+        final stat = await file.stat();
+
+        if (stat.type == FileSystemEntityType.file) {
+          final ext = path.split('.').last.toLowerCase();
+
+          if (imageExtensions.contains(ext)) {
+            imageCount++;
+            totalBytes += stat.size;
+          } else if (videoExtensions.contains(ext)) {
+            videoCount++;
+            totalBytes += stat.size;
+          }
+        }
+      } catch (e) {
+        // 忽略无法访问的文件
+        debugPrint('Error analyzing file $path: $e');
+      }
+    }
+
+    return UploadAnalysisResult(
+      imageCount: imageCount,
+      videoCount: videoCount,
+      totalBytes: totalBytes,
+    );
+  }
+
+  /// 在后台线程加载文件列表
+  static Future<List<FileItem>> loadFilesInBackground(String path) async {
     final directory = Directory(path);
     final entities = await directory.list().toList();
     final items = <FileItem>[];
@@ -214,7 +212,14 @@ class FileUtils {
           ),
         );
       } else if (entity is File) {
-        final type = getFileType(entity.path);
+        final ext = entity.path.split('.').last.toLowerCase();
+        FileItemType? type;
+
+        if (imageExtensions.contains(ext)) {
+          type = FileItemType.image;
+        } else if (videoExtensions.contains(ext)) {
+          type = FileItemType.video;
+        }
 
         if (type != null) {
           final stat = await entity.stat();
@@ -230,7 +235,7 @@ class FileUtils {
       }
     }
 
-    // 排序：文件夹在前，然后按名称排序
+    // 排序：文件夹优先，然后按名称排序
     items.sort((a, b) {
       if (a.type == FileItemType.folder && b.type != FileItemType.folder) {
         return -1;
@@ -243,47 +248,34 @@ class FileUtils {
 
     return items;
   }
-}
 
-/// 上传分析结果模型
-class UploadAnalysisResult {
-  final int imageCount;
-  final int videoCount;
-  final int totalBytes;
+  /// 判断文件是否为图片
+  static bool isImageFile(String path) {
+    final ext = path.split('.').last.toLowerCase();
+    return imageExtensions.contains(ext);
+  }
 
-  UploadAnalysisResult(this.imageCount, this.videoCount, this.totalBytes);
+  /// 判断文件是否为视频
+  static bool isVideoFile(String path) {
+    final ext = path.split('.').last.toLowerCase();
+    return videoExtensions.contains(ext);
+  }
 
-  double get totalSizeMB => totalBytes / (1024 * 1024);
-}
+  /// 判断文件是否为媒体文件
+  static bool isMediaFile(String path) {
+    return isImageFile(path) || isVideoFile(path);
+  }
 
-/// 文件分析工具
-class FileAnalyzer {
-  /// 分析文件列表的统计数据
-  static Future<UploadAnalysisResult> analyzeFiles(
-      List<String> filePaths) async {
-    int imageCount = 0;
-    int videoCount = 0;
-    int totalBytes = 0;
-
-    for (final path in filePaths) {
-      try {
-        final file = File(path);
-        final stat = await file.stat();
-
-        if (stat.type == FileSystemEntityType.file) {
-          if (FileUtils.isImage(path)) {
-            imageCount++;
-            totalBytes += stat.size;
-          } else if (FileUtils.isVideo(path)) {
-            videoCount++;
-            totalBytes += stat.size;
-          }
-        }
-      } catch (e) {
-        debugPrint('Error analyzing file $path: $e');
-      }
+  /// 格式化文件大小
+  static String formatFileSize(int bytes) {
+    if (bytes < 1024) {
+      return '$bytes B';
+    } else if (bytes < 1024 * 1024) {
+      return '${(bytes / 1024).toStringAsFixed(2)} KB';
+    } else if (bytes < 1024 * 1024 * 1024) {
+      return '${(bytes / (1024 * 1024)).toStringAsFixed(2)} MB';
+    } else {
+      return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(2)} GB';
     }
-
-    return UploadAnalysisResult(imageCount, videoCount, totalBytes);
   }
 }

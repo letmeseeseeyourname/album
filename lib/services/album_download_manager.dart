@@ -3,7 +3,9 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:path/path.dart' as path;
 import 'package:http/http.dart' as http;
+import '../network/constant_sign.dart';
 import '../user/models/resource_list_model.dart';
+import '../user/my_instance.dart';
 
 class AlbumDownloadManager {
   static final AlbumDownloadManager _instance = AlbumDownloadManager._internal();
@@ -55,7 +57,9 @@ class AlbumDownloadManager {
 
         try {
           // 使用原始路径下载
-          final downloadUrl = resource.originPath ?? resource.mediumPath;
+          // final downloadUrl = resource.originPath ?? resource.mediumPath;
+          final downloadUrl = "${AppConfig.minio()}/${resource.originPath ?? resource.mediumPath}";
+
           if (downloadUrl == null || downloadUrl.isEmpty) {
             debugPrint('资源 $fileName 没有有效的下载路径');
             failCount++;
@@ -117,16 +121,43 @@ class AlbumDownloadManager {
 
   /// 获取默认下载路径
   static Future<String> getDefaultDownloadPath() async {
-    // Windows 默认下载路径
-    if (Platform.isWindows) {
-      final userProfile = Platform.environment['USERPROFILE'];
-      if (userProfile != null) {
-        return path.join(userProfile, 'Downloads', '亲选相册');
+    // 首先尝试从设置中获取用户配置的下载路径
+    String? savedPath = await MyInstance().getDownloadPath();
+
+    String downloadPath;
+    if (savedPath != null && savedPath.isNotEmpty) {
+      // 使用用户设置的路径
+      downloadPath = savedPath;
+    } else {
+      // 使用默认路径
+      if (Platform.isWindows) {
+        final userProfile = Platform.environment['USERPROFILE'];
+        if (userProfile != null) {
+          downloadPath = path.join(userProfile, 'Downloads', '亲选相册');
+        } else {
+          downloadPath = path.join(Directory.current.path, 'downloads', '亲选相册');
+        }
+      } else {
+        // 其他平台
+        downloadPath = path.join(Directory.current.path, 'downloads', '亲选相册');
       }
+
+      // 将默认路径保存到设置中
+      await MyInstance().setDownloadPath(downloadPath);
     }
 
-    // 其他平台
-    return path.join(Directory.current.path, 'downloads', '亲选相册');
+    // 确保下载目录存在,如果不存在则创建
+    try {
+      final downloadDir = Directory(downloadPath);
+      if (!await downloadDir.exists()) {
+        await downloadDir.create(recursive: true);
+        debugPrint('创建下载目录: $downloadPath');
+      }
+    } catch (e) {
+      debugPrint('创建下载目录失败: $e');
+    }
+
+    return downloadPath;
   }
 }
 

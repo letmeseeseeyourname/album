@@ -336,7 +336,7 @@ class _AlbumLibraryPageState extends State<AlbumLibraryPage>
       body: CustomTitleBar(
         backgroundColor: const Color(0xFFF5E8DC),
         rightTitleBgColor: Colors.white,
-        showToolbar: false,
+        showToolbar: true,
         child: Row(
           children: [
             SideNavigation(
@@ -358,7 +358,7 @@ class _AlbumLibraryPageState extends State<AlbumLibraryPage>
                       child: Column(
                         children: [
                           _buildHeader(),
-                          _buildToolbar(),
+                          // _buildToolbar(),
                           Expanded(
                             child: _buildContent(),
                           ),
@@ -536,7 +536,7 @@ class _AlbumLibraryPageState extends State<AlbumLibraryPage>
             unselectedLabelColor: Colors.grey.shade600,
             labelStyle: const TextStyle(
               fontSize: 16,
-              fontWeight: FontWeight.w600,
+              fontWeight: FontWeight.w500,
             ),
             unselectedLabelStyle: const TextStyle(
               fontSize: 16,
@@ -544,13 +544,15 @@ class _AlbumLibraryPageState extends State<AlbumLibraryPage>
             ),
             indicator: const UnderlineTabIndicator(
               borderSide: BorderSide(width: 3, color: Colors.black87),
-              insets: EdgeInsets.symmetric(horizontal: 16),
+              insets: EdgeInsets.symmetric(horizontal: 25),
             ),
             tabs: const [
               Tab(text: '个人'),
               Tab(text: '家庭'),
             ],
           ),
+          const Spacer(),
+          _buildToolbar()
         ],
       ),
     );

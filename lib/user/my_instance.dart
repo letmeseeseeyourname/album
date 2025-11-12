@@ -20,24 +20,28 @@ class MyInstance {
   Group? group;
   List<Group>? groups;
 
+  // 设置相关的键
+  static const String _downloadPathKey = 'download_path';
+  static const String _minimizeOnCloseKey = 'minimize_on_close';
+
   factory MyInstance() {
     return _singleton;
   }
 
   MyInstance._internal();
 
-   bool  isDeviceAdmin()   {
+  bool isDeviceAdmin() {
     //1、管理员；2、成员；3、虚拟用户
-    var groupCount =   groups?.length ?? 0;
+    var groupCount = groups?.length ?? 0;
     if (groupCount == 0) {
       return false;
     }
     int? groupId = this.group?.groupId;
-    if(groupId == null || groupId == -1) {
+    if (groupId == null || groupId == -1) {
       return false;
     }
-    var group =   groups?.where((g) => g.groupId == groupId).toList().firstOrNull;
-    if(group == null) {
+    var group = groups?.where((g) => g.groupId == groupId).toList().firstOrNull;
+    if (group == null) {
       return false;
     }
     var allMembers = group.users ?? [];
@@ -64,17 +68,17 @@ class MyInstance {
   Future<Group?> getGroup() async {
     SharedPreferences prefs = await SharedPreferences.getInstance();
     String? groupStr = prefs.getString('group');
-    if(groupStr == null || groupStr.isEmpty) {
+    if (groupStr == null || groupStr.isEmpty) {
       return null;
     }
-    Group? group  = Group.fromJson(convert.jsonDecode(groupStr));
-     this.group = group;
+    Group? group = Group.fromJson(convert.jsonDecode(groupStr));
+    this.group = group;
     return group;
   }
 
   setGroup(Group? group) async {
     SharedPreferences prefs = await SharedPreferences.getInstance();
-     if (group == null) {
+    if (group == null) {
       prefs.remove('group');
       return;
     }
@@ -112,5 +116,32 @@ class MyInstance {
       return true;
     }
     return false;
+  }
+
+  // ========== 设置相关方法 ==========
+
+  /// 获取下载路径
+  Future<String?> getDownloadPath() async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    return prefs.getString(_downloadPathKey);
+  }
+
+  /// 设置下载路径
+  Future<void> setDownloadPath(String path) async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_downloadPathKey, path);
+  }
+
+  /// 获取关闭时是否最小化（true=最小化到托盘，false=退出程序）
+  Future<bool> getMinimizeOnClose() async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    // 默认值为 true（最小化到托盘）
+    return prefs.getBool(_minimizeOnCloseKey) ?? true;
+  }
+
+  /// 设置关闭时是否最小化
+  Future<void> setMinimizeOnClose(bool minimize) async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_minimizeOnCloseKey, minimize);
   }
 }

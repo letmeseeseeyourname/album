@@ -1,4 +1,4 @@
-// pages/folder_detail_page_backup.dart
+// pages/folder_detail_page.dart
 import 'dart:io';
 import 'package:ablumwin/user/my_instance.dart';
 import 'package:flutter/foundation.dart';
