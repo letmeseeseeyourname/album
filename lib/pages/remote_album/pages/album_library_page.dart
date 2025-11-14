@@ -208,6 +208,8 @@ class _AlbumLibraryPageState extends State<AlbumLibraryPage>
 
                   // 底部栏
                   AlbumBottomBar(
+                    userId: widget.currentUserId,
+                    groupId: widget.selectedGroup?.groupId,
                     selectionManager: _selectionManager,
                     dataManager: _dataManager,
                   ),

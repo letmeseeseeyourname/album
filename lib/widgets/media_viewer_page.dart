@@ -272,9 +272,9 @@ class _MediaViewerPageState extends State<MediaViewerPage> {
       },
       transitionBuilder: (context, animation, secondaryAnimation, child) {
         final slideAnimation =
-            Tween<Offset>(begin: const Offset(0, -1), end: Offset.zero).animate(
-              CurvedAnimation(parent: animation, curve: Curves.easeOutCubic),
-            );
+        Tween<Offset>(begin: const Offset(0, -1), end: Offset.zero).animate(
+          CurvedAnimation(parent: animation, curve: Curves.easeOutCubic),
+        );
 
         final fadeAnimation = Tween<double>(
           begin: 0.0,
@@ -404,8 +404,19 @@ class _MediaViewerPageState extends State<MediaViewerPage> {
       onScaleUpdate: (details) {
         setState(() {
           _scale = (_baseScale * details.scale).clamp(0.5, 4.0);
-          _imagePosition += details.focalPointDelta;
+          // 只有在缩放时才允许移动位置
+          if (details.scale != 1.0) {
+            _imagePosition += details.focalPointDelta;
+          }
         });
+      },
+      onScaleEnd: (details) {
+        // 如果缩放比例是1.0（即没有缩放），重置位置
+        if (_scale == 1.0) {
+          setState(() {
+            _imagePosition = Offset.zero;
+          });
+        }
       },
       child: Transform.translate(
         offset: _imagePosition,
@@ -413,35 +424,35 @@ class _MediaViewerPageState extends State<MediaViewerPage> {
           scale: _scale,
           child: currentItem.sourceType == MediaSourceType.local
               ? Image.file(
-                  File(currentItem.localPath!),
-                  fit: BoxFit.contain,
-                  errorBuilder: (context, error, stackTrace) {
-                    return const Center(
-                      child: Icon(Icons.error, color: Colors.white, size: 64),
-                    );
-                  },
-                )
+            File(currentItem.localPath!),
+            fit: BoxFit.contain,
+            errorBuilder: (context, error, stackTrace) {
+              return const Center(
+                child: Icon(Icons.error, color: Colors.white, size: 64),
+              );
+            },
+          )
               : Image.network(
-                  "${AppConfig.minio()}/${currentItem.networkUrl!}",
-                  fit: BoxFit.contain,
-                  loadingBuilder: (context, child, loadingProgress) {
-                    if (loadingProgress == null) return child;
-                    return Center(
-                      child: CircularProgressIndicator(
-                        value: loadingProgress.expectedTotalBytes != null
-                            ? loadingProgress.cumulativeBytesLoaded /
-                                  loadingProgress.expectedTotalBytes!
-                            : null,
-                        color: Colors.white,
-                      ),
-                    );
-                  },
-                  errorBuilder: (context, error, stackTrace) {
-                    return const Center(
-                      child: Icon(Icons.error, color: Colors.white, size: 64),
-                    );
-                  },
+            "${AppConfig.minio()}/${currentItem.networkUrl!}",
+            fit: BoxFit.contain,
+            loadingBuilder: (context, child, loadingProgress) {
+              if (loadingProgress == null) return child;
+              return Center(
+                child: CircularProgressIndicator(
+                  value: loadingProgress.expectedTotalBytes != null
+                      ? loadingProgress.cumulativeBytesLoaded /
+                      loadingProgress.expectedTotalBytes!
+                      : null,
+                  color: Colors.white,
                 ),
+              );
+            },
+            errorBuilder: (context, error, stackTrace) {
+              return const Center(
+                child: Icon(Icons.error, color: Colors.white, size: 64),
+              );
+            },
+          ),
         ),
       ),
     );
@@ -460,38 +471,47 @@ class _MediaViewerPageState extends State<MediaViewerPage> {
   Widget _buildTopBar() {
     final currentItem = widget.mediaItems[currentIndex];
 
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [Colors.black.withOpacity(0.7), Colors.transparent],
+    return GestureDetector(
+      // 添加拖拽功能
+      onPanStart: (details) {
+        windowManager.startDragging();
+      },
+      child: Container(
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [Colors.black.withOpacity(0.7), Colors.transparent],
+          ),
         ),
-      ),
-      child: Row(
-        children: [
-          IconButton(
-            icon: const Icon(Icons.close, color: Colors.white, size: 28),
-            onPressed: () => Navigator.pop(context),
-          ),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Text(
-              currentItem.name,
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 16,
-                fontWeight: FontWeight.w500,
-              ),
-              overflow: TextOverflow.ellipsis,
+        child: Row(
+          children: [
+            IconButton(
+              icon: const Icon(Icons.close, color: Colors.white, size: 28),
+              onPressed: () => Navigator.pop(context),
             ),
-          ),
-          IconButton(
-            icon: const Icon(Icons.info_outline, color: Colors.white, size: 24),
-            onPressed: _showMediaInfo,
-          ),
-        ],
+            const SizedBox(width: 16),
+            Expanded(
+              child: MouseRegion(
+                cursor: SystemMouseCursors.move, // 鼠标悬停时显示移动光标
+                child: Text(
+                  currentItem.name,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w500,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ),
+            IconButton(
+              icon: const Icon(Icons.info_outline, color: Colors.white, size: 24),
+              onPressed: _showMediaInfo,
+            ),
+          ],
+        ),
       ),
     );
   }

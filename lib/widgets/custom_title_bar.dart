@@ -5,6 +5,7 @@ import 'package:window_manager/window_manager.dart';
 import 'package:ablumwin/user/my_instance.dart';
 import '../network/constant_sign.dart';
 import '../pages/settings_page.dart';  // 新增导入
+import '../pages/transfer_record_page.dart';  // 新增导入 - 传输记录页面
 
 class CustomTitleBar extends StatefulWidget {
   final Widget? child;
@@ -101,6 +102,16 @@ class _CustomTitleBarState extends State<CustomTitleBar> {
       barrierDismissible: true,
       barrierColor: Colors.black54,
       builder: (context) => const SettingsPage(),
+    );
+  }
+
+  // 🆕 打开传输记录页面
+  void _openTransferRecord() {
+    showDialog(
+      context: context,
+      barrierDismissible: true,
+      barrierColor: Colors.black54,
+      builder: (context) => const TransferRecordPage(),
     );
   }
 
@@ -258,7 +269,7 @@ class _CustomTitleBarState extends State<CustomTitleBar> {
                                     width: 20,
                                     height: 20,
                                   ),
-                                  onPressed: () {},
+                                  onPressed: _openTransferRecord,  // 🆕 打开传输记录
                                   iconSize: 24,
                                   tooltip: '传输',
                                 ),

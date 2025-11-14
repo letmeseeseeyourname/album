@@ -12,6 +12,7 @@ import '../services/folder_manager.dart';
 import '../album/manager/local_folder_upload_manager.dart';
 import '../user/my_instance.dart';
 import 'folder_detail_page.dart';
+import 'local_album/pages/folder_detail_page.dart';
 
 class MainFolderPage extends StatefulWidget {
   final int selectedNavIndex;
@@ -488,7 +489,7 @@ class _MainFolderPageState extends State<MainFolderPage> {
                 Navigator.push(
                   context,
                   PageRouteBuilder(
-                    pageBuilder: (context, animation, secondaryAnimation) => FolderDetailPage(
+                    pageBuilder: (context, animation, secondaryAnimation) => FolderDetailPageRefactored(
                       folder: folders[index],
                       selectedNavIndex: widget.selectedNavIndex,
                       onNavigationChanged: widget.onNavigationChanged,

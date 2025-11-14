@@ -102,8 +102,8 @@ class LocalUploadConfig {
 /// 专门处理从本地文件夹选择的文件上传，与移动设备相册上传分离
 /// 但复用相同的底层服务：数据库、任务管理、文件上传等
 class LocalFolderUploadManager extends ChangeNotifier {
-  static final LocalFolderUploadManager _singleton =
-  LocalFolderUploadManager._internal();
+  // static final LocalFolderUploadManager _singleton =
+  // LocalFolderUploadManager._internal();
 
   // 复用原有的底层服务
   DatabaseHelper dbHelper = DatabaseHelper.instance;
@@ -113,11 +113,13 @@ class LocalFolderUploadManager extends ChangeNotifier {
   LocalUploadProgress? _currentProgress;
   bool _isUploading = false;
 
-  LocalFolderUploadManager._internal();
+  // LocalFolderUploadManager._internal();
+  //
+  // factory LocalFolderUploadManager() {
+  //   return _singleton;
+  // }
 
-  factory LocalFolderUploadManager() {
-    return _singleton;
-  }
+  LocalFolderUploadManager();
 
   /// 获取当前上传进度
   LocalUploadProgress? get currentProgress => _currentProgress;
