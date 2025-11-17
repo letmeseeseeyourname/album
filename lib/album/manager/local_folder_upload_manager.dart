@@ -487,12 +487,18 @@ class LocalFolderUploadManager extends ChangeNotifier {
       final uploadPath = _removeFirstAndLastSlash(response.model?.uploadPath ?? "");
       final taskId = response.model?.taskId ?? 0;
 
-      // 使用原有的任务管理器
+      // ✅ 计算任务的文件统计信息
+      final chunkFileCount = chunk.length;
+      final chunkTotalSize = chunk.fold<int>(0, (sum, entry) => sum + entry.key.fileSize);
+
+      // 使用原有的任务管理器（包含文件统计）
       await taskManager.insertTask(
         taskId: taskId,
         userId: userId,
         groupId: groupId,
         status: UploadTaskStatus.uploading,
+        fileCount: chunkFileCount,
+        totalSize: chunkTotalSize,
       );
 
       // 处理已存在的文件（服务器端去重）

@@ -18,7 +18,7 @@ extension UploadTaskStatusX on UploadTaskStatus {
   static UploadTaskStatus fromCode(int code) => UploadTaskStatus.values[code];
 }
 
-/// 上传任务记录模型
+/// 上传任务记录模型（增强版：包含文件统计）
 class UploadTaskRecord {
   final int taskId; // unique id for this upload task
   final int userId;
@@ -26,6 +26,8 @@ class UploadTaskRecord {
   final UploadTaskStatus status;
   final int createdAt; // epoch millis
   final int updatedAt; // epoch millis
+  final int fileCount; // ✅ 新增：文件数量
+  final int totalSize; // ✅ 新增：总大小（字节）
 
   UploadTaskRecord({
     required this.taskId,
@@ -34,11 +36,15 @@ class UploadTaskRecord {
     required this.status,
     required this.createdAt,
     required this.updatedAt,
+    this.fileCount = 0, // ✅ 默认值
+    this.totalSize = 0, // ✅ 默认值
   });
 
   UploadTaskRecord copyWith({
     UploadTaskStatus? status,
     int? updatedAt,
+    int? fileCount,
+    int? totalSize,
   }) =>
       UploadTaskRecord(
         taskId: taskId,
@@ -47,6 +53,8 @@ class UploadTaskRecord {
         status: status ?? this.status,
         createdAt: createdAt,
         updatedAt: updatedAt ?? this.updatedAt,
+        fileCount: fileCount ?? this.fileCount,
+        totalSize: totalSize ?? this.totalSize,
       );
 
   Map<String, Object?> toMap() => {
@@ -56,6 +64,8 @@ class UploadTaskRecord {
     'status': status.code,
     'created_at': createdAt,
     'updated_at': updatedAt,
+    'file_count': fileCount, // ✅ 新增
+    'total_size': totalSize, // ✅ 新增
   };
 
   static UploadTaskRecord fromMap(Map<String, Object?> map) => UploadTaskRecord(
@@ -65,16 +75,31 @@ class UploadTaskRecord {
     status: UploadTaskStatusX.fromCode(map['status'] as int),
     createdAt: map['created_at'] as int,
     updatedAt: map['updated_at'] as int,
+    fileCount: (map['file_count'] as int?) ?? 0, // ✅ 新增（兼容旧数据）
+    totalSize: (map['total_size'] as int?) ?? 0, // ✅ 新增（兼容旧数据）
   );
+
+  /// ✅ 格式化文件大小显示
+  String get formattedSize {
+    if (totalSize < 1024) {
+      return '${totalSize}B';
+    } else if (totalSize < 1024 * 1024) {
+      return '${(totalSize / 1024).toStringAsFixed(1)}KB';
+    } else if (totalSize < 1024 * 1024 * 1024) {
+      return '${(totalSize / (1024 * 1024)).toStringAsFixed(1)}MB';
+    } else {
+      return '${(totalSize / (1024 * 1024 * 1024)).toStringAsFixed(2)}GB';
+    }
+  }
 }
 
-/// 上传任务数据库管理器（Windows/Linux/macOS/移动端通用）
+/// 上传任务数据库管理器（增强版）
 class UploadFileTaskManager {
   static final UploadFileTaskManager instance = UploadFileTaskManager._init();
   UploadFileTaskManager._init();
 
   static const _dbName = 'upload_tasks.db';
-  static const _dbVersion = 3;
+  static const _dbVersion = 5; // ✅ 版本升级到4
   static const _table = 'upload_tasks';
 
   Database? _db;
@@ -111,6 +136,8 @@ class UploadFileTaskManager {
               status INTEGER NOT NULL,
               created_at INTEGER NOT NULL,
               updated_at INTEGER NOT NULL,
+              file_count INTEGER NOT NULL DEFAULT 0,
+              total_size INTEGER NOT NULL DEFAULT 0,
               PRIMARY KEY (task_id, user_id, group_id)
             );
           ''');
@@ -119,6 +146,23 @@ class UploadFileTaskManager {
           await db.execute('CREATE INDEX IF NOT EXISTS idx_${_table}_status ON $_table(status);');
         },
         onUpgrade: (db, oldVersion, newVersion) async {
+          // ✅ 从版本3升级到版本4：添加 file_count 和 total_size 字段
+          if (oldVersion < 4) {
+            try {
+              // 尝试添加新字段（如果已存在会报错，忽略即可）
+              await db.execute('ALTER TABLE $_table ADD COLUMN file_count INTEGER NOT NULL DEFAULT 0;');
+            } catch (e) {
+              debugPrint('file_count column may already exist: $e');
+            }
+
+            try {
+              await db.execute('ALTER TABLE $_table ADD COLUMN total_size INTEGER NOT NULL DEFAULT 0;');
+            } catch (e) {
+              debugPrint('total_size column may already exist: $e');
+            }
+          }
+
+          // 向下兼容：处理版本2升级
           if (oldVersion < 2) {
             await db.execute('''
               CREATE TABLE IF NOT EXISTS ${_table}_new (
@@ -128,12 +172,14 @@ class UploadFileTaskManager {
                 status INTEGER NOT NULL,
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL,
+                file_count INTEGER NOT NULL DEFAULT 0,
+                total_size INTEGER NOT NULL DEFAULT 0,
                 PRIMARY KEY (task_id, user_id, group_id)
               );
             ''');
             await db.execute('''
-              INSERT OR REPLACE INTO ${_table}_new(task_id,user_id,group_id,status,created_at,updated_at)
-              SELECT CAST(task_id AS INTEGER), user_id, group_id, status, created_at, updated_at FROM $_table;
+              INSERT OR REPLACE INTO ${_table}_new(task_id,user_id,group_id,status,created_at,updated_at,file_count,total_size)
+              SELECT CAST(task_id AS INTEGER), user_id, group_id, status, created_at, updated_at, 0, 0 FROM $_table;
             ''');
             await db.execute('DROP TABLE IF EXISTS $_table;');
             await db.execute('ALTER TABLE ${_table}_new RENAME TO $_table;');
@@ -142,6 +188,7 @@ class UploadFileTaskManager {
             await db.execute('CREATE INDEX IF NOT EXISTS idx_${_table}_status ON $_table(status);');
           }
 
+          // 向下兼容：处理版本3升级
           if (oldVersion < 3) {
             await db.execute('''
               CREATE TABLE IF NOT EXISTS ${_table}_v3 (
@@ -151,12 +198,14 @@ class UploadFileTaskManager {
                 status INTEGER NOT NULL,
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL,
+                file_count INTEGER NOT NULL DEFAULT 0,
+                total_size INTEGER NOT NULL DEFAULT 0,
                 PRIMARY KEY (task_id, user_id, group_id)
               );
             ''');
             await db.execute('''
-              INSERT OR REPLACE INTO ${_table}_v3(task_id,user_id,group_id,status,created_at,updated_at)
-              SELECT task_id, user_id, group_id, status, created_at, updated_at FROM $_table;
+              INSERT OR REPLACE INTO ${_table}_v3(task_id,user_id,group_id,status,created_at,updated_at,file_count,total_size)
+              SELECT task_id, user_id, group_id, status, created_at, updated_at, 0, 0 FROM $_table;
             ''');
             await db.execute('DROP TABLE IF EXISTS $_table;');
             await db.execute('ALTER TABLE ${_table}_v3 RENAME TO $_table;');
@@ -169,12 +218,14 @@ class UploadFileTaskManager {
     );
   }
 
-  /// 插入新任务（存在相同主键会替换）
+  /// 插入新任务（支持文件统计）
   Future<void> insertTask({
     required int taskId,
     required int userId,
     required int groupId,
     UploadTaskStatus status = UploadTaskStatus.pending,
+    int fileCount = 0,
+    int totalSize = 0,
   }) async {
     final db = await _database();
     final now = DateTime.now().millisecondsSinceEpoch;
@@ -187,6 +238,8 @@ class UploadFileTaskManager {
         status: status,
         createdAt: now,
         updatedAt: now,
+        fileCount: fileCount,
+        totalSize: totalSize,
       ).toMap(),
       conflictAlgorithm: ConflictAlgorithm.replace,
     );
@@ -198,8 +251,17 @@ class UploadFileTaskManager {
     required int userId,
     required int groupId,
     UploadTaskStatus status = UploadTaskStatus.pending,
+    int? fileCount,
+    int? totalSize,
   }) async {
-    await insertTask(taskId: taskId, userId: userId, groupId: groupId, status: status);
+    await insertTask(
+      taskId: taskId,
+      userId: userId,
+      groupId: groupId,
+      status: status,
+      fileCount: fileCount ?? 0,
+      totalSize: totalSize ?? 0,
+    );
   }
 
   /// 根据 taskId 更新状态（可能匹配多个用户）
@@ -226,6 +288,28 @@ class UploadFileTaskManager {
     return db.update(
       _table,
       {'status': status.code, 'updated_at': now},
+      where: 'task_id = ? AND user_id = ? AND group_id = ?',
+      whereArgs: [taskId, userId, groupId],
+    );
+  }
+
+  /// ✅ 更新任务的文件统计信息
+  Future<int> updateTaskStats({
+    required int taskId,
+    required int userId,
+    required int groupId,
+    required int fileCount,
+    required int totalSize,
+  }) async {
+    final db = await _database();
+    final now = DateTime.now().millisecondsSinceEpoch;
+    return db.update(
+      _table,
+      {
+        'file_count': fileCount,
+        'total_size': totalSize,
+        'updated_at': now,
+      },
       where: 'task_id = ? AND user_id = ? AND group_id = ?',
       whereArgs: [taskId, userId, groupId],
     );
