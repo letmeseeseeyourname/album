@@ -77,7 +77,7 @@ class _SideNavigationState extends State<SideNavigation> {
           // 导航按钮
           NavButton(
             svgPath: 'assets/icons/local_icon.svg',
-            label: '本地图库',
+            label: '此电脑',
             isSelected: widget.selectedIndex == 0,
             onTap: () => widget.onNavigationChanged(0),
           ),

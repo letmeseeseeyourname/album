@@ -2,6 +2,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'dart:async';
+import 'dart:io';  // 🆕 导入dart:io用于Process
+import '../network/constant_sign.dart';
 import '../widgets/qr_code_login.dart';
 import '../widgets/password_login.dart';
 import '../widgets/verify_code_login.dart';
@@ -150,7 +152,7 @@ class _LoginPageState extends State<LoginPage> {
         showErrorDialog(result.message);
       }
     } catch (e) {
-      showErrorDialog('验证码发送失败，请稍后重试');
+      showErrorDialog('验证码发送失败,请稍后重试');
     }
   }
 
@@ -217,11 +219,11 @@ class _LoginPageState extends State<LoginPage> {
       });
 
       if (result.success) {
-        // 登录成功，跳转到主页面
+        // 登录成功,跳转到主页面
         if (mounted) {
           showSuccessDialog('登录成功');
 
-          // 延迟一下再跳转，让用户看到成功提示
+          // 延迟一下再跳转,让用户看到成功提示
           await Future.delayed(const Duration(milliseconds: 500));
 
           if (mounted) {
@@ -232,14 +234,14 @@ class _LoginPageState extends State<LoginPage> {
           }
         }
       } else {
-        // 登录失败，显示错误信息
+        // 登录失败,显示错误信息
         showErrorDialog(result.message);
       }
     } catch (e) {
       setState(() {
         isLoading = false;
       });
-      showErrorDialog('登录失败，请稍后重试');
+      showErrorDialog('登录失败,请稍后重试');
     }
   }
 
@@ -263,9 +265,84 @@ class _LoginPageState extends State<LoginPage> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(message),
+        backgroundColor: Colors.green,
         duration: const Duration(seconds: 2),
       ),
     );
+  }
+
+  // 🆕 使用系统命令打开浏览器 - 最简单可靠的方法
+  Future<void> _openUrlInBrowser(String url) async {
+    print('准备打开URL: $url');
+
+    try {
+      if (Platform.isWindows) {
+        // Windows: 使用 start 命令
+        await Process.run('cmd', ['/c', 'start', '', url]);
+        print('✅ 已在浏览器中打开');
+      } else if (Platform.isMacOS) {
+        // macOS: 使用 open 命令
+        await Process.run('open', [url]);
+        print('✅ 已在浏览器中打开');
+      } else if (Platform.isLinux) {
+        // Linux: 使用 xdg-open 命令
+        await Process.run('xdg-open', [url]);
+        print('✅ 已在浏览器中打开');
+      } else {
+        print('❌ 不支持的平台');
+        if (mounted) {
+          showErrorDialog('当前平台不支持打开浏览器');
+        }
+      }
+    } catch (e, stackTrace) {
+      print('❌ 打开浏览器失败: $e');
+      print('堆栈: $stackTrace');
+      if (mounted) {
+        showErrorDialog('打开链接失败：$e');
+      }
+    }
+  }
+
+  // 🆕 显示用户协议
+  void showProtocolDialog() async {
+    print('=== showProtocolDialog 开始 ===');
+
+    try {
+      final url = AppConfig.protocolUrl();
+      print('协议URL: $url');
+
+      await _openUrlInBrowser(url);
+
+    } catch (e, stackTrace) {
+      print('错误: $e');
+      print('堆栈: $stackTrace');
+      if (mounted) {
+        showErrorDialog('打开用户协议失败：$e');
+      }
+    }
+
+    print('=== showProtocolDialog 结束 ===');
+  }
+
+  // 🆕 显示隐私政策
+  void showPrivacyDialog() async {
+    print('=== showPrivacyDialog 开始 ===');
+
+    try {
+      final url = AppConfig.privacyUrl();
+      print('隐私政策URL: $url');
+
+      await _openUrlInBrowser(url);
+
+    } catch (e, stackTrace) {
+      print('错误: $e');
+      print('堆栈: $stackTrace');
+      if (mounted) {
+        showErrorDialog('打开隐私政策失败：$e');
+      }
+    }
+
+    print('=== showPrivacyDialog 结束 ===');
   }
 
   @override
@@ -393,14 +470,40 @@ class _LoginPageState extends State<LoginPage> {
                             crossAxisAlignment: WrapCrossAlignment.center,
                             children: [
                               const Text('我已阅读并同意 '),
-                              const Text(
-                                '用户协议',
-                                style: TextStyle(color: Colors.orange),
+                              // 🆕 用户协议可点击 - 使用InkWell增加点击反馈
+                              InkWell(
+                                onTap: () {
+                                  print('点击了用户协议');
+                                  showProtocolDialog();
+                                },
+                                child: const Padding(
+                                  padding: EdgeInsets.symmetric(horizontal: 2, vertical: 2),
+                                  child: Text(
+                                    '用户协议',
+                                    style: TextStyle(
+                                      color: Colors.orange,
+                                      decoration: TextDecoration.underline,
+                                    ),
+                                  ),
+                                ),
                               ),
                               const Text(' 和 '),
-                              const Text(
-                                '隐私政策',
-                                style: TextStyle(color: Colors.orange),
+                              // 🆕 隐私政策可点击 - 使用InkWell增加点击反馈
+                              InkWell(
+                                onTap: () {
+                                  print('点击了隐私政策');
+                                  showPrivacyDialog();
+                                },
+                                child: const Padding(
+                                  padding: EdgeInsets.symmetric(horizontal: 2, vertical: 2),
+                                  child: Text(
+                                    '隐私政策',
+                                    style: TextStyle(
+                                      color: Colors.orange,
+                                      decoration: TextDecoration.underline,
+                                    ),
+                                  ),
+                                ),
                               ),
                             ],
                           ),
