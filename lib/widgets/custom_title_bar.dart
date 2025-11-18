@@ -250,14 +250,18 @@ class _CustomTitleBarState extends State<CustomTitleBar> {
                                 // 添加文件夹按钮
                                 ElevatedButton.icon(
                                   onPressed: widget.onAddFolder,
-                                  icon: const Icon(Icons.add, size: 18),
+                                  icon: SvgPicture.asset(
+                                    'assets/icons/add_folder.svg',
+                                    width: 20,
+                                    height: 20,
+                                  ),
                                   label: const Text('添加文件夹'),
                                   style: ElevatedButton.styleFrom(
-                                    backgroundColor: Colors.white,
+                                    backgroundColor: const Color(0xFFF5F5F5),
                                     foregroundColor: Colors.black,
                                     elevation: 0,
-                                    side: BorderSide(
-                                      color: Colors.grey.shade300,
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(8),
                                     ),
                                     padding: const EdgeInsets.symmetric(
                                       horizontal: 16,
@@ -389,12 +393,13 @@ class _WindowControlButtonState extends State<WindowControlButton> {
         child: Container(
           width: 46,
           height: 80,
+          alignment: Alignment.center,
           color: isHovered
               ? (widget.isClose ? Colors.red : Colors.grey.shade200)
               : Colors.transparent,
           child: Icon(
             widget.icon,
-            size: 16,
+            size: 20,
             color: isHovered && widget.isClose ? Colors.white : Colors.black,
           ),
         ),
