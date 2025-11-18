@@ -1,5 +1,6 @@
 // pages/login_page.dart
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'dart:async';
 import '../widgets/qr_code_login.dart';
 import '../widgets/password_login.dart';
@@ -27,9 +28,22 @@ class _LoginPageState extends State<LoginPage> {
   int countdown = 0;
   Timer? countdownTimer;
 
+  // 🆕 手机号错误提示
+  String? phoneErrorText;
+  // 🆕 密码错误提示
+  String? passwordErrorText;
+  // 🆕 验证码错误提示
+  String? verifyCodeErrorText;
+
   @override
   void initState() {
     super.initState();
+
+    // 🆕 添加输入监听器
+    phoneController.addListener(_validatePhone);
+    passwordController.addListener(_validatePassword);
+    verifyCodeController.addListener(_validateVerifyCode);
+
     Future.delayed(Duration(seconds: 1), () {
       phoneController.text = "15323783167";
       passwordController.text = "123456";
@@ -44,6 +58,54 @@ class _LoginPageState extends State<LoginPage> {
     verifyCodeController.dispose();
     countdownTimer?.cancel();
     super.dispose();
+  }
+
+  // 🆕 实时验证手机号
+  void _validatePhone() {
+    final phone = phoneController.text;
+    setState(() {
+      if (phone.isEmpty) {
+        phoneErrorText = null;
+      } else if (phone.length < 11) {
+        phoneErrorText = '手机号应为11位';
+      } else if (!isValidPhone(phone)) {
+        phoneErrorText = '手机号格式不正确';
+      } else {
+        phoneErrorText = null;
+      }
+    });
+  }
+
+  // 🆕 实时验证密码
+  void _validatePassword() {
+    final password = passwordController.text;
+    setState(() {
+      if (password.isEmpty) {
+        passwordErrorText = null;
+      } else if (password.length < 6) {
+        passwordErrorText = '密码至少6位';
+      } else if (!RegExp(r'^[a-zA-Z0-9]+$').hasMatch(password)) {
+        passwordErrorText = '密码只能包含字母和数字';
+      } else {
+        passwordErrorText = null;
+      }
+    });
+  }
+
+  // 🆕 实时验证验证码
+  void _validateVerifyCode() {
+    final code = verifyCodeController.text;
+    setState(() {
+      if (code.isEmpty) {
+        verifyCodeErrorText = null;
+      } else if (code.length < 4) {
+        verifyCodeErrorText = '验证码应为4-6位';
+      } else if (!RegExp(r'^[0-9]+$').hasMatch(code)) {
+        verifyCodeErrorText = '验证码只能包含数字';
+      } else {
+        verifyCodeErrorText = null;
+      }
+    });
   }
 
   bool isValidPhone(String phone) {
@@ -107,14 +169,22 @@ class _LoginPageState extends State<LoginPage> {
         showErrorDialog('请输入密码');
         return;
       }
+      if (passwordController.text.length < 6) {
+        showErrorDialog('密码至少6位');
+        return;
+      }
     } else if (selectedTab == 2) {
       if (verifyCodeController.text.isEmpty) {
         showErrorDialog('请输入验证码');
         return;
       }
+      if (verifyCodeController.text.length < 4) {
+        showErrorDialog('验证码长度不正确');
+        return;
+      }
     }
 
-    // 检查隐私条例
+    // 检查隐私条款
     if (!agreeToTerms) {
       showErrorDialog('请阅读并同意用户协议和隐私政策');
       return;
@@ -251,6 +321,8 @@ class _LoginPageState extends State<LoginPage> {
                         phoneController: phoneController,
                         passwordController: passwordController,
                         obscurePassword: obscurePassword,
+                        phoneErrorText: phoneErrorText,  // 🆕 传递错误提示
+                        passwordErrorText: passwordErrorText,  // 🆕 传递错误提示
                         onTogglePasswordVisibility: () {
                           setState(() {
                             obscurePassword = !obscurePassword;
@@ -262,6 +334,8 @@ class _LoginPageState extends State<LoginPage> {
                         phoneController: phoneController,
                         verifyCodeController: verifyCodeController,
                         countdown: countdown,
+                        phoneErrorText: phoneErrorText,  // 🆕 传递错误提示
+                        verifyCodeErrorText: verifyCodeErrorText,  // 🆕 传递错误提示
                         onGetVerifyCode: handleGetVerifyCode,
                       ),
 

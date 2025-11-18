@@ -234,7 +234,7 @@ class MyNetworkProvider extends ChangeNotifier {
     ResponseModel<UserModel> responseModel =
         await requestAndConvertResponseModel(
       url,
-      formData: {"type": "主动", "clientType": "iOS", "deviceCode": uuid},
+      formData: {"type": "主动", "clientType": "Windows", "deviceCode": uuid},
       netMethod: NetMethod.post,
     );
     return responseModel;

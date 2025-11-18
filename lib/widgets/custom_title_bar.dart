@@ -6,6 +6,7 @@ import 'package:ablumwin/user/my_instance.dart';
 import '../network/constant_sign.dart';
 import '../pages/settings_page.dart';  // 新增导入
 import '../pages/upload_records_page.dart';  // 新增导入传输记录页面
+import '../pages/user_info_page.dart';  // 导入用户信息页面
 
 class CustomTitleBar extends StatefulWidget {
   final Widget? child;
@@ -115,6 +116,16 @@ class _CustomTitleBarState extends State<CustomTitleBar> {
     );
   }
 
+  // 🆕 打开用户信息页面
+  void _openUserInfo() {
+    showDialog(
+      context: context,
+      barrierDismissible: true,
+      barrierColor: Colors.black54,
+      builder: (context) => const UserInfoPage(),
+    );
+  }
+
 
 
   @override
@@ -155,11 +166,15 @@ class _CustomTitleBarState extends State<CustomTitleBar> {
                           ),
                         ),
                         const SizedBox(width: 10),
-                        // Logo/用户头像
-                        SizedBox(
-                          width: 40,
-                          height: 40,
-                          child: _buildAvatar(),
+                        // Logo/用户头像 - 🆕 添加点击事件
+                        InkWell(
+                          onTap: _openUserInfo,
+                          borderRadius: BorderRadius.circular(20),
+                          child: SizedBox(
+                            width: 40,
+                            height: 40,
+                            child: _buildAvatar(),
+                          ),
                         ),
                       ],
                     ),
