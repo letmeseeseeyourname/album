@@ -4,10 +4,10 @@ class AppConfig {
   static String hostUrl() {
     if (environment == 0) {
       // return 'http://127.0.0.1:8080';
-      return 'http://192.168.3.236:8080';
+      return 'http://192.168.3.184:8080';
     }
     // return 'http://127.0.0.1:8080';
-    return 'http://192.168.3.236:8080';
+    return 'http://192.168.3.184:8080';
   }
 
   static String userUrl() {
@@ -20,10 +20,10 @@ class AppConfig {
   static String minio() {
     if (environment == 0) {
       // return 'http://127.0.0.1:9000';
-      return 'http://192.168.3.236:9000';
+      return 'http://192.168.3.184:9000';
     }
     // return 'http:/127.0.0.1:9000';
-    return 'http://192.168.3.236:9000';
+    return 'http://192.168.3.184:9000';
   }
 
   static String avatarURL() {
