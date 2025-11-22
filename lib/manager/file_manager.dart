@@ -192,7 +192,7 @@ class FileManager extends ChangeNotifier {
   double getSelectedTotalSize() {
     double totalSize = 0;
     for (int index in _selectedIndices) {
-      totalSize += (_fileItems[index].size ?? 0) / (1024 * 1024);
+      totalSize += (_fileItems[index].size) / (1024 * 1024);
     }
     return totalSize;
   }

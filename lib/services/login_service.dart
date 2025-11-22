@@ -134,7 +134,7 @@ class LoginService {
       } else {
         return LogoutResult(
           success: false,
-          message: response.message ?? '登出失败',
+          message: response.message,
         );
       }
     } catch (e) {

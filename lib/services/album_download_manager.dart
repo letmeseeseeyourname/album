@@ -60,7 +60,7 @@ class AlbumDownloadManager {
           // final downloadUrl = resource.originPath ?? resource.mediumPath;
           final downloadUrl = "${AppConfig.minio()}/${resource.originPath ?? resource.mediumPath}";
 
-          if (downloadUrl == null || downloadUrl.isEmpty) {
+          if (downloadUrl.isEmpty) {
             debugPrint('资源 $fileName 没有有效的下载路径');
             failCount++;
             continue;

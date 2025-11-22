@@ -18,7 +18,7 @@ class DeviceModel {
     final String? lisenceKey;
     final int? menufacturerId;
     final String? p2pAddress;
-    final dynamic? p2pName;
+    final dynamic p2pName;
     final int? status;
     final String? ram;
     final String? rom;
@@ -26,7 +26,7 @@ class DeviceModel {
     final String? cpu;
     final String? screenResolution;
     final String? screenSize;
-    final dynamic? dateProduction;
+    final dynamic dateProduction;
     final String? address;
 
     const DeviceModel({
@@ -75,7 +75,7 @@ class DeviceModel {
         String? lisenceKey,
         int? menufacturerId,
         String? p2pAddress,
-        dynamic? p2pName,
+        dynamic p2pName,
         int? status,
         String? ram,
         String? rom,
@@ -83,7 +83,7 @@ class DeviceModel {
         String? cpu,
         String? screenResolution,
         String? screenSize,
-        dynamic? dateProduction,
+        dynamic dateProduction,
         String? address,
     }) {
         return DeviceModel(

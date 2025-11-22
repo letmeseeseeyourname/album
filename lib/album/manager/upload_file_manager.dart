@@ -1,12 +1,10 @@
 import 'dart:developer' as LogUtil;
 import 'dart:io';
-import 'dart:typed_data';
 import 'package:ablumwin/user/provider/mine_provider.dart';
 import 'package:flutter_image_compress/flutter_image_compress.dart';
 
 import '../../minio/minio_service.dart';
 import '../../user/models/resource_list_model.dart';
-import '../../user/native_bridge.dart';
 import '../../utils/file_util.dart';
 import '../models/local_file_item.dart';
 import '../../user/my_instance.dart';
@@ -798,8 +796,7 @@ class UploadAllPhotosManager extends ChangeNotifier {
       // 过滤出需要上传的文件
       final newAssets = newChunk.where((media) {
         final md5 = media.md5Hash;
-        return md5 != null &&
-            !failedFileList.any((failed) => failed.fileCode == md5);
+        return !failedFileList.any((failed) => failed.fileCode == md5);
       }).toList();
 
       if (newAssets.isEmpty) {
@@ -857,7 +854,7 @@ class UploadAllPhotosManager extends ChangeNotifier {
           if (result) {
             LogUtil.log("[upload] Uploaded: ${entity.fileName}");
             uploadedFileCodes.add(entity);
-            await dbHelper.updateStatusByMd5Hash(entity.md5Hash!, 1);
+            await dbHelper.updateStatusByMd5Hash(entity.md5Hash, 1);
             uploadedFiles++;
           } else {
             LogUtil.log("[upload] Failed to upload: ${entity.fileName}");
@@ -887,7 +884,7 @@ class UploadAllPhotosManager extends ChangeNotifier {
 
       // 使用 for-in 替代 forEach with async
       for (var entity in uploadedFileCodes) {
-        await dbHelper.updateStatusByMd5Hash(entity.md5Hash!, 2);
+        await dbHelper.updateStatusByMd5Hash(entity.md5Hash, 2);
       }
     } else {
       LogUtil.log("No files uploaded successfully");
@@ -937,10 +934,10 @@ class UploadAllPhotosManager extends ChangeNotifier {
       final fileDetailList = <FileDetailModel>[];
 
       for (var entity in uploadedFiles) {
-        final code = entity.md5Hash!;
-        final fileName = p.basename(entity.fileName!);
-        final fileNameWithoutExt = p.basenameWithoutExtension(entity.fileName!);
-        final fileExt = entity.fileName!.split('.').last;
+        final code = entity.md5Hash;
+        final fileName = p.basename(entity.fileName);
+        final fileNameWithoutExt = p.basenameWithoutExtension(entity.fileName);
+        final fileExt = entity.fileName.split('.').last;
         final imageFileName = "$fileNameWithoutExt.jpg";
 
         final dt = DateTime.fromMillisecondsSinceEpoch(entity.createDate.toInt());

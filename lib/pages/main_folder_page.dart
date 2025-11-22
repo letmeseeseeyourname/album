@@ -347,9 +347,9 @@ class _MainFolderPageState extends State<MainFolderPage> {
       return;
     }
 
+    // 允许在有上传任务时添加新任务（支持多任务并发）
     if (isUploading) {
-      _showMessage('已有上传任务在进行中', isError: true);
-      return;
+      _showMessage('正在添加新的上传任务到队列...', isError: false);
     }
 
     // 1. 获取所有选中的文件夹
@@ -394,9 +394,12 @@ class _MainFolderPageState extends State<MainFolderPage> {
       onComplete: (success, message) {
         if (mounted) {
           setState(() {
-            isUploading = false;
-            uploadProgress = null;
-            if (success) {
+            // 检查_uploadManager是否还有其他任务在运行
+            // 只有当所有任务都完成时才设置 isUploading 为 false
+            isUploading = _uploadManager.isUploading;
+            uploadProgress = _uploadManager.currentProgress;
+            // 只有当所有任务都完成且当前任务成功时才清空选择
+            if (success && !_uploadManager.isUploading) {
               // 清空选择
               selectedIndices.clear();
               isSelectionMode = false;

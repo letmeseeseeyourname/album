@@ -32,9 +32,9 @@ class FolderGridComponent extends StatelessWidget {
       child: LayoutBuilder(
         builder: (context, constraints) {
           // 固定的 item 尺寸
-          const itemWidth = 180.0;
-          const itemHeight = 150.0;
-          const spacing = 20.0;
+          const itemWidth = 135.0;
+          const itemHeight = 120.0;
+          const spacing = 10.0;
 
           // 计算可用宽度
           final availableWidth = constraints.maxWidth;
@@ -130,7 +130,7 @@ class _FolderCardWidgetState extends State<FolderCardWidget> {
           child: Stack(
             children: [
               Padding(
-                padding: const EdgeInsets.all(12.0),
+                padding: const EdgeInsets.all(7.0),
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   crossAxisAlignment: CrossAxisAlignment.center,
@@ -145,18 +145,18 @@ class _FolderCardWidgetState extends State<FolderCardWidget> {
                       ),
                     ),
 
-                    const SizedBox(height: 12),
+                    const SizedBox(height: 5),
 
                     // 文件夹名称 - 固定高度
                     SizedBox(
-                      height: 40,
+                      height: 30,
                       child: Center(
                         child: Text(
                           widget.folder.name,
                           style: const TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w500,
-                            height: 1.3,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w400,
+                            height: 1.2,
                           ),
                           textAlign: TextAlign.center,
                           maxLines: 2,
