@@ -17,12 +17,16 @@ import '../../../widgets/file_item_card.dart';
 import '../../../widgets/file_list_item.dart';
 import '../widgets/folder_detail_bottom_bar.dart';
 import '../widgets/folder_detail_top_bar.dart';
+import '../widgets/equal_height_gallery.dart';
 import '../../../widgets/media_viewer_page.dart';
 import '../widgets/preview_panel.dart';
 import '../../../widgets/side_navigation.dart';
 
 /// 重构后的文件夹详情页面
-/// 使用控制器模式将业务逻辑从UI中分离
+///
+/// ✅ 更新:
+/// - 新增等高视图模式 (ViewMode.equalHeight)
+/// - 新增"取消选择"功能
 class FolderDetailPageRefactored extends StatefulWidget {
   final FolderInfo folder;
   final int selectedNavIndex;
@@ -53,7 +57,9 @@ class _FolderDetailPageRefactoredState extends State<FolderDetailPageRefactored>
   // 数据状态
   List<FileItem> _fileItems = [];
   bool _isLoading = true;
-  bool _isGridView = true;
+
+  // 使用 ViewMode 枚举
+  ViewMode _viewMode = ViewMode.grid;
 
   @override
   void initState() {
@@ -168,6 +174,13 @@ class _FolderDetailPageRefactoredState extends State<FolderDetailPageRefactored>
     });
   }
 
+  /// ✅ 新增: 取消选择
+  void _cancelSelection() {
+    setState(() {
+      _selectionController.cancelSelection();
+    });
+  }
+
   /// 设置筛选类型
   void _setFilterType(String type) {
     setState(() {
@@ -176,9 +189,11 @@ class _FolderDetailPageRefactoredState extends State<FolderDetailPageRefactored>
   }
 
   /// 设置视图模式
-  void _setViewMode(bool isGridView) {
+  void _setViewMode(ViewMode mode) {
     setState(() {
-      _isGridView = isGridView;
+      _viewMode = mode;
+      // 切换视图模式时清除选择
+      _selectionController.cancelSelection();
     });
   }
 
@@ -262,17 +277,9 @@ class _FolderDetailPageRefactoredState extends State<FolderDetailPageRefactored>
   /// 上传进度变化回调
   void _onUploadProgressChanged() {
     if (mounted) {
-      setState(() {
-        // _uploadCoordinator.updateProgress();
-      });
+      setState(() {});
     }
   }
-
-  // ============ 文件上传改进版 _handleSync 方法 ============
-// 改进点:
-// 1. 移除上传阻塞检查 - 允许多任务并发上传
-// 2. 确认后立即取消选中 - 提升用户体验
-// 3. 简化回调逻辑 - 不再在完成时操作选择状态
 
   /// 处理同步上传
   Future<void> _handleSync() async {
@@ -280,13 +287,6 @@ class _FolderDetailPageRefactoredState extends State<FolderDetailPageRefactored>
       _showMessage('请先选择要上传的文件或文件夹', isError: true);
       return;
     }
-
-    // ✅ 改进2: 移除上传中的阻塞检查,允许继续选择并开启新的上传任务
-    // ❌ 旧代码 (已删除):
-    // if (_uploadCoordinator.isUploading) {
-    //   _showMessage('已有上传任务在进行中', isError: true);
-    //   return;
-    // }
 
     // 准备上传
     final selectedItems = _selectionController.getSelectedItems(_fileItems);
@@ -314,8 +314,7 @@ class _FolderDetailPageRefactoredState extends State<FolderDetailPageRefactored>
 
     if (!confirmed) return;
 
-    // ✅ 改进1: 用户确认上传后立即取消选中状态,允许继续选择其他文件
-    // 这是新增的关键代码
+    // 用户确认上传后立即取消选中状态
     setState(() {
       _selectionController.cancelSelection();
     });
@@ -325,22 +324,8 @@ class _FolderDetailPageRefactoredState extends State<FolderDetailPageRefactored>
       prepareResult.filePaths!,
           (String message, {bool isError = false}) => _showMessage(message, isError: isError),
           () {
-        // ✅ 改进3: 简化上传完成回调
-        // ❌ 旧代码 (已删除):
-        // if (mounted) {
-        //   setState(() {
-        //     if (_uploadCoordinator.uploadProgress != null) {
-        //       _selectionController.cancelSelection();
-        //     }
-        //   });
-        // }
-
-        // ✅ 新代码 (简洁明了):
         if (mounted) {
-          setState(() {
-            // 上传完成后刷新界面即可
-            // 选中状态已在确认时取消,无需再次操作
-          });
+          setState(() {});
         }
       },
     );
@@ -449,7 +434,7 @@ class _FolderDetailPageRefactoredState extends State<FolderDetailPageRefactored>
                           Expanded(
                             child: _isLoading
                                 ? const Center(child: CircularProgressIndicator())
-                                : _buildFileGrid(),
+                                : _buildFileContent(),
                           ),
                           _buildBottomBar(),
                         ],
@@ -472,18 +457,24 @@ class _FolderDetailPageRefactoredState extends State<FolderDetailPageRefactored>
     );
   }
 
+  /// TopBar 使用 ViewMode 枚举
   Widget _buildTopBar() {
+    final bool isSelectAllChecked = _selectionController.selectedCount == _fileItems.length &&
+        _selectionController.selectedCount > 0;
+
     return FolderDetailTopBar(
       pathSegments: _pathController.pathSegments,
       onPathSegmentTap: _navigateToPathSegment,
-      isSelectAllChecked: _selectionController.selectedCount == _fileItems.length &&
-          _selectionController.selectedCount > 0,
+      isSelectAllChecked: isSelectAllChecked,
       onSelectAllToggle: _toggleSelectAll,
       filterType: _selectionController.filterType,
       onFilterChange: _setFilterType,
-      isGridView: _isGridView,
+      viewMode: _viewMode,
       onViewModeChange: _setViewMode,
       isUploading: _uploadCoordinator.isUploading,
+      // ✅ 新增: 传递选中数量和取消选择回调
+      selectedCount: _selectionController.selectedCount,
+      onCancelSelection: _cancelSelection,
     );
   }
 
@@ -521,7 +512,8 @@ class _FolderDetailPageRefactoredState extends State<FolderDetailPageRefactored>
     );
   }
 
-  Widget _buildFileGrid() {
+  /// 根据视图模式构建不同的内容
+  Widget _buildFileContent() {
     final filteredFiles = _selectionController.getFilteredFiles(_fileItems);
 
     if (filteredFiles.isEmpty) {
@@ -533,18 +525,64 @@ class _FolderDetailPageRefactoredState extends State<FolderDetailPageRefactored>
       );
     }
 
-    return _isGridView
-        ? _buildGridView(filteredFiles)
-        : _buildListView(filteredFiles);
+    switch (_viewMode) {
+      case ViewMode.equalHeight:
+        return _buildEqualHeightView(filteredFiles);
+      case ViewMode.grid:
+        return _buildGridView(filteredFiles);
+      case ViewMode.list:
+        return _buildListView(filteredFiles);
+    }
+  }
+
+  /// 构建等高视图
+  Widget _buildEqualHeightView(List<FileItem> filteredFiles) {
+    return EqualHeightGallery(
+      items: filteredFiles,
+      selectedIndices: _selectionController.selectedIndices,
+      isSelectionMode: _selectionController.isSelectionMode,
+      targetRowHeight: 200.0,
+      spacing: 4.0,
+      padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 10),
+      onItemTap: (actualIndex) {
+        if (_selectionController.isSelectionMode) {
+          _toggleSelection(actualIndex);
+        } else if (filteredFiles[actualIndex].type == FileItemType.folder) {
+          // 单击文件夹时进入文件夹
+          _navigateToFolder(
+            filteredFiles[actualIndex].path,
+            filteredFiles[actualIndex].name,
+          );
+        } else {
+          _openPreview(actualIndex);
+        }
+      },
+      onItemDoubleTap: (actualIndex) {
+        if (filteredFiles[actualIndex].type == FileItemType.folder) {
+          _navigateToFolder(
+            filteredFiles[actualIndex].path,
+            filteredFiles[actualIndex].name,
+          );
+        } else {
+          _openFullScreenViewer(actualIndex);
+        }
+      },
+      onItemLongPress: (actualIndex) {
+        _toggleSelection(actualIndex);
+      },
+      onCheckboxToggle: (actualIndex) {
+        _toggleSelection(actualIndex);
+      },
+    );
   }
 
   Widget _buildGridView(List<FileItem> filteredFiles) {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 20),
+      padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 10),
       child: LayoutBuilder(
         builder: (context, constraints) {
           const itemWidth = 140.0;
-          const spacing = 20.0;
+          const spacing = 10.0;
           final crossAxisCount =
           ((constraints.maxWidth + spacing) / (itemWidth + spacing))
               .floor()
@@ -560,7 +598,6 @@ class _FolderDetailPageRefactoredState extends State<FolderDetailPageRefactored>
             itemBuilder: (context, index) {
               final actualIndex = _fileItems.indexOf(filteredFiles[index]);
               return GestureDetector(
-                // ✅ 移除 isUploading 检查,允许上传时继续操作
                 onDoubleTap: () {
                   if (filteredFiles[index].type == FileItemType.folder) {
                     _navigateToFolder(
@@ -577,7 +614,6 @@ class _FolderDetailPageRefactoredState extends State<FolderDetailPageRefactored>
                   showCheckbox: _selectionController.isSelectionMode ||
                       _selectionController.selectedIndices.contains(actualIndex),
                   canSelect: true,
-                  // ✅ 移除 isUploading 检查,允许上传时选择文件
                   onTap: () {
                     if (_selectionController.isSelectionMode) {
                       _toggleSelection(actualIndex);
@@ -590,9 +626,7 @@ class _FolderDetailPageRefactoredState extends State<FolderDetailPageRefactored>
                       _openPreview(actualIndex);
                     }
                   },
-                  // ✅ 移除 isUploading 检查
                   onLongPress: () => _toggleSelection(actualIndex),
-                  // ✅ 移除 isUploading 检查
                   onCheckboxToggle: () => _toggleSelection(actualIndex),
                 ),
               );
@@ -610,7 +644,6 @@ class _FolderDetailPageRefactoredState extends State<FolderDetailPageRefactored>
       itemBuilder: (context, index) {
         final actualIndex = _fileItems.indexOf(filteredFiles[index]);
         return GestureDetector(
-          // ✅ 移除 isUploading 检查,允许上传时继续操作
           onDoubleTap: () {
             if (filteredFiles[index].type == FileItemType.folder) {
               _navigateToFolder(
@@ -624,7 +657,6 @@ class _FolderDetailPageRefactoredState extends State<FolderDetailPageRefactored>
             isSelected: _selectionController.selectedIndices.contains(actualIndex),
             canSelect: _selectionController.isSelectionMode ||
                 _selectionController.selectedIndices.contains(actualIndex),
-            // ✅ 移除 isUploading 检查,允许上传时选择文件
             onTap: () {
               if (_selectionController.isSelectionMode) {
                 _toggleSelection(actualIndex);
@@ -637,14 +669,12 @@ class _FolderDetailPageRefactoredState extends State<FolderDetailPageRefactored>
                 _openPreview(actualIndex);
               }
             },
-            // ✅ 移除 isUploading 检查
             onCheckboxToggle: () => _toggleSelection(actualIndex),
           ),
         );
       },
     );
   }
-
 }
 
 // 静态导航组件（向后兼容）
