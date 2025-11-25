@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter/services.dart';
+import 'package:uuid/uuid.dart';
 
 class NativeBridge {
   static const MethodChannel _channel = MethodChannel('remote_album/native');
@@ -24,7 +25,7 @@ class NativeBridge {
       // return 'device-${DateTime.now().millisecondsSinceEpoch}';
 
       // 方案3: 基于主机名（需要导入 dart:io）
-      return 'device-${Platform.localHostname}';
+      return 'device-win-${Uuid().v4()}';
     }
 
     // Android/iOS 平台调用原生方法

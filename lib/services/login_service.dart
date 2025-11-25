@@ -1,6 +1,7 @@
 // services/login_service.dart
 import 'package:ablumwin/user/my_instance.dart';
 
+import '../user/models/qr_code_model.dart';
 import '../user/provider/mine_provider.dart';
 import '../network/response/response_model.dart';
 import '../user/models/login_response_model.dart';
@@ -25,6 +26,32 @@ class LoginService {
       return LoginResult(
         success: false,
         message: '登录失败：${e.toString()}',
+      );
+    }
+  }
+
+  /// 获取扫码登录二维码
+  /// [deviceCode] 设备唯一标识
+  static Future<QrCodeResult> getQrCode(String deviceCode) async {
+    try {
+      final response = await _provider.getQrCode(deviceCode);
+
+      if (response.isSuccess && response.model != null) {
+        return QrCodeResult(
+          success: true,
+          message: response.message ?? '获取二维码成功',
+          qrCodeData: response.model!,
+        );
+      } else {
+        return QrCodeResult(
+          success: false,
+          message: response.message ?? '获取二维码失败',
+        );
+      }
+    } catch (e) {
+      return QrCodeResult(
+        success: false,
+        message: '获取二维码异常：${e.toString()}',
       );
     }
   }
@@ -178,6 +205,18 @@ class LoginResult {
   });
 }
 
+/// 获取二维码结果类
+class QrCodeResult {
+  final bool success;
+  final String message;
+  final QrCodeModel? qrCodeData;
+
+  QrCodeResult({
+    required this.success,
+    required this.message,
+    this.qrCodeData,
+  });
+}
 /// 发送验证码结果类
 class SendCodeResult {
   final bool success;

@@ -52,9 +52,32 @@ class _HomePageState extends State<HomePage> {
     });
 
     WidgetsBinding.instance.addPostFrameCallback((_) async{
-      await _reloadData();
-      _onPeriodicCallback();
+      await _initializeConnection();
     });
+  }
+
+  /// 初始化 P2P 连接
+  /// 流程：获取设备组 -> P2P连接建立 -> 刷新存储信息
+  Future<void> _initializeConnection() async {
+    debugPrint('开始初始化 P2P 连接...');
+
+    // 1. 先加载设备组数据，这会触发 P2P 连接建立
+    await _reloadData();
+
+    // 2. 如果有选中的设备组，说明 P2P 连接已经建立
+    if (_selectedGroup != null) {
+      debugPrint('设备组已选择: ${_selectedGroup?.groupName}, 开始刷新数据');
+
+      // 3. P2P 连接成功后，刷新设备存储信息
+      await _refreshDeviceStorage();
+
+      // 4. 启动定期回调
+      _onPeriodicCallback();
+
+      debugPrint('P2P 连接初始化完成');
+    } else {
+      debugPrint('未找到可用的设备组');
+    }
   }
 
   void _onPeriodicCallback() {
@@ -69,11 +92,14 @@ class _HomePageState extends State<HomePage> {
   }
 
   _refreshDeviceStorage() async {
+    debugPrint('开始刷新设备存储信息...');
     var deviceRsp = await widget.mineProvider.getStorageInfo();
     if (deviceRsp.isSuccess) {
       P6DeviceInfoModel? storageInfo = deviceRsp.model;
-      debugPrint("storageInfo $storageInfo");
+      debugPrint("✅ 设备存储信息刷新成功: $storageInfo");
       MyInstance().p6deviceInfoModel = storageInfo;
+    } else {
+      debugPrint("❌ 设备存储信息刷新失败: ${deviceRsp.message}");
     }
   }
 
@@ -88,27 +114,39 @@ class _HomePageState extends State<HomePage> {
 
   // 重新加载数据
   _reloadData() async {
+    debugPrint('开始加载设备组数据...');
     var response = await widget.mineProvider.getAllGroups();
     if (response.isSuccess) {
       _loadGroups();
+      debugPrint('✅ 设备组数据加载成功，共 ${_groups.length} 个设备组');
+      if (_selectedGroup != null) {
+        debugPrint('当前选中设备组: ${_selectedGroup?.groupName} (${_selectedGroup?.deviceCode})');
+      }
+    } else {
+      debugPrint('❌ 设备组数据加载失败: ${response.message}');
     }
   }
 
   // 处理Group选择
   void _onGroupSelected(Group group) async {
     if (_selectedGroup?.groupId == group.groupId) {
+      debugPrint('设备组未变化，无需切换');
       return; // 已经是当前选中的group
     }
+
+    debugPrint('用户切换设备组: ${group.groupName} (${group.deviceCode})');
 
     setState(() {
       _selectedGroup = group;
     });
 
-    // 切换group
+    // 切换group（这会自动建立 P2P 连接）
+    debugPrint('开始切换设备组并建立 P2P 连接...');
     await widget.mineProvider.changeGroup(group.deviceCode ?? "");
 
-    // 刷新设备存储信息
-    _refreshDeviceStorage();
+    // P2P 连接成功后，刷新设备存储信息
+    debugPrint('设备组切换完成，刷新存储信息');
+    await _refreshDeviceStorage();
   }
 
   void _onNavigationChanged(int index) {

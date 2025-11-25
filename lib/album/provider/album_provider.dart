@@ -1,5 +1,6 @@
 
 
+import 'package:ablumwin/utils/win_helper.dart';
 import 'package:flutter/material.dart';
 import '../../network/constant_sign.dart';
 import '../../network/network_provider.dart';
@@ -44,7 +45,7 @@ class AlbumProvider extends ChangeNotifier{
   Future<ResponseModel<FileUploadResponseModel>> createSyncTask(
       List<FileUploadModel> fileList) async {
     // ...existing code...
-    var uuid = await NativeBridge.uuid();
+    var uuid = await WinHelper.uuid();
     String url = "${AppConfig.hostUrl()}/nass/ps/storage/createSyncTask";
     String extraDeviceName = "Windows";
     ResponseModel<FileUploadResponseModel> responseModel =

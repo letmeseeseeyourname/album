@@ -15,7 +15,4 @@ MyAllGroupsModel _$MyAllGroupsModelFromJson(Map<String, dynamic> json) =>
     );
 
 Map<String, dynamic> _$MyAllGroupsModelToJson(MyAllGroupsModel instance) =>
-    <String, dynamic>{
-      'groups': instance.groups,
-      'total': instance.total,
-    };
+    <String, dynamic>{'groups': instance.groups, 'total': instance.total};

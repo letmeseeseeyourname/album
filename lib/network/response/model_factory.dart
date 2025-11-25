@@ -5,6 +5,7 @@ import '../../user/models/device_model.dart';
 import '../../user/models/login_response_model.dart';
 import '../../user/models/my_all_groups_model.dart';
 import '../../user/models/p6device_info_model.dart';
+import '../../user/models/qr_code_model.dart';
 import '../../user/models/resource_list_model.dart';
 import '../../user/models/user.dart';
 import '../../user/models/user_model.dart';
@@ -32,6 +33,8 @@ class ModelFactory {
         return LoginResponseModel.fromJson(json) as T;
       case "UserModel":
         return UserModel.fromJson(json) as T;
+      case "QrCodeModel":
+        return QrCodeModel.fromJson(json) as T;
       case "UserInfo":
         return UserInfo.fromJson(json) as T;
       case "User":

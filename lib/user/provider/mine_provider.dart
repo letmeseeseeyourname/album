@@ -11,6 +11,7 @@ import '../../network/constant_sign.dart';
 import '../../network/network_provider.dart';
 import '../../network/response/response_model.dart';
 import '../../pages/home_page.dart';
+import '../../utils/win_helper.dart';
 import '../models/device_model.dart';
 import '../models/login_response_model.dart';
 import '../models/my_all_groups_model.dart';
@@ -19,6 +20,8 @@ import '../models/user.dart';
 import '../models/user_model.dart';
 import '../my_instance.dart';
 import '../native_bridge.dart';
+import '../models/qr_code_model.dart';
+import '../../p2p/pg_tunnel_service.dart';
 
 
 extension StringMD5 on String {
@@ -71,6 +74,7 @@ class MyNetworkProvider extends ChangeNotifier {
   final sm = LocalSemaphore(1);
   ResponseModel<MyAllGroupsModel>? groupResp;
   DateTime lastGetAllGroupTime = DateTime.now();
+  String currentP2pAccount = ''; // 当前P2P连接的账号
 
   static final MyNetworkProvider _singleton = MyNetworkProvider._internal();
 
@@ -174,10 +178,28 @@ class MyNetworkProvider extends ChangeNotifier {
     return p6loginResp;
   }
 
+  /// 获取二维码接口
+  /// Path: api/admin/auth/get-qr-code
+  Future<ResponseModel<QrCodeModel>> getQrCode(String deviceCode) async {
+    String url = "${AppConfig.userUrl()}/api/admin/auth/get-qr-code";
+
+    // 根据现有代码习惯，使用 requestAndConvertResponseModel 统一处理
+    // 参照 getDevice 接口，这里使用 POST 方式传递 deviceCode
+    ResponseModel<QrCodeModel> responseModel = await requestAndConvertResponseModel(
+      url,
+      formData: {
+        "deviceCode": deviceCode,
+      },
+      netMethod: NetMethod.post, // 如果后端强制要求 GET，请改为 NetMethod.get 并将参数拼接到 url 或调整 formData
+    );
+
+    return responseModel;
+  }
+
 //邮件类型：1-注册用户、2-找回/重置密码、3-验证邮箱、4-更换邮箱
   Future<ResponseModel<String>> getCode(
-    String phone,
-  ) async {
+      String phone,
+      ) async {
     String url =
         "${AppConfig.userUrl()}/api/admin/auth/send-phone-code?phoneNumber=$phone";
     ResponseModel<String> responseModel = await requestAndConvertResponseModel(
@@ -219,8 +241,8 @@ class MyNetworkProvider extends ChangeNotifier {
       });
     }
     ResponseModel<LoginResponseModel> responseModel =
-        await requestAndConvertResponseModel(url,
-            formData: formData, netMethod: NetMethod.post);
+    await requestAndConvertResponseModel(url,
+        formData: formData, netMethod: NetMethod.post);
 
     if (responseModel.isSuccess) {
       await MyInstance().set(responseModel.model);
@@ -232,7 +254,7 @@ class MyNetworkProvider extends ChangeNotifier {
     String url = "${AppConfig.userUrl()}/api/admin/auth/logout";
     var uuid = await NativeBridge.uuid();
     ResponseModel<UserModel> responseModel =
-        await requestAndConvertResponseModel(
+    await requestAndConvertResponseModel(
       url,
       formData: {"type": "主动", "clientType": "Windows", "deviceCode": uuid},
       netMethod: NetMethod.post,
@@ -258,7 +280,7 @@ class MyNetworkProvider extends ChangeNotifier {
   Future<ResponseModel<User>> getUserInfo() async {
     String url = "${AppConfig.userUrl()}/api/admin/users/getUser";
     ResponseModel<User> responseModel =
-        await requestAndConvertResponseModel(url, netMethod: NetMethod.get);
+    await requestAndConvertResponseModel(url, netMethod: NetMethod.get);
 
     if (responseModel.isSuccess) {
       var user = MyInstance().user;
@@ -330,17 +352,65 @@ class MyNetworkProvider extends ChangeNotifier {
 
   ///TODO( add p2p connect )
   Future<bool> _loginP2p(String p2pName) async {
+    try {
+      final p2pService = PgTunnelService();
 
-    // var result = await NativeBridge.startp2p(p2pName);
-    var result = true;
+      // 如果当前账号与要连接的账号相同，直接返回成功
+      if (currentP2pAccount == p2pName) {
+        debugPrint("P2P已连接到账号: $p2pName");
+        return true;
+      }
 
-    if (result) {
-      debugPrint("P2P连接成功");
+      // 如果有旧账号，先清理旧连接
+      if (currentP2pAccount.isNotEmpty) {
+        debugPrint("清理旧P2P连接: $currentP2pAccount");
+        try {
+          // 删除旧连接
+          await p2pService.connectDelete(
+            peerId: currentP2pAccount,
+            clientAddr: "127.0.0.1:9000",
+          );
+          await p2pService.connectDelete(
+            peerId: currentP2pAccount,
+            clientAddr: "127.0.0.1:8080",
+          );
+          // 停止隧道
+          await p2pService.stop();
+        } catch (e) {
+          debugPrint("清理旧连接时出错: $e");
+        }
+      }
+
+      // 获取设备UUID
+      String uuid = await WinHelper.uuid();
+      debugPrint("Starting P2P tunnel with account: $p2pName, uuid: $uuid");
+
+      // 启动隧道
+      await p2pService.start(uuid);
+
+      // 添加连接 - 8080端口
+      await p2pService.connectAdd(
+        peerId: p2pName,
+        listenAddr: "127.0.0.1:8080",
+        clientAddr: "127.0.0.1:8080",
+      );
+
+      // 添加连接 - 9000端口
+      await p2pService.connectAdd(
+        peerId: p2pName,
+        listenAddr: "127.0.0.1:9000",
+        clientAddr: "127.0.0.1:9000",
+      );
+
+      // 更新当前账号
+      currentP2pAccount = p2pName;
+
+      debugPrint("P2P连接成功: $p2pName");
       return true;
-    } else {
-      debugPrint("P2P连接失败");
+    } catch (e) {
+      debugPrint("P2P连接失败: $e");
+      return false;
     }
-    return false;
   }
 
 
