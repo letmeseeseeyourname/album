@@ -83,36 +83,188 @@ class FolderDetailTopBar extends StatelessWidget {
 }
 
 /// 路径导航组件
+///
+/// 优化：
+/// - 当路径层级超过 maxVisibleSegments 时，中间显示 "..."
+/// - 点击 "..." 弹出隐藏层级菜单
+/// - 目录名超过 maxNameLength 个字符时截断显示
 class _PathNavigation extends StatelessWidget {
   final List<String> pathSegments;
   final Function(int) onPathSegmentTap;
+
+  /// 最大可见层级数（包括第一个和最后显示的几个）
+  static const int maxVisibleSegments = 4;
+
+  /// 目录名最大显示长度
+  static const int maxNameLength = 20;
 
   const _PathNavigation({
     required this.pathSegments,
     required this.onPathSegmentTap,
   });
 
+  /// 截断过长的目录名
+  String _truncateName(String name, {int maxLength = maxNameLength}) {
+    if (name.length <= maxLength) return name;
+    return '${name.substring(0, maxLength)}...';
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Wrap(
-      spacing: 8,
-      children: [
-        for (int i = 0; i < pathSegments.length; i++) ...[
-          _PathSegment(
-            text: i == 0 ? '此电脑' : pathSegments[i],
-            isLast: i == pathSegments.length - 1,
-            onTap: () => onPathSegmentTap(i),
-          ),
-          if (i < pathSegments.length - 1)
-            const Text(' / ', style: TextStyle(fontSize: 16)),
+    final totalSegments = pathSegments.length;
+
+    // 如果层级数不超过最大可见数，直接显示所有层级
+    if (totalSegments <= maxVisibleSegments) {
+      return _buildFullPath();
+    }
+
+    // 层级过多时，显示：第一个 + ... + 最后几个
+    return _buildCollapsedPath(context);
+  }
+
+  /// 构建完整路径（不折叠）
+  Widget _buildFullPath() {
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          for (int i = 0; i < pathSegments.length; i++) ...[
+            _PathSegment(
+              text: i == 0 ? '此电脑' : _truncateName(pathSegments[i]),
+              isLast: i == pathSegments.length - 1,
+              onTap: () => onPathSegmentTap(i),
+            ),
+            if (i < pathSegments.length - 1)
+              const Text(' / ', style: TextStyle(fontSize: 16)),
+          ],
         ],
-      ],
+      ),
+    );
+  }
+
+  /// 构建折叠路径（显示 ... 按钮）
+  Widget _buildCollapsedPath(BuildContext context) {
+    // 计算要显示的最后几个层级数量（保留3个可见位置给后面的层级）
+    const int tailCount = 3;
+
+    // 隐藏的层级：从索引1开始，到 totalSegments - tailCount
+    final int hiddenStart = 1;
+    final int hiddenEnd = pathSegments.length - tailCount;
+    final List<int> hiddenIndices = List.generate(
+      hiddenEnd - hiddenStart,
+          (i) => hiddenStart + i,
+    );
+
+    // 要显示的最后几个层级的起始索引
+    final int tailStart = pathSegments.length - tailCount;
+
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // 1. 第一个层级（此电脑）
+          _PathSegment(
+            text: '此电脑',
+            isLast: false,
+            onTap: () => onPathSegmentTap(0),
+          ),
+          const Text(' / ', style: TextStyle(fontSize: 16)),
+
+          // 2. "..." 下拉菜单（显示隐藏的层级）
+          _CollapsedMenuButton(
+            hiddenSegments: hiddenIndices.map((i) => pathSegments[i]).toList(),
+            hiddenIndices: hiddenIndices,
+            onItemTap: onPathSegmentTap,
+            maxNameLength: maxNameLength,
+          ),
+          const Text(' / ', style: TextStyle(fontSize: 16)),
+
+          // 3. 最后几个层级
+          for (int i = tailStart; i < pathSegments.length; i++) ...[
+            _PathSegment(
+              text: _truncateName(pathSegments[i]),
+              isLast: i == pathSegments.length - 1,
+              onTap: () => onPathSegmentTap(i),
+            ),
+            if (i < pathSegments.length - 1)
+              const Text(' / ', style: TextStyle(fontSize: 16)),
+          ],
+        ],
+      ),
     );
   }
 }
 
+/// 折叠菜单按钮（"..." 按钮）
+class _CollapsedMenuButton extends StatelessWidget {
+  final List<String> hiddenSegments;
+  final List<int> hiddenIndices;
+  final Function(int) onItemTap;
+  final int maxNameLength;
+
+  const _CollapsedMenuButton({
+    required this.hiddenSegments,
+    required this.hiddenIndices,
+    required this.onItemTap,
+    required this.maxNameLength,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return PopupMenuButton<int>(
+      tooltip: '显示更多路径',
+      offset: const Offset(0, 30),
+      padding: EdgeInsets.zero,
+      constraints: const BoxConstraints(),
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(4),
+          ),
+          child: const Text(
+            '...',
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w500,
+              color: Colors.blue,
+            ),
+          ),
+        ),
+      ),
+      onSelected: onItemTap,
+      itemBuilder: (context) => [
+        for (int i = 0; i < hiddenSegments.length; i++)
+          PopupMenuItem<int>(
+            value: hiddenIndices[i],
+            child: Row(
+              children: [
+                const Icon(Icons.folder_outlined, size: 18, color: Colors.grey),
+                const SizedBox(width: 8),
+                Flexible(
+                  child: Text(
+                    _truncateName(hiddenSegments[i]),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+          ),
+      ],
+    );
+  }
+
+  String _truncateName(String name) {
+    if (name.length <= maxNameLength) return name;
+    return '${name.substring(0, maxNameLength)}...';
+  }
+}
+
 /// 路径段
-class _PathSegment extends StatelessWidget {
+class _PathSegment extends StatefulWidget {
   final String text;
   final bool isLast;
   final VoidCallback onTap;
@@ -124,18 +276,29 @@ class _PathSegment extends StatelessWidget {
   });
 
   @override
+  State<_PathSegment> createState() => _PathSegmentState();
+}
+
+class _PathSegmentState extends State<_PathSegment> {
+  bool _isHovered = false;
+
+  @override
   Widget build(BuildContext context) {
     return GestureDetector(
-      onTap: onTap,
+      onTap: widget.onTap,
       child: MouseRegion(
         cursor: SystemMouseCursors.click,
+        onEnter: (_) => setState(() => _isHovered = true),
+        onExit: (_) => setState(() => _isHovered = false),
         child: Text(
-          text,
+          widget.text,
           style: TextStyle(
             fontSize: 16,
             fontWeight: FontWeight.w500,
-            color: isLast ? Colors.black : Colors.blue,
-            decoration: isLast ? null : TextDecoration.underline,
+            color: widget.isLast ? Colors.black : Colors.blue,
+            decoration: (!widget.isLast && _isHovered)
+                ? TextDecoration.underline
+                : null,
           ),
         ),
       ),
