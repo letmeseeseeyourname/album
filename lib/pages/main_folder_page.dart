@@ -684,6 +684,7 @@ class _MainFolderPageState extends State<MainFolderPage> {
         backgroundColor: Color(0xFFF5E8DC),
         rightTitleBgColor: Colors.white,
         showToolbar: true,
+        showTabs: false,
         onAddFolder: _pickFolder,
         child: Row(
           children: [

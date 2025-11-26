@@ -1,4 +1,4 @@
-// pages/home_page.dart
+// pages/home_page.dart (修改版 - 添加Tab状态管理)
 import 'package:flutter/material.dart';
 import '../eventbus/event_bus.dart';
 import '../minio/minio_service.dart';
@@ -8,8 +8,6 @@ import '../user/my_instance.dart';
 import '../user/provider/mine_provider.dart';
 import '../pages/remote_album/pages/album_library_page.dart';
 import 'main_folder_page.dart';
-
-
 
 class P6loginEvent {
   P6loginEvent();
@@ -27,12 +25,15 @@ class HomePage extends StatefulWidget {
   HomePage({super.key});
 
   var mineProvider = MyNetworkProvider();
+
   @override
   State<HomePage> createState() => _HomePageState();
 }
 
 class _HomePageState extends State<HomePage> {
   int _selectedIndex = 0; // 0: 本地图库, 1: 相册图库
+  int _albumTabIndex = 0; // 🆕 相册图库的Tab索引 (0: 个人, 1: 家庭)
+
   final minioService = MinioService.instance;
   List<Group> _groups = [];
   Group? _selectedGroup;
@@ -46,34 +47,23 @@ class _HomePageState extends State<HomePage> {
       _p6loginAction();
     });
 
-    // 监听Group变化事件
     MCEventBus.on<GroupChangedEvent>().listen((event) {
       _loadGroups();
     });
 
-    WidgetsBinding.instance.addPostFrameCallback((_) async{
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
       await _initializeConnection();
     });
   }
 
-  /// 初始化 P2P 连接
-  /// 流程：获取设备组 -> P2P连接建立 -> 刷新存储信息
   Future<void> _initializeConnection() async {
     debugPrint('开始初始化 P2P 连接...');
-
-    // 1. 先加载设备组数据，这会触发 P2P 连接建立
     await _reloadData();
 
-    // 2. 如果有选中的设备组，说明 P2P 连接已经建立
     if (_selectedGroup != null) {
       debugPrint('设备组已选择: ${_selectedGroup?.groupName}, 开始刷新数据');
-
-      // 3. P2P 连接成功后，刷新设备存储信息
       await _refreshDeviceStorage();
-
-      // 4. 启动定期回调
       _onPeriodicCallback();
-
       debugPrint('P2P 连接初始化完成');
     } else {
       debugPrint('未找到可用的设备组');
@@ -81,9 +71,7 @@ class _HomePageState extends State<HomePage> {
   }
 
   void _onPeriodicCallback() {
-    // This method will be called every 5 minutes
     print('Periodic callback triggered - ${DateTime.now()}');
-    // widget.mineProvider.refreshToken();
     _refreshDeviceStorage();
   }
 
@@ -103,7 +91,6 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  // 从MyInstance加载groups
   void _loadGroups() {
     setState(() {
       _groups = MyInstance().groups ?? [];
@@ -112,7 +99,6 @@ class _HomePageState extends State<HomePage> {
     });
   }
 
-  // 重新加载数据
   _reloadData() async {
     debugPrint('开始加载设备组数据...');
     var response = await widget.mineProvider.getAllGroups();
@@ -127,11 +113,10 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  // 处理Group选择
   void _onGroupSelected(Group group) async {
     if (_selectedGroup?.groupId == group.groupId) {
       debugPrint('设备组未变化，无需切换');
-      return; // 已经是当前选中的group
+      return;
     }
 
     debugPrint('用户切换设备组: ${group.groupName} (${group.deviceCode})');
@@ -140,11 +125,9 @@ class _HomePageState extends State<HomePage> {
       _selectedGroup = group;
     });
 
-    // 切换group（这会自动建立 P2P 连接）
     debugPrint('开始切换设备组并建立 P2P 连接...');
     await widget.mineProvider.changeGroup(group.deviceCode ?? "");
 
-    // P2P 连接成功后，刷新设备存储信息
     debugPrint('设备组切换完成，刷新存储信息');
     await _refreshDeviceStorage();
   }
@@ -152,6 +135,13 @@ class _HomePageState extends State<HomePage> {
   void _onNavigationChanged(int index) {
     setState(() {
       _selectedIndex = index;
+    });
+  }
+
+  // 🆕 处理相册Tab切换
+  void _onAlbumTabChanged(int index) {
+    setState(() {
+      _albumTabIndex = index;
     });
   }
 
@@ -174,6 +164,10 @@ class _HomePageState extends State<HomePage> {
           selectedGroup: _selectedGroup,
           onGroupSelected: _onGroupSelected,
           currentUserId: _currentUserId,
+
+          // 🆕 传递Tab状态
+          currentTabIndex: _albumTabIndex,
+          onTabChanged: _onAlbumTabChanged,
         );
       default:
         return MainFolderPage(
@@ -190,6 +184,5 @@ class _HomePageState extends State<HomePage> {
   @override
   Widget build(BuildContext context) {
     return _getCurrentPage();
-
   }
 }

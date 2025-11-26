@@ -1,4 +1,4 @@
-// pages/album_library_page.dart (优化版)
+// pages/album_library_page.dart (修改版 - 移除Tab栏)
 import 'package:flutter/material.dart';
 import '../../../user/models/group.dart';
 import '../../../widgets/custom_title_bar.dart';
@@ -10,9 +10,6 @@ import '../components/album_bottom_bar.dart';
 import '../components/album_preview_panel.dart';
 import '../managers/selection_manager.dart';
 
-
-/// 优化后的相册图库页面
-/// 主要职责：页面框架和组件回调
 class AlbumLibraryPage extends StatefulWidget {
   final int selectedNavIndex;
   final Function(int) onNavigationChanged;
@@ -20,6 +17,10 @@ class AlbumLibraryPage extends StatefulWidget {
   final Group? selectedGroup;
   final Function(Group)? onGroupSelected;
   final int? currentUserId;
+
+  // 🆕 接收外部Tab状态
+  final int currentTabIndex;
+  final Function(int) onTabChanged;
 
   const AlbumLibraryPage({
     super.key,
@@ -29,17 +30,15 @@ class AlbumLibraryPage extends StatefulWidget {
     this.selectedGroup,
     this.onGroupSelected,
     this.currentUserId,
+    required this.currentTabIndex,
+    required this.onTabChanged,
   });
 
   @override
   State<AlbumLibraryPage> createState() => _AlbumLibraryPageState();
 }
 
-class _AlbumLibraryPageState extends State<AlbumLibraryPage>
-    with SingleTickerProviderStateMixin {
-  // Tab控制器
-  late TabController _tabController;
-
+class _AlbumLibraryPageState extends State<AlbumLibraryPage> {
   // 管理器
   final SelectionManager _selectionManager = SelectionManager();
   final AlbumDataManager _dataManager = AlbumDataManager();
@@ -57,8 +56,6 @@ class _AlbumLibraryPageState extends State<AlbumLibraryPage>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 2, vsync: this);
-    _tabController.addListener(_onTabChanged);
     _scrollController.addListener(_onScroll);
 
     // 初始加载数据
@@ -66,26 +63,28 @@ class _AlbumLibraryPageState extends State<AlbumLibraryPage>
   }
 
   @override
+  void didUpdateWidget(AlbumLibraryPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+
+    // 🆕 监听Tab变化
+    if (oldWidget.currentTabIndex != widget.currentTabIndex) {
+      _onTabSwitch();
+    }
+  }
+
+  @override
   void dispose() {
-    _tabController.dispose();
     _scrollController.dispose();
     _selectionManager.dispose();
     _dataManager.dispose();
     super.dispose();
   }
 
-  void _onTabChanged() {
-    if (_tabController.indexIsChanging) {
-      _onTabSwitch();
-    }
-  }
-
   void _onScroll() {
-    // 预加载优化：提前加载（距离底部 20% 或 500px 时开始）
     final maxScroll = _scrollController.position.maxScrollExtent;
     final currentScroll = _scrollController.position.pixels;
-    final threshold = maxScroll * 0.8; // 80% 位置
-    final minThreshold = maxScroll - 500; // 或距离底部 500px
+    final threshold = maxScroll * 0.8;
+    final minThreshold = maxScroll - 500;
 
     if (currentScroll >= threshold || currentScroll >= minThreshold) {
       if (!_dataManager.isLoading && _dataManager.hasMore) {
@@ -99,21 +98,17 @@ class _AlbumLibraryPageState extends State<AlbumLibraryPage>
   }
 
   void _onTabSwitch() {
-    // 优化：切换 Tab 时使用缓存，不重新加载
     _selectionManager.clearSelection();
     _closePreview();
 
-    // 切换到对应的缓存数据
     _dataManager.switchTab(_isPersonalTab);
 
-    // 如果该 Tab 没有数据，则加载
     if (!_dataManager.hasData) {
       _dataManager.resetAndLoad(isPrivate: _isPersonalTab);
     }
   }
 
   void _resetAndLoad() {
-    // 强制刷新（清空缓存）
     _selectionManager.clearSelection();
     _closePreview();
     _dataManager.forceRefresh(isPrivate: _isPersonalTab);
@@ -123,9 +118,9 @@ class _AlbumLibraryPageState extends State<AlbumLibraryPage>
     _dataManager.loadMore(isPrivate: _isPersonalTab);
   }
 
-  bool get _isPersonalTab => _tabController.index == 0;
+  // 🆕 使用外部传入的Tab索引
+  bool get _isPersonalTab => widget.currentTabIndex == 0;
 
-  // 预览相关方法
   void _openPreview(int index) {
     setState(() {
       _showPreview = true;
@@ -163,6 +158,12 @@ class _AlbumLibraryPageState extends State<AlbumLibraryPage>
         showToolbar: true,
         backgroundColor: const Color(0xFFF5E8DC),
         rightTitleBgColor: Colors.white,
+
+        // 🆕 传递Tab相关参数
+        showTabs: true,
+        currentTabIndex: widget.currentTabIndex,
+        onTabChanged: widget.onTabChanged,
+
         child: Row(
           children: [
             // 侧边导航栏
@@ -179,8 +180,8 @@ class _AlbumLibraryPageState extends State<AlbumLibraryPage>
             Expanded(
               child: Column(
                 children: [
-                  // Tab栏
-                  _buildTabBar(),
+                  // 🆕 只保留工具栏，Tab栏已移至CustomTitleBar
+                  _buildToolbar(),
 
                   // 内容区域
                   Expanded(
@@ -222,61 +223,36 @@ class _AlbumLibraryPageState extends State<AlbumLibraryPage>
     );
   }
 
-  Widget _buildTabBar() {
+  // 🆕 简化的工具栏（不包含Tab栏）
+  Widget _buildToolbar() {
     return Container(
       decoration: BoxDecoration(
         border: Border(
           bottom: BorderSide(color: Colors.grey.shade300),
         ),
       ),
-      child: Column(
-        children: [
-          // Tab栏
-          Container(
-            color: Colors.white,
-            alignment: Alignment.centerLeft,
-            padding: const EdgeInsets.symmetric(horizontal: 24),
-            child: TabBar(
-              controller: _tabController,
-              isScrollable: true,
-              labelColor: Colors.black87,
-              unselectedLabelColor: Colors.grey,
-              indicatorColor: Colors.orange,
-              indicatorSize: TabBarIndicatorSize.label,
-              labelStyle: const TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w500,
-              ),
-              unselectedLabelStyle: const TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.normal,
-              ),
-              tabs: const [
-                Tab(text: '个人'),
-                Tab(text: '家庭'),
-              ],
-            ),
-          ),
-
-          // 工具栏
-          AlbumToolbar(
-            selectionManager: _selectionManager,
-            isGridView: _isGridView,
-            onRefresh: _resetAndLoad,
-            onSelectAll: () {
-              _selectionManager.selectAll(_dataManager.getAllResourceIds());
-            },
-            onClearSelection: () {
-              _selectionManager.clearSelection();
-            },
-            onToggleView: () {
-              setState(() {
-                _isGridView = !_isGridView;
-              });
-            },
-            allResourceIds: _dataManager.getAllResourceIds(),
-          ),
-        ],
+      child: AlbumToolbar(
+        selectionManager: _selectionManager,
+        isGridView: _isGridView,
+        onRefresh: _resetAndLoad,
+        onToggleSelectAll: () {
+          // 🆕 切换全选/取消全选
+          if (_selectionManager.selectionCount == _dataManager.getAllResourceIds().length &&
+              _dataManager.getAllResourceIds().isNotEmpty) {
+            _selectionManager.clearSelection();
+          } else {
+            _selectionManager.selectAll(_dataManager.getAllResourceIds());
+          }
+        },
+        onClearSelection: () {
+          _selectionManager.clearSelection();
+        },
+        onToggleView: () {
+          setState(() {
+            _isGridView = !_isGridView;
+          });
+        },
+        allResourceIds: _dataManager.getAllResourceIds(),
       ),
     );
   }
@@ -286,14 +262,12 @@ class _AlbumLibraryPageState extends State<AlbumLibraryPage>
       animation: _dataManager,
       builder: (context, child) {
         if (_dataManager.isLoading && !_dataManager.hasData) {
-          // 首次加载时显示加载指示器
           return const Center(
             child: CircularProgressIndicator(),
           );
         }
 
         if (_dataManager.errorMessage != null && !_dataManager.hasData) {
-          // 显示错误信息
           return Center(
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
@@ -319,7 +293,6 @@ class _AlbumLibraryPageState extends State<AlbumLibraryPage>
         }
 
         if (!_dataManager.hasData) {
-          // 空状态
           return Center(
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
@@ -344,16 +317,25 @@ class _AlbumLibraryPageState extends State<AlbumLibraryPage>
 
         return Stack(
           children: [
-            // 相册网格视图
-            AlbumGridView(
+            // 🆕 根据视图模式显示不同布局
+            _isGridView
+                ? AlbumGridView(
               groupedResources: _dataManager.groupedResources,
               allResources: _dataManager.allResources,
               selectionManager: _selectionManager,
               onItemClick: _openPreview,
               scrollController: _scrollController,
+              isGridView: true,
+            )
+                : AlbumGridView(
+              groupedResources: _dataManager.groupedResources,
+              allResources: _dataManager.allResources,
+              selectionManager: _selectionManager,
+              onItemClick: _openPreview,
+              scrollController: _scrollController,
+              isGridView: false,
             ),
 
-            // 加载更多指示器
             if (_dataManager.isLoading && _dataManager.hasData)
               const Positioned(
                 bottom: 20,
