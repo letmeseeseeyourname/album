@@ -31,7 +31,7 @@ class FolderGridComponent extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 20),
       child: LayoutBuilder(
         builder: (context, constraints) {
-          // 固定的 item 尺寸
+          // 固定的 items 尺寸
           const itemWidth = 135.0;
           const itemHeight = 120.0;
           const spacing = 10.0;
@@ -39,7 +39,7 @@ class FolderGridComponent extends StatelessWidget {
           // 计算可用宽度
           final availableWidth = constraints.maxWidth;
 
-          // 计算每行可以显示多少个 item
+          // 计算每行可以显示多少个 items
           final crossAxisCount = ((availableWidth + spacing) / (itemWidth + spacing)).floor().clamp(1, 10);
 
           return GridView.builder(

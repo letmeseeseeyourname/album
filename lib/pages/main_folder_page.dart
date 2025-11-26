@@ -808,7 +808,7 @@ class _MainFolderPageState extends State<MainFolderPage> {
                 Navigator.push(
                   context,
                   PageRouteBuilder(
-                    pageBuilder: (context, animation, secondaryAnimation) => FolderDetailPageRefactored(
+                    pageBuilder: (context, animation, secondaryAnimation) => FolderDetailPage(
                       folder: folder,
                       selectedNavIndex: widget.selectedNavIndex,
                       onNavigationChanged: widget.onNavigationChanged,
@@ -984,7 +984,7 @@ class _MainFolderPageState extends State<MainFolderPage> {
                 Navigator.push(
                   context,
                   PageRouteBuilder(
-                    pageBuilder: (context, animation, secondaryAnimation) => FolderDetailPageRefactored(
+                    pageBuilder: (context, animation, secondaryAnimation) => FolderDetailPage(
                       folder: folders[index],
                       selectedNavIndex: widget.selectedNavIndex,
                       onNavigationChanged: widget.onNavigationChanged,

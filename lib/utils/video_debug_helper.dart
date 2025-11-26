@@ -267,8 +267,8 @@ class VideoUrlCheckResult {
 /// }
 ///
 /// Future<void> _checkVideoUrlBeforePlay() async {
-///   final item = widget.mediaItems[currentIndex];
-///   final url = item.getMediaSource();
+///   final items = widget.mediaItems[currentIndex];
+///   final url = items.getMediaSource();
 ///
 ///   final result = await VideoDebugHelper.checkVideoUrl(url);
 ///
