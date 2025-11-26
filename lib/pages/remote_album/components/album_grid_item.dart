@@ -81,7 +81,7 @@ class AlbumGridItem extends StatelessWidget {
     }
 
     final imageUrl = "${AppConfig.minio()}/${resource.thumbnailPath!}";
-    // print("imageUrl: $imageUrl");
+    debugPrint("imageUrl: $imageUrl");
     // 根据图片的宽高比决定填充方式
     final aspectRatio = _getImageAspectRatio();
 
