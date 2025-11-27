@@ -6,6 +6,7 @@ import 'package:dio/dio.dart';
 import 'package:path/path.dart' as p;
 import '../../../user/models/resource_list_model.dart';
 import '../../../network/constant_sign.dart';
+import '../../../services/transfer_speed_service.dart';
 import '../database/download_task_db_helper.dart';
 
 
@@ -240,6 +241,9 @@ class DownloadQueueManager extends ChangeNotifier {
       status: DownloadTaskStatus.downloading,
     );
 
+    // 启动传输速率监控
+    TransferSpeedService.instance.startMonitoring();
+
     try {
       // 确保保存目录存在
       final saveFile = File(task.savePath!);
@@ -270,6 +274,9 @@ class DownloadQueueManager extends ChangeNotifier {
         onReceiveProgress: (received, total) {
           final totalSize = downloadedSize + total;
           final currentSize = downloadedSize + received;
+
+          // 更新传输速率服务
+          TransferSpeedService.instance.updateDownloadProgress(currentSize);
 
           // 更新进度
           final index = _downloadTasks.indexWhere((t) => t.taskId == taskId);
@@ -357,6 +364,11 @@ class DownloadQueueManager extends ChangeNotifier {
     } finally {
       // 清理活动任务
       _activeTasks.remove(taskId);
+
+      // 如果没有活动任务了，停止速率监控
+      if (_activeTasks.isEmpty) {
+        TransferSpeedService.instance.onDownloadComplete();
+      }
 
       // 处理下一个任务
       _processNextDownload();

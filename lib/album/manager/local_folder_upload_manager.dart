@@ -14,6 +14,7 @@ import 'package:semaphore_plus/semaphore_plus.dart';
 
 import '../../minio/minio_service.dart';
 import '../../services/thumbnail_helper.dart';
+import '../../services/transfer_speed_service.dart';
 import '../../user/my_instance.dart';
 import '../database/database_helper.dart';
 import '../database/upload_task_db_helper.dart';
@@ -164,6 +165,9 @@ class LocalFolderUploadManager extends ChangeNotifier {
     int totalFiles = localFilePaths.length;
     int uploadedFiles = 0;
     int failedFiles = 0;
+
+    // 启动传输速率监控
+    TransferSpeedService.instance.startMonitoring();
 
     try {
       final userId = MyInstance().user?.user?.id ?? 0;
@@ -344,6 +348,10 @@ class LocalFolderUploadManager extends ChangeNotifier {
       _isUploading = false;
       _updateProgress(totalFiles, uploadedFiles, failedFiles);
       onProgress?.call(_currentProgress!);
+
+      // 停止传输速率监控
+      TransferSpeedService.instance.onUploadComplete();
+
       notifyListeners();
     }
   }
@@ -563,7 +571,11 @@ class LocalFolderUploadManager extends ChangeNotifier {
     final sm = LocalSemaphore(LocalUploadConfig.maxConcurrentUploads);
     int taskCount = files.length;
 
-    LogUtil.log("Files to be uploaded: ${files.length}");
+    // 计算总字节数和已上传字节数
+    int totalBytes = files.fold(0, (sum, entry) => sum + entry.key.fileSize);
+    int uploadedBytes = 0;
+
+    LogUtil.log("Files to be uploaded: ${files.length}, Total bytes: $totalBytes");
 
     // 并发上传
     for (var entry in files) {
@@ -587,6 +599,10 @@ class LocalFolderUploadManager extends ChangeNotifier {
             uploadedEntries.add(entry);
             await dbHelper.updateStatusByMd5Hash(md5Hash, 2); // 状态2：已完成
             uploadedFiles++;
+
+            // 更新已上传字节数和传输速率
+            uploadedBytes += fileInfo.fileSize;
+            TransferSpeedService.instance.updateUploadProgress(uploadedBytes);
           } else {
             LogUtil.log("[upload] Failed to upload: ${fileInfo.fileName}");
             await dbHelper.updateStatusByMd5Hash(md5Hash, 3); // 状态3：失败
@@ -702,7 +718,7 @@ class LocalFolderUploadManager extends ChangeNotifier {
       result = await minioService.uploadFile(
         bucketName,
         "$uploadPathWithoutBucket/$md5Hash/thumbnail_$imageFileName",
-        thumbnailFile.path,
+        file.path,
       );
 
       await _cleanupFile(thumbnailFile);
@@ -722,7 +738,7 @@ class LocalFolderUploadManager extends ChangeNotifier {
       result = await minioService.uploadFile(
         bucketName,
         "$uploadPathWithoutBucket/$md5Hash/show_$imageFileName",
-        mediumFile.path,
+        file.path,
       );
 
       await _cleanupFile(mediumFile);

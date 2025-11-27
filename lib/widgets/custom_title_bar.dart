@@ -1,4 +1,4 @@
-// widgets/custom_title_bar.dart (修改版 - 支持Tab栏)
+// widgets/custom_title_bar.dart (修改版 - 支持Tab栏和传输速率显示)
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/svg.dart';
 import 'package:window_manager/window_manager.dart';
@@ -7,6 +7,7 @@ import '../network/constant_sign.dart';
 import '../pages/settings_page.dart';
 import '../pages/upload_records_page.dart';
 import '../pages/user_info_page.dart';
+import '../services/transfer_speed_service.dart';
 
 class CustomTitleBar extends StatefulWidget {
   final Widget? child;
@@ -110,11 +111,11 @@ class _CustomTitleBarState extends State<CustomTitleBar> {
   }
 
   void _openUploadRecords() {
-    showDialog(
-      context: context,
-      barrierDismissible: true,
-      barrierColor: Colors.black54,
-      builder: (context) => const UploadRecordsPage(),
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => const UploadRecordsPage(),
+      ),
     );
   }
 
@@ -320,6 +321,12 @@ class _CustomTitleBarState extends State<CustomTitleBar> {
                                     ),
                                   ),
                                 const Spacer(),
+
+                                // 传输速率显示
+                                TransferSpeedIndicator(
+                                  speedService: TransferSpeedService.instance,
+                                ),
+
                                 const SizedBox(width: 16),
                                 IconButton(
                                   icon: SvgPicture.asset(

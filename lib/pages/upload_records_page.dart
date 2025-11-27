@@ -1,7 +1,9 @@
 // pages/upload_records_page.dart
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:window_manager/window_manager.dart';
 import '../album/database/upload_task_db_helper.dart';
+import '../album/database/download_task_db_helper.dart';
 import '../user/my_instance.dart';
 
 /// 传输记录页面
@@ -17,15 +19,17 @@ class _UploadRecordsPageState extends State<UploadRecordsPage>
     with SingleTickerProviderStateMixin {
   late TabController _tabController;
   final UploadFileTaskManager _taskManager = UploadFileTaskManager.instance;
+  final DownloadTaskDbHelper _downloadDbHelper = DownloadTaskDbHelper.instance;
 
   List<UploadTaskRecord> _uploadTasks = [];
+  List<DownloadTaskRecord> _downloadTasks = [];
   bool _isLoading = true;
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
-    _loadUploadTasks();
+    _loadAllTasks();
   }
 
   @override
@@ -34,38 +38,57 @@ class _UploadRecordsPageState extends State<UploadRecordsPage>
     super.dispose();
   }
 
-  /// 加载上传任务列表
-  Future<void> _loadUploadTasks() async {
+  /// 加载所有任务（上传和下载）
+  Future<void> _loadAllTasks() async {
     setState(() {
       _isLoading = true;
     });
 
+    await Future.wait([
+      _loadUploadTasks(),
+      _loadDownloadTasks(),
+    ]);
+
+    setState(() {
+      _isLoading = false;
+    });
+  }
+
+  /// 加载上传任务列表
+  Future<void> _loadUploadTasks() async {
     try {
       final userId = MyInstance().user?.user?.id ?? 0;
       final groupId = MyInstance().group?.groupId ?? 0;
 
       if (userId > 0 && groupId > 0) {
-        // 加载所有任务，不限制状态
         final tasks = await _taskManager.listTasks(
           userId: userId,
           groupId: groupId,
-          limit: 100, // 限制最多显示100条记录
+          limit: 100,
         );
-
-        setState(() {
-          _uploadTasks = tasks;
-          _isLoading = false;
-        });
-      } else {
-        setState(() {
-          _isLoading = false;
-        });
+        _uploadTasks = tasks;
       }
     } catch (e) {
       print('加载上传任务失败: $e');
-      setState(() {
-        _isLoading = false;
-      });
+    }
+  }
+
+  /// 加载下载任务列表
+  Future<void> _loadDownloadTasks() async {
+    try {
+      final userId = MyInstance().user?.user?.id ?? 0;
+      final groupId = MyInstance().group?.groupId ?? 0;
+
+      if (userId > 0 && groupId > 0) {
+        final tasks = await _downloadDbHelper.listTasks(
+          userId: userId,
+          groupId: groupId,
+          limit: 100,
+        );
+        _downloadTasks = tasks;
+      }
+    } catch (e) {
+      print('加载下载任务失败: $e');
     }
   }
 
@@ -126,34 +149,27 @@ class _UploadRecordsPageState extends State<UploadRecordsPage>
 
   @override
   Widget build(BuildContext context) {
-    return Dialog(
-      backgroundColor: Colors.transparent,
-      insetPadding: const EdgeInsets.symmetric(horizontal: 40, vertical: 60),
-      child: Container(
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: Column(
-          children: [
-            // 顶部标题栏
-            _buildTitleBar(),
+    return Scaffold(
+      backgroundColor: Colors.white,
+      body: Column(
+        children: [
+          // 顶部标题栏
+          _buildTitleBar(),
 
-            // Tab栏
-            _buildTabBar(),
+          // Tab栏
+          _buildTabBar(),
 
-            // 内容区域
-            Expanded(
-              child: TabBarView(
-                controller: _tabController,
-                children: [
-                  _buildUploadTab(),
-                  _buildDownloadTab(),
-                ],
-              ),
+          // 内容区域
+          Expanded(
+            child: TabBarView(
+              controller: _tabController,
+              children: [
+                _buildUploadTab(),
+                _buildDownloadTab(),
+              ],
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
@@ -162,41 +178,54 @@ class _UploadRecordsPageState extends State<UploadRecordsPage>
   Widget _buildTitleBar() {
     return Container(
       height: 56,
-      padding: const EdgeInsets.symmetric(horizontal: 20),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: const BorderRadius.only(
-          topLeft: Radius.circular(12),
-          topRight: Radius.circular(12),
-        ),
         border: Border(
-          bottom: BorderSide(color: Colors.grey.shade300),
+          bottom: BorderSide(color: Colors.grey.shade200),
         ),
       ),
       child: Row(
         children: [
-          // 返回按钮
-          IconButton(
-            icon: const Icon(Icons.arrow_back, size: 24),
-            onPressed: () => Navigator.pop(context),
-            tooltip: '返回',
-          ),
-
-          const SizedBox(width: 12),
-
-          // 标题
-          const Text(
-            '传输记录',
-            style: TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.w600,
+          // 左侧：返回按钮和标题（可拖拽区域）
+          Expanded(
+            child: GestureDetector(
+              onPanStart: (_) => windowManager.startDragging(),
+              onDoubleTap: () async {
+                if (await windowManager.isMaximized()) {
+                  await windowManager.unmaximize();
+                } else {
+                  await windowManager.maximize();
+                }
+              },
+              child: Container(
+                color: Colors.transparent,
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Row(
+                  children: [
+                    // 返回按钮
+                    IconButton(
+                      icon: const Icon(Icons.arrow_back, size: 24),
+                      onPressed: () => Navigator.pop(context),
+                      tooltip: '返回',
+                    ),
+                    const SizedBox(width: 8),
+                    // 标题
+                    const Text(
+                      '传输记录',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             ),
           ),
 
-          const Spacer(),
-
-          // 窗口控制按钮区域（占位，保持与主窗口一致）
+          // 右侧：工具按钮和窗口控制
           Row(
+            mainAxisSize: MainAxisSize.min,
             children: [
               // 设置按钮
               IconButton(
@@ -210,32 +239,28 @@ class _UploadRecordsPageState extends State<UploadRecordsPage>
                 onPressed: () {},
                 tooltip: '排序',
               ),
-              // 最小化按钮（占位）
-              Container(
-                width: 46,
-                height: 56,
-                color: Colors.transparent,
-                child: const Icon(Icons.minimize, size: 16),
+              const SizedBox(width: 8),
+              // 最小化按钮
+              _WindowButton(
+                icon: Icons.minimize,
+                onPressed: () => windowManager.minimize(),
               ),
-              // 最大化按钮（占位）
-              Container(
-                width: 46,
-                height: 56,
-                color: Colors.transparent,
-                child: const Icon(Icons.crop_square, size: 16),
+              // 最大化按钮
+              _WindowButton(
+                icon: Icons.crop_square,
+                onPressed: () async {
+                  if (await windowManager.isMaximized()) {
+                    await windowManager.unmaximize();
+                  } else {
+                    await windowManager.maximize();
+                  }
+                },
               ),
               // 关闭按钮
-              MouseRegion(
-                cursor: SystemMouseCursors.click,
-                child: GestureDetector(
-                  onTap: () => Navigator.pop(context),
-                  child: Container(
-                    width: 46,
-                    height: 56,
-                    color: Colors.transparent,
-                    child: const Icon(Icons.close, size: 16),
-                  ),
-                ),
+              _WindowButton(
+                icon: Icons.close,
+                isClose: true,
+                onPressed: () => Navigator.pop(context),
               ),
             ],
           ),
@@ -247,23 +272,48 @@ class _UploadRecordsPageState extends State<UploadRecordsPage>
   /// 构建Tab栏
   Widget _buildTabBar() {
     return Container(
-      height: 48,
-      padding: const EdgeInsets.symmetric(horizontal: 20),
+      height: 60,
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
       decoration: BoxDecoration(
-        color: const Color(0xFFF5F5F5),
+        color: Colors.white,
         border: Border(
-          bottom: BorderSide(color: Colors.grey.shade300),
+          bottom: BorderSide(color: Colors.grey.shade200),
         ),
       ),
-      child: TabBar(
-        controller: _tabController,
-        labelColor: Colors.black,
-        unselectedLabelColor: Colors.grey,
-        indicatorColor: Colors.orange,
-        indicatorWeight: 3,
-        tabs: const [
-          Tab(text: '同步'),
-          Tab(text: '下载'),
+      child: Row(
+        children: [
+          // 左对齐的 Tab 按钮组
+          Container(
+            decoration: BoxDecoration(
+              color: const Color(0xFFF5F5F5),
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: TabBar(
+              controller: _tabController,
+              isScrollable: true,
+              labelColor: Colors.black,
+              unselectedLabelColor: Colors.grey,
+              indicatorSize: TabBarIndicatorSize.tab,
+              indicator: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(6),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.05),
+                    blurRadius: 2,
+                    offset: const Offset(0, 1),
+                  ),
+                ],
+              ),
+              dividerColor: Colors.transparent,
+              labelPadding: const EdgeInsets.symmetric(horizontal: 20),
+              tabs: const [
+                Tab(text: '同步'),
+                Tab(text: '下载'),
+              ],
+            ),
+          ),
+          const Spacer(),
         ],
       ),
     );
@@ -297,10 +347,10 @@ class _UploadRecordsPageState extends State<UploadRecordsPage>
         // 任务列表
         Expanded(
           child: ListView.builder(
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+            padding: EdgeInsets.zero,
             itemCount: _uploadTasks.length,
             itemBuilder: (context, index) {
-              return _buildUploadTaskItem(_uploadTasks[index]);
+              return _buildUploadTaskItem(_uploadTasks[index], index);
             },
           ),
         ),
@@ -311,15 +361,319 @@ class _UploadRecordsPageState extends State<UploadRecordsPage>
     );
   }
 
-  /// 构建下载Tab（暂未实现）
+  /// 构建下载Tab
   Widget _buildDownloadTab() {
-    return const Center(
-      child: Text(
-        '下载功能开发中...',
-        style: TextStyle(
-          fontSize: 16,
-          color: Colors.grey,
+    if (_isLoading) {
+      return const Center(
+        child: CircularProgressIndicator(),
+      );
+    }
+
+    if (_downloadTasks.isEmpty) {
+      return const Center(
+        child: Text(
+          '暂无下载记录',
+          style: TextStyle(
+            fontSize: 16,
+            color: Colors.grey,
+          ),
         ),
+      );
+    }
+
+    return Column(
+      children: [
+        // 表头
+        _buildDownloadTableHeader(),
+
+        // 任务列表
+        Expanded(
+          child: ListView.builder(
+            padding: EdgeInsets.zero,
+            itemCount: _downloadTasks.length,
+            itemBuilder: (context, index) {
+              return _buildDownloadTaskItem(_downloadTasks[index], index);
+            },
+          ),
+        ),
+
+        // 底部分页信息
+        _buildDownloadPaginationFooter(),
+      ],
+    );
+  }
+
+  /// 构建下载表头
+  Widget _buildDownloadTableHeader() {
+    return Container(
+      height: 48,
+      padding: const EdgeInsets.symmetric(horizontal: 20),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF9F9F9),
+        border: Border(
+          bottom: BorderSide(color: Colors.grey.shade300),
+        ),
+      ),
+      child: Row(
+        children: [
+          _buildHeaderCell('文件名', flex: 3),
+          _buildHeaderCell('大小', flex: 2),
+          _buildHeaderCell('进度', flex: 2),
+          _buildHeaderCell('状态', flex: 2),
+          _buildHeaderCell('操作', flex: 2),
+        ],
+      ),
+    );
+  }
+
+  /// 构建下载任务项
+  Widget _buildDownloadTaskItem(DownloadTaskRecord task, int index) {
+    // 奇偶行不同背景色
+    final isEvenRow = index % 2 == 0;
+
+    return Container(
+      height: 56,
+      padding: const EdgeInsets.symmetric(horizontal: 20),
+      decoration: BoxDecoration(
+        color: isEvenRow ? Colors.white : const Color(0xFFFAFAFA),
+        border: Border(
+          bottom: BorderSide(color: Colors.grey.shade200),
+        ),
+      ),
+      child: Row(
+        children: [
+          // 文件名
+          Expanded(
+            flex: 3,
+            child: Row(
+              children: [
+                // 文件类型图标
+                Icon(
+                  task.fileType == 'V' ? Icons.videocam : Icons.image,
+                  size: 20,
+                  color: task.fileType == 'V' ? Colors.blue : Colors.orange,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    task.fileName,
+                    style: const TextStyle(fontSize: 14),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          // 大小
+          Expanded(
+            flex: 2,
+            child: Text(
+              _formatFileSize(task.fileSize),
+              style: const TextStyle(fontSize: 14),
+            ),
+          ),
+
+          // 进度
+          Expanded(
+            flex: 2,
+            child: _buildProgressWidget(task),
+          ),
+
+          // 状态
+          Expanded(
+            flex: 2,
+            child: _buildDownloadStatusWidget(task.status),
+          ),
+
+          // 操作
+          Expanded(
+            flex: 2,
+            child: _buildDownloadActionButtons(task),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 构建进度显示
+  Widget _buildProgressWidget(DownloadTaskRecord task) {
+    if (task.status == DownloadTaskStatus.completed) {
+      return const Text(
+        '100%',
+        style: TextStyle(fontSize: 14, color: Colors.green),
+      );
+    }
+
+    if (task.status == DownloadTaskStatus.downloading) {
+      final progress = (task.progress * 100).toStringAsFixed(1);
+      return Row(
+        children: [
+          Expanded(
+            child: LinearProgressIndicator(
+              value: task.progress,
+              backgroundColor: Colors.grey.shade200,
+              valueColor: const AlwaysStoppedAnimation<Color>(Colors.orange),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            '$progress%',
+            style: const TextStyle(fontSize: 12, color: Colors.grey),
+          ),
+        ],
+      );
+    }
+
+    return Text(
+      '${(task.progress * 100).toStringAsFixed(0)}%',
+      style: const TextStyle(fontSize: 14, color: Colors.grey),
+    );
+  }
+
+  /// 构建下载状态显示
+  Widget _buildDownloadStatusWidget(DownloadTaskStatus status) {
+    String text;
+    Color color;
+
+    switch (status) {
+      case DownloadTaskStatus.pending:
+        text = '等待中';
+        color = Colors.grey;
+        break;
+      case DownloadTaskStatus.downloading:
+        text = '下载中';
+        color = Colors.orange;
+        break;
+      case DownloadTaskStatus.paused:
+        text = '已暂停';
+        color = Colors.blue;
+        break;
+      case DownloadTaskStatus.completed:
+        text = '已完成';
+        color = Colors.green;
+        break;
+      case DownloadTaskStatus.failed:
+        text = '失败';
+        color = Colors.red;
+        break;
+      case DownloadTaskStatus.canceled:
+        text = '已取消';
+        color = Colors.grey;
+        break;
+    }
+
+    return Text(
+      text,
+      style: TextStyle(fontSize: 14, color: color),
+    );
+  }
+
+  /// 构建下载操作按钮
+  Widget _buildDownloadActionButtons(DownloadTaskRecord task) {
+    return Row(
+      children: [
+        // 删除按钮
+        TextButton(
+          onPressed: () => _showDeleteDownloadConfirmDialog(task),
+          child: const Text(
+            '删除',
+            style: TextStyle(fontSize: 13, color: Colors.red),
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// 显示删除下载记录确认对话框
+  void _showDeleteDownloadConfirmDialog(DownloadTaskRecord task) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('确认删除'),
+        content: Text('确定要删除 "${task.fileName}" 的下载记录吗？'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+              _deleteDownloadTask(task);
+            },
+            child: const Text('删除', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 删除下载任务记录
+  Future<void> _deleteDownloadTask(DownloadTaskRecord task) async {
+    try {
+      await _downloadDbHelper.deleteTask(
+        taskId: task.taskId,
+        userId: task.userId,
+        groupId: task.groupId,
+      );
+
+      // 刷新列表
+      await _loadAllTasks();
+      setState(() {});
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('已删除记录')),
+        );
+      }
+    } catch (e) {
+      print('删除下载任务失败: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('删除失败: $e')),
+        );
+      }
+    }
+  }
+
+  /// 格式化文件大小
+  String _formatFileSize(int bytes) {
+    if (bytes < 1024) {
+      return '${bytes}B';
+    } else if (bytes < 1024 * 1024) {
+      return '${(bytes / 1024).toStringAsFixed(1)}KB';
+    } else if (bytes < 1024 * 1024 * 1024) {
+      return '${(bytes / (1024 * 1024)).toStringAsFixed(1)}MB';
+    } else {
+      return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(2)}GB';
+    }
+  }
+
+  /// 构建下载分页信息
+  Widget _buildDownloadPaginationFooter() {
+    final totalCount = _downloadTasks.length;
+
+    return Container(
+      height: 48,
+      padding: const EdgeInsets.symmetric(horizontal: 20),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        border: Border(
+          top: BorderSide(color: Colors.grey.shade200),
+        ),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.end,
+        children: [
+          Text(
+            '共 $totalCount 条记录',
+            style: TextStyle(
+              fontSize: 13,
+              color: Colors.grey.shade600,
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -363,17 +717,20 @@ class _UploadRecordsPageState extends State<UploadRecordsPage>
   }
 
   /// 构建上传任务项
-  Widget _buildUploadTaskItem(UploadTaskRecord task) {
+  Widget _buildUploadTaskItem(UploadTaskRecord task, int index) {
     final dateTime =
     DateTime.fromMillisecondsSinceEpoch(task.createdAt);
     final formattedDate =
     DateFormat('yyyy.M.d HH:mm:ss').format(dateTime);
 
+    // 奇偶行不同背景色
+    final isEvenRow = index % 2 == 0;
+
     return Container(
-      height: 60,
-      margin: const EdgeInsets.only(bottom: 8),
+      height: 56,
+      padding: const EdgeInsets.symmetric(horizontal: 20),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: isEvenRow ? Colors.white : const Color(0xFFFAFAFA),
         border: Border(
           bottom: BorderSide(color: Colors.grey.shade200),
         ),
@@ -389,11 +746,11 @@ class _UploadRecordsPageState extends State<UploadRecordsPage>
             ),
           ),
 
-          // 数量（这里使用taskId作为占位，实际应该从其他地方获取）
+          // 数量
           Expanded(
             flex: 2,
             child: Text(
-              '${task.fileCount}', // ✅ 显示实际文件数量
+              '${task.fileCount}',
               style: const TextStyle(fontSize: 14),
             ),
           ),
@@ -402,7 +759,7 @@ class _UploadRecordsPageState extends State<UploadRecordsPage>
           Expanded(
             flex: 2,
             child: Text(
-              task.formattedSize, // ✅ 显示格式化的实际大小
+              task.formattedSize,
               style: const TextStyle(fontSize: 14),
             ),
           ),
@@ -523,26 +880,72 @@ class _UploadRecordsPageState extends State<UploadRecordsPage>
 
   /// 构建分页信息
   Widget _buildPaginationFooter() {
+    final totalCount = _uploadTasks.length;
+
     return Container(
       height: 48,
       padding: const EdgeInsets.symmetric(horizontal: 20),
       decoration: BoxDecoration(
         color: Colors.white,
         border: Border(
-          top: BorderSide(color: Colors.grey.shade300),
+          top: BorderSide(color: Colors.grey.shade200),
         ),
       ),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.end,
         children: [
           Text(
-            '第1/3页，共20条',
+            '共 $totalCount 条记录',
             style: TextStyle(
               fontSize: 13,
               color: Colors.grey.shade600,
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// 窗口控制按钮
+class _WindowButton extends StatefulWidget {
+  final IconData icon;
+  final VoidCallback onPressed;
+  final bool isClose;
+
+  const _WindowButton({
+    required this.icon,
+    required this.onPressed,
+    this.isClose = false,
+  });
+
+  @override
+  State<_WindowButton> createState() => _WindowButtonState();
+}
+
+class _WindowButtonState extends State<_WindowButton> {
+  bool _isHovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return MouseRegion(
+      onEnter: (_) => setState(() => _isHovered = true),
+      onExit: (_) => setState(() => _isHovered = false),
+      child: GestureDetector(
+        onTap: widget.onPressed,
+        child: Container(
+          width: 46,
+          height: 56,
+          alignment: Alignment.center,
+          color: _isHovered
+              ? (widget.isClose ? Colors.red : Colors.grey.shade200)
+              : Colors.transparent,
+          child: Icon(
+            widget.icon,
+            size: 18,
+            color: _isHovered && widget.isClose ? Colors.white : Colors.black54,
+          ),
+        ),
       ),
     );
   }
