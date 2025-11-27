@@ -55,6 +55,25 @@ class LoginService {
       );
     }
   }
+  /// 扫码登录轮询接口
+  /// 用于检查用户是否已通过APP扫码确认登录
+  static Future<LoginResult> p6useQRLogin(String deviceCode) async {
+    try {
+      final response = await _provider.p6useQRLogin(deviceCode);
+
+      return LoginResult(
+        success: response.isSuccess,
+        message: response.isSuccess ? '登录成功' : (response.message ?? '等待扫码确认'),
+        loginData: response.model,
+      );
+    } catch (e) {
+      return LoginResult(
+        success: false,
+        message: '扫码登录异常：${e.toString()}',
+      );
+    }
+  }
+
 
   /// 验证码登录
   /// [phone] 手机号

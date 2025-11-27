@@ -19,7 +19,6 @@ import '../models/p6device_info_model.dart';
 import '../models/user.dart';
 import '../models/user_model.dart';
 import '../my_instance.dart';
-import '../native_bridge.dart';
 import '../models/qr_code_model.dart';
 import '../../p2p/pg_tunnel_service.dart';
 
@@ -191,10 +190,39 @@ class MyNetworkProvider extends ChangeNotifier {
         "deviceCode": deviceCode,
       },
       netMethod: NetMethod.post, // 如果后端强制要求 GET，请改为 NetMethod.get 并将参数拼接到 url 或调整 formData
+      isUrlEncode: true,
     );
 
     return responseModel;
   }
+
+  Future<ResponseModel<LoginResponseModel>> p6useQRLogin(String deviceCode) async {
+    var appInfo = await PackageInfo.fromPlatform();
+
+    String url = "${AppConfig.userUrl()}/api/admin/auth/p6useQRLogin";
+
+    var formData = {
+      "appVersion": appInfo.version,
+      "deviceType": "windows",
+      "deviceCode": deviceCode,
+      "deviceModel": await WinHelper.getDeviceModel(),
+    };
+
+    ResponseModel<LoginResponseModel> responseModel =
+    await requestAndConvertResponseModel(
+      url,
+      formData: formData,
+      netMethod: NetMethod.post,
+    );
+
+    // 登录成功后的处理（与 login 方法保持一致）
+    if (responseModel.isSuccess) {
+      await MyInstance().set(responseModel.model);
+    }
+
+    return responseModel;
+  }
+
 
 //邮件类型：1-注册用户、2-找回/重置密码、3-验证邮箱、4-更换邮箱
   Future<ResponseModel<String>> getCode(
@@ -217,7 +245,7 @@ class MyNetworkProvider extends ChangeNotifier {
   Future<ResponseModel<LoginResponseModel>> login(
       String account, String password, Logintype logType) async {
     var appInfo = await PackageInfo.fromPlatform();
-    var uuid = await NativeBridge.uuid();
+    var uuid = await WinHelper.uuid();
     String url = "${AppConfig.userUrl()}/api/admin/auth/login-by-password";
     var formData = {
       "deviceCode": uuid,
@@ -252,7 +280,7 @@ class MyNetworkProvider extends ChangeNotifier {
 
   Future<ResponseModel<UserModel>> logout() async {
     String url = "${AppConfig.userUrl()}/api/admin/auth/logout";
-    var uuid = await NativeBridge.uuid();
+    var uuid = await WinHelper.uuid();
     ResponseModel<UserModel> responseModel =
     await requestAndConvertResponseModel(
       url,
