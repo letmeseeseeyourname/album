@@ -185,23 +185,26 @@ class _AlbumLibraryPageState extends State<AlbumLibraryPage> {
 
                   // 内容区域
                   Expanded(
-                    child: Row(
+                    child: Stack(
                       children: [
-                        // 左侧相册列表
-                        Expanded(
-                          child: _buildMainContent(),
-                        ),
+                        // 主内容区（相册列表）
+                        _buildMainContent(),
 
-                        // 右侧预览面板
+                        // 右侧预览面板（覆盖在上方）
                         if (_showPreview)
-                          AlbumPreviewPanel(
-                            mediaItems: _dataManager.allResources,
-                            previewIndex: _previewIndex,
-                            onClose: _closePreview,
-                            onPrevious: _previousMedia,
-                            onNext: _nextMedia,
-                            canGoPrevious: _previewIndex > 0,
-                            canGoNext: _previewIndex < _dataManager.allResources.length - 1,
+                          Positioned(
+                            top: 0,
+                            right: 0,
+                            bottom: 0,
+                            child: AlbumPreviewPanel(
+                              mediaItems: _dataManager.allResources,
+                              previewIndex: _previewIndex,
+                              onClose: _closePreview,
+                              onPrevious: _previousMedia,
+                              onNext: _nextMedia,
+                              canGoPrevious: _previewIndex > 0,
+                              canGoNext: _previewIndex < _dataManager.allResources.length - 1,
+                            ),
                           ),
                       ],
                     ),

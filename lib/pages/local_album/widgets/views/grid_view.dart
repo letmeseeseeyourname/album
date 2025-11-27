@@ -1,24 +1,23 @@
 // widgets/views/grid_view.dart
 import 'dart:async';
+import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_svg/svg.dart';
 import '../../../../models/file_item.dart';
-import '../../services/media_cache_service.dart';
-import '../common/selection_checkbox.dart';
-import '../items/folder_item.dart';
-import '../items/image_item.dart';
-import '../items/video_item.dart';
+import '../../../../services/thumbnail_helper.dart';
 import 'file_view_factory.dart';
 
 /// 网格视图组件
 ///
-/// 使用统一的 MediaCacheService 管理缓存
+/// 显示文件夹、图片、视频的网格布局
+/// Item 布局：正方形缩略图 + 名称 + 大小
 class FileGridView extends StatefulWidget {
   final List<FileItem> items;
   final Set<int> selectedIndices;
   final bool isSelectionMode;
   final EdgeInsets padding;
   final double itemWidth;
-  final double itemAspectRatio;
   final double spacing;
   final Function(int actualIndex) onItemTap;
   final Function(int actualIndex) onItemDoubleTap;
@@ -32,7 +31,6 @@ class FileGridView extends StatefulWidget {
     required this.isSelectionMode,
     this.padding = const EdgeInsets.symmetric(horizontal: 30, vertical: 10),
     this.itemWidth = 140.0,
-    this.itemAspectRatio = 0.85,
     this.spacing = 10.0,
     required this.onItemTap,
     required this.onItemDoubleTap,
@@ -45,14 +43,14 @@ class FileGridView extends StatefulWidget {
 }
 
 class _FileGridViewState extends State<FileGridView> {
-  final MediaCacheService _cacheService = MediaCacheService.instance;
-  StreamSubscription<CacheUpdateEvent>? _cacheSubscription;
+  // 视频缩略图缓存
+  static final Map<String, String> _videoThumbnailCache = {};
+  static final Set<String> _loadingThumbnailPaths = {};
 
   @override
   void initState() {
     super.initState();
     _preloadThumbnails();
-    _subscribeToCacheUpdates();
   }
 
   @override
@@ -63,32 +61,52 @@ class _FileGridViewState extends State<FileGridView> {
     }
   }
 
-  @override
-  void dispose() {
-    _cacheSubscription?.cancel();
-    super.dispose();
-  }
-
   void _preloadThumbnails() {
     for (final item in widget.items) {
       if (item.type == FileItemType.video) {
-        _cacheService.preloadVideoThumbnail(item.path);
+        _preloadVideoThumbnail(item);
       }
     }
   }
 
-  void _subscribeToCacheUpdates() {
-    _cacheSubscription = _cacheService.onCacheUpdate.listen((event) {
-      if (event.type == CacheUpdateType.thumbnail && mounted) {
-        setState(() {});
+  void _preloadVideoThumbnail(FileItem item) {
+    if (_videoThumbnailCache.containsKey(item.path)) return;
+    if (_loadingThumbnailPaths.contains(item.path)) return;
+
+    _loadingThumbnailPaths.add(item.path);
+    _loadVideoThumbnailAsync(item);
+  }
+
+  Future<void> _loadVideoThumbnailAsync(FileItem item) async {
+    try {
+      final thumbnailPath = await ThumbnailHelper.generateThumbnail(item.path);
+      if (thumbnailPath != null) {
+        final file = File(thumbnailPath);
+        if (await file.exists()) {
+          _videoThumbnailCache[item.path] = thumbnailPath;
+          if (mounted) {
+            setState(() {});
+          }
+        }
       }
-    });
+      _loadingThumbnailPaths.remove(item.path);
+    } catch (e) {
+      if (kDebugMode) {
+        print('FileGridView: Error generating thumbnail: $e');
+      }
+      _loadingThumbnailPaths.remove(item.path);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     if (widget.items.isEmpty) {
-      return const EmptyStateWidget();
+      return const Center(
+        child: Text(
+          '此文件夹为空',
+          style: TextStyle(fontSize: 16, color: Colors.grey),
+        ),
+      );
     }
 
     return Padding(
@@ -101,7 +119,7 @@ class _FileGridViewState extends State<FileGridView> {
           return GridView.builder(
             gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
               crossAxisCount: crossAxisCount,
-              childAspectRatio: widget.itemAspectRatio,
+              childAspectRatio: 0.85, // 宽高比，留出名称和大小的空间
               crossAxisSpacing: widget.spacing,
               mainAxisSpacing: widget.spacing,
             ),
@@ -120,8 +138,7 @@ class _FileGridViewState extends State<FileGridView> {
 
     switch (item.type) {
       case FileItemType.folder:
-        return FolderItem(
-          key: ValueKey(item.path),
+        return _FolderGridItem(
           item: item,
           isSelected: isSelected,
           showCheckbox: showCheckbox,
@@ -129,12 +146,10 @@ class _FileGridViewState extends State<FileGridView> {
           onDoubleTap: () => widget.onItemDoubleTap(index),
           onLongPress: () => widget.onItemLongPress(index),
           onCheckboxToggle: () => widget.onCheckboxToggle(index),
-          checkboxPosition: CheckboxPosition.topRight,
         );
 
       case FileItemType.image:
-        return ImageItem(
-          key: ValueKey(item.path),
+        return _ImageGridItem(
           item: item,
           isSelected: isSelected,
           showCheckbox: showCheckbox,
@@ -142,24 +157,19 @@ class _FileGridViewState extends State<FileGridView> {
           onDoubleTap: () => widget.onItemDoubleTap(index),
           onLongPress: () => widget.onItemLongPress(index),
           onCheckboxToggle: () => widget.onCheckboxToggle(index),
-          checkboxPosition: CheckboxPosition.topRight,
-          borderRadius: BorderRadius.circular(8),
         );
 
       case FileItemType.video:
-        return VideoItem(
-          key: ValueKey(item.path),
+        return _VideoGridItem(
           item: item,
           isSelected: isSelected,
           showCheckbox: showCheckbox,
-          thumbnailPath: _cacheService.getVideoThumbnail(item.path),
-          isLoadingThumbnail: _cacheService.isLoadingThumbnail(item.path),
+          thumbnailPath: _videoThumbnailCache[item.path],
+          isLoadingThumbnail: _loadingThumbnailPaths.contains(item.path),
           onTap: () => widget.onItemTap(index),
           onDoubleTap: () => widget.onItemDoubleTap(index),
           onLongPress: () => widget.onItemLongPress(index),
           onCheckboxToggle: () => widget.onCheckboxToggle(index),
-          checkboxPosition: CheckboxPosition.topRight,
-          borderRadius: BorderRadius.circular(8),
         );
 
       default:
@@ -168,15 +178,537 @@ class _FileGridViewState extends State<FileGridView> {
   }
 }
 
+/// 文件夹网格项
+class _FolderGridItem extends StatefulWidget {
+  final FileItem item;
+  final bool isSelected;
+  final bool showCheckbox;
+  final VoidCallback onTap;
+  final VoidCallback onDoubleTap;
+  final VoidCallback onLongPress;
+  final VoidCallback onCheckboxToggle;
+
+  const _FolderGridItem({
+    required this.item,
+    required this.isSelected,
+    required this.showCheckbox,
+    required this.onTap,
+    required this.onDoubleTap,
+    required this.onLongPress,
+    required this.onCheckboxToggle,
+  });
+
+  @override
+  State<_FolderGridItem> createState() => _FolderGridItemState();
+}
+
+class _FolderGridItemState extends State<_FolderGridItem> {
+  bool _isHovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return MouseRegion(
+      onEnter: (_) => setState(() => _isHovered = true),
+      onExit: (_) => setState(() => _isHovered = false),
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
+        onTap: widget.onTap,
+        onDoubleTap: widget.onDoubleTap,
+        onLongPress: widget.onLongPress,
+        child: Container(
+          decoration: BoxDecoration(
+            color: widget.isSelected
+                ? Colors.orange.shade50
+                : (_isHovered ? Colors.grey.shade100 : Colors.transparent),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(
+              color: widget.isSelected
+                  ? Colors.orange
+                  : (_isHovered ? Colors.grey.shade300 : Colors.transparent),
+              width: widget.isSelected ? 2 : 1,
+            ),
+          ),
+          child: Stack(
+            children: [
+              // 文件夹内容
+              Padding(
+                padding: const EdgeInsets.all(8),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    // 文件夹图标
+                    Expanded(
+                      flex: 3,
+                      child: Center(
+                        child: SvgPicture.asset(
+                          'assets/icons/folder_icon.svg',
+                          width: 70,
+                          height: 56,
+                          fit: BoxFit.contain,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    // 文件夹名称
+                    Text(
+                      widget.item.name,
+                      style: const TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w500,
+                      ),
+                      textAlign: TextAlign.center,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ),
+
+              // 复选框
+              if (widget.showCheckbox || _isHovered)
+                Positioned(
+                  top: 8,
+                  right: 8,
+                  child: GestureDetector(
+                    onTap: widget.onCheckboxToggle,
+                    child: MouseRegion(
+                      cursor: SystemMouseCursors.click,
+                      child: _buildCheckbox(),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCheckbox() {
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 200),
+      width: 24,
+      height: 24,
+      decoration: BoxDecoration(
+        color: widget.isSelected ? Colors.orange : Colors.white,
+        shape: BoxShape.circle,
+        border: Border.all(
+          color: widget.isSelected ? Colors.orange : Colors.grey.shade400,
+          width: 2,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.1),
+            blurRadius: 4,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: widget.isSelected
+          ? const Icon(Icons.check, size: 16, color: Colors.white)
+          : null,
+    );
+  }
+}
+
+/// 图片网格项
+class _ImageGridItem extends StatefulWidget {
+  final FileItem item;
+  final bool isSelected;
+  final bool showCheckbox;
+  final VoidCallback onTap;
+  final VoidCallback onDoubleTap;
+  final VoidCallback onLongPress;
+  final VoidCallback onCheckboxToggle;
+
+  const _ImageGridItem({
+    required this.item,
+    required this.isSelected,
+    required this.showCheckbox,
+    required this.onTap,
+    required this.onDoubleTap,
+    required this.onLongPress,
+    required this.onCheckboxToggle,
+  });
+
+  @override
+  State<_ImageGridItem> createState() => _ImageGridItemState();
+}
+
+class _ImageGridItemState extends State<_ImageGridItem> {
+  bool _isHovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return MouseRegion(
+      onEnter: (_) => setState(() => _isHovered = true),
+      onExit: (_) => setState(() => _isHovered = false),
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
+        onTap: widget.onTap,
+        onDoubleTap: widget.onDoubleTap,
+        onLongPress: widget.onLongPress,
+        child: Container(
+          decoration: BoxDecoration(
+            color: widget.isSelected
+                ? Colors.orange.shade50
+                : (_isHovered ? Colors.grey.shade50 : Colors.transparent),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(
+              color: widget.isSelected
+                  ? Colors.orange
+                  : (_isHovered ? Colors.grey.shade300 : Colors.transparent),
+              width: widget.isSelected ? 2 : 1,
+            ),
+          ),
+          child: Stack(
+            children: [
+              // 主内容
+              Padding(
+                padding: const EdgeInsets.all(8),
+                child: Column(
+                  children: [
+                    // 正方形图片缩略图
+                    Expanded(
+                      child: AspectRatio(
+                        aspectRatio: 1,
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(6),
+                          child: Image.file(
+                            File(widget.item.path),
+                            fit: BoxFit.cover,
+                            cacheWidth: 200,
+                            cacheHeight: 200,
+                            errorBuilder: (context, error, stackTrace) {
+                              return Container(
+                                color: Colors.grey.shade200,
+                                child: const Center(
+                                  child: Icon(Icons.broken_image, color: Colors.grey, size: 40),
+                                ),
+                              );
+                            },
+                            frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
+                              if (wasSynchronouslyLoaded) return child;
+                              return AnimatedOpacity(
+                                opacity: frame == null ? 0 : 1,
+                                duration: const Duration(milliseconds: 300),
+                                child: frame != null
+                                    ? child
+                                    : Container(
+                                  color: Colors.grey.shade100,
+                                  child: Icon(Icons.image, color: Colors.grey.shade300, size: 40),
+                                ),
+                              );
+                            },
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    // 文件名
+                    Text(
+                      widget.item.name,
+                      style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500,
+                      ),
+                      textAlign: TextAlign.center,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 2),
+                    // 文件大小
+                    Text(
+                      _formatFileSize(widget.item.size),
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: Colors.grey.shade600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+              // 复选框
+              if (widget.showCheckbox || _isHovered)
+                Positioned(
+                  top: 8,
+                  right: 8,
+                  child: GestureDetector(
+                    onTap: widget.onCheckboxToggle,
+                    child: MouseRegion(
+                      cursor: SystemMouseCursors.click,
+                      child: _buildCheckbox(),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCheckbox() {
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 200),
+      width: 24,
+      height: 24,
+      decoration: BoxDecoration(
+        color: widget.isSelected ? Colors.orange : Colors.white,
+        shape: BoxShape.circle,
+        border: Border.all(
+          color: widget.isSelected ? Colors.orange : Colors.grey.shade400,
+          width: 2,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.15),
+            blurRadius: 4,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: widget.isSelected
+          ? const Icon(Icons.check, size: 16, color: Colors.white)
+          : null,
+    );
+  }
+
+  String _formatFileSize(int bytes) {
+    if (bytes < 1024) return '$bytes B';
+    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
+    return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+  }
+}
+
+/// 视频网格项
+class _VideoGridItem extends StatefulWidget {
+  final FileItem item;
+  final bool isSelected;
+  final bool showCheckbox;
+  final String? thumbnailPath;
+  final bool isLoadingThumbnail;
+  final VoidCallback onTap;
+  final VoidCallback onDoubleTap;
+  final VoidCallback onLongPress;
+  final VoidCallback onCheckboxToggle;
+
+  const _VideoGridItem({
+    required this.item,
+    required this.isSelected,
+    required this.showCheckbox,
+    this.thumbnailPath,
+    this.isLoadingThumbnail = false,
+    required this.onTap,
+    required this.onDoubleTap,
+    required this.onLongPress,
+    required this.onCheckboxToggle,
+  });
+
+  @override
+  State<_VideoGridItem> createState() => _VideoGridItemState();
+}
+
+class _VideoGridItemState extends State<_VideoGridItem> {
+  bool _isHovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return MouseRegion(
+      onEnter: (_) => setState(() => _isHovered = true),
+      onExit: (_) => setState(() => _isHovered = false),
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
+        onTap: widget.onTap,
+        onDoubleTap: widget.onDoubleTap,
+        onLongPress: widget.onLongPress,
+        child: Container(
+          decoration: BoxDecoration(
+            color: widget.isSelected
+                ? Colors.orange.shade50
+                : (_isHovered ? Colors.grey.shade50 : Colors.transparent),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(
+              color: widget.isSelected
+                  ? Colors.orange
+                  : (_isHovered ? Colors.grey.shade300 : Colors.transparent),
+              width: widget.isSelected ? 2 : 1,
+            ),
+          ),
+          child: Stack(
+            children: [
+              // 主内容
+              Padding(
+                padding: const EdgeInsets.all(8),
+                child: Column(
+                  children: [
+                    // 正方形视频缩略图
+                    Expanded(
+                      child: AspectRatio(
+                        aspectRatio: 1,
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(6),
+                          child: Stack(
+                            fit: StackFit.expand,
+                            children: [
+                              // 缩略图
+                              _buildThumbnail(),
+                              // 播放按钮
+                              Center(
+                                child: Container(
+                                  width: 40,
+                                  height: 40,
+                                  decoration: BoxDecoration(
+                                    color: Colors.black.withOpacity(0.6),
+                                    shape: BoxShape.circle,
+                                  ),
+                                  child: const Icon(
+                                    Icons.play_arrow,
+                                    color: Colors.white,
+                                    size: 24,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    // 文件名
+                    Text(
+                      widget.item.name,
+                      style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500,
+                      ),
+                      textAlign: TextAlign.center,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 2),
+                    // 文件大小
+                    Text(
+                      _formatFileSize(widget.item.size),
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: Colors.grey.shade600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+              // 复选框
+              if (widget.showCheckbox || _isHovered)
+                Positioned(
+                  top: 8,
+                  right: 8,
+                  child: GestureDetector(
+                    onTap: widget.onCheckboxToggle,
+                    child: MouseRegion(
+                      cursor: SystemMouseCursors.click,
+                      child: _buildCheckbox(),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildThumbnail() {
+    if (widget.thumbnailPath != null) {
+      return Image.file(
+        File(widget.thumbnailPath!),
+        fit: BoxFit.cover,
+        cacheWidth: 200,
+        cacheHeight: 200,
+        errorBuilder: (context, error, stackTrace) => _buildPlaceholder(),
+        frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
+          if (wasSynchronouslyLoaded) return child;
+          return AnimatedOpacity(
+            opacity: frame == null ? 0 : 1,
+            duration: const Duration(milliseconds: 300),
+            child: frame != null ? child : _buildPlaceholder(),
+          );
+        },
+      );
+    } else if (widget.isLoadingThumbnail) {
+      return Container(
+        color: Colors.grey.shade200,
+        child: Center(
+          child: SizedBox(
+            width: 20,
+            height: 20,
+            child: CircularProgressIndicator(
+              strokeWidth: 2,
+              color: Colors.orange.shade700,
+            ),
+          ),
+        ),
+      );
+    } else {
+      return _buildPlaceholder();
+    }
+  }
+
+  Widget _buildPlaceholder() {
+    return Container(
+      color: Colors.grey.shade200,
+      child: Center(
+        child: Icon(
+          Icons.videocam,
+          color: Colors.grey.shade400,
+          size: 40,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCheckbox() {
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 200),
+      width: 24,
+      height: 24,
+      decoration: BoxDecoration(
+        color: widget.isSelected ? Colors.orange : Colors.white,
+        shape: BoxShape.circle,
+        border: Border.all(
+          color: widget.isSelected ? Colors.orange : Colors.grey.shade400,
+          width: 2,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.15),
+            blurRadius: 4,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: widget.isSelected
+          ? const Icon(Icons.check, size: 16, color: Colors.white)
+          : null,
+    );
+  }
+
+  String _formatFileSize(int bytes) {
+    if (bytes < 1024) return '$bytes B';
+    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
+    return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+  }
+}
+
 /// 网格视图构建器
 class GridViewBuilder implements FileViewBuilder {
   final double itemWidth;
-  final double itemAspectRatio;
   final double spacing;
 
   const GridViewBuilder({
     this.itemWidth = 140.0,
-    this.itemAspectRatio = 0.85,
     this.spacing = 10.0,
   });
 
@@ -188,7 +720,6 @@ class GridViewBuilder implements FileViewBuilder {
       isSelectionMode: config.isSelectionMode,
       padding: config.padding,
       itemWidth: itemWidth,
-      itemAspectRatio: itemAspectRatio,
       spacing: spacing,
       onItemTap: config.callbacks.onTap,
       onItemDoubleTap: config.callbacks.onDoubleTap,
