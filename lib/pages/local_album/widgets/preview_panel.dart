@@ -38,7 +38,7 @@ class PreviewPanel extends StatelessWidget {
     final isVideo = item.type == FileItemType.video;
 
     return Container(
-      color: Colors.black,
+      color: Colors.white,
       child: Stack(
         children: [
           // 媒体显示区域
@@ -53,9 +53,10 @@ class PreviewPanel extends StatelessWidget {
               top: 0,
               bottom: 0,
               child: Center(
-                child: IconButton(
-                  icon: const Icon(Icons.chevron_left, size: 48, color: Colors.white),
-                  onPressed: onPrevious,
+                child: _buildNavigationButton(
+                  icon: Icons.chevron_left,
+                  onPressed:onPrevious,
+                  tooltip: '上一个',
                 ),
               ),
             ),
@@ -67,9 +68,10 @@ class PreviewPanel extends StatelessWidget {
               top: 0,
               bottom: 0,
               child: Center(
-                child: IconButton(
-                  icon: const Icon(Icons.chevron_right, size: 48, color: Colors.white),
-                  onPressed: onNext,
+                child: _buildNavigationButton(
+                  icon: Icons.chevron_right,
+                  onPressed:onNext,
+                  tooltip: '上一个',
                 ),
               ),
             ),
@@ -98,8 +100,15 @@ class PreviewPanel extends StatelessWidget {
             top: 10,
             right: 10,
             child: IconButton(
-              icon: const Icon(Icons.close, size: 32, color: Colors.white),
+              icon: const Icon(Icons.close, size: 20),
               onPressed: onClose,
+              tooltip: '关闭预览',
+              splashRadius: 18,
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(
+                minWidth: 36,
+                minHeight: 36,
+              ),
             ),
           ),
 
@@ -150,6 +159,33 @@ class PreviewPanel extends StatelessWidget {
     return Video(
       controller: videoController!,
       controls: NoVideoControls,
+    );
+  }
+  /// 导航按钮
+  Widget _buildNavigationButton({
+    required IconData icon,
+    required VoidCallback onPressed,
+    required String tooltip,
+  }) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.black.withOpacity(0.6),
+        shape: BoxShape.circle,
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.2),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: IconButton(
+        icon: Icon(icon, color: Colors.white, size: 28),
+        onPressed: onPressed,
+        tooltip: tooltip,
+        iconSize: 28,
+        padding: const EdgeInsets.all(12),
+      ),
     );
   }
 }

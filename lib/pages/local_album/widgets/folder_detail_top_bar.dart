@@ -1,5 +1,6 @@
 // widgets/folder_detail_top_bar.dart
 import 'package:flutter/material.dart';
+import 'package:flutter_svg/svg.dart';
 import 'views/file_view_factory.dart';
 
 /// 文件夹详情页顶部工具栏
@@ -45,10 +46,12 @@ class FolderDetailTopBar extends StatelessWidget {
       child: Row(
         children: [
           // 路径导航
-          Expanded(child: _PathNavigation(
-            pathSegments: pathSegments,
-            onPathSegmentTap: onPathSegmentTap,
-          )),
+          Expanded(
+            child: _PathNavigation(
+              pathSegments: pathSegments,
+              onPathSegmentTap: onPathSegmentTap,
+            ),
+          ),
 
           // "取消选择" 文字
           if (selectedCount > 0 && onCancelSelection != null) ...[
@@ -72,10 +75,7 @@ class FolderDetailTopBar extends StatelessWidget {
           const SizedBox(width: 8),
 
           // 视图模式切换菜单
-          _ViewModeMenu(
-            viewMode: viewMode,
-            onViewModeChange: onViewModeChange,
-          ),
+          _ViewModeMenu(viewMode: viewMode, onViewModeChange: onViewModeChange),
         ],
       ),
     );
@@ -153,7 +153,7 @@ class _PathNavigation extends StatelessWidget {
     final int hiddenEnd = pathSegments.length - tailCount;
     final List<int> hiddenIndices = List.generate(
       hiddenEnd - hiddenStart,
-          (i) => hiddenStart + i,
+      (i) => hiddenStart + i,
     );
 
     // 要显示的最后几个层级的起始索引
@@ -222,9 +222,7 @@ class _CollapsedMenuButton extends StatelessWidget {
         cursor: SystemMouseCursors.click,
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(4),
-          ),
+          decoration: BoxDecoration(borderRadius: BorderRadius.circular(4)),
           child: const Text(
             '...',
             style: TextStyle(
@@ -336,16 +334,21 @@ class _SelectAllButton extends StatelessWidget {
   final bool isChecked;
   final VoidCallback onToggle;
 
-  const _SelectAllButton({
-    required this.isChecked,
-    required this.onToggle,
-  });
+  const _SelectAllButton({required this.isChecked, required this.onToggle});
+
+  // 定义 SVG 文件的路径
+  static const String _selectedIconPath = 'assets/icons/selected_all_icon.svg';
+  static const String _unselectedIconPath =
+      'assets/icons/unselect_all_icon.svg';
 
   @override
   Widget build(BuildContext context) {
+    final String iconPath = isChecked ? _selectedIconPath : _unselectedIconPath;
     return IconButton(
-      icon: Icon(
-        isChecked ? Icons.check_box : Icons.check_box_outline_blank,
+      icon: SvgPicture.asset(
+        iconPath,
+        width: 20, // 设置 SVG 宽度，与默认 Icon 大小相似
+        height: 20, // 设置 SVG 高度
       ),
       onPressed: onToggle,
       tooltip: isChecked ? '取消全选' : '全选',
@@ -368,7 +371,11 @@ class _FilterMenu extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return PopupMenuButton<String>(
-      icon: const Icon(Icons.filter_list),
+      icon: SvgPicture.asset(
+        'assets/icons/screening .svg',
+        width: 20,
+        height: 20,
+      ),
       tooltip: '筛选',
       offset: const Offset(0, 45),
       enabled: enabled,
@@ -403,10 +410,7 @@ class _ViewModeMenu extends StatelessWidget {
   final ViewMode viewMode;
   final Function(ViewMode) onViewModeChange;
 
-  const _ViewModeMenu({
-    required this.viewMode,
-    required this.onViewModeChange,
-  });
+  const _ViewModeMenu({required this.viewMode, required this.onViewModeChange});
 
   @override
   Widget build(BuildContext context) {
@@ -416,7 +420,11 @@ class _ViewModeMenu extends StatelessWidget {
       offset: const Offset(0, 45),
       onSelected: onViewModeChange,
       itemBuilder: (context) => [
-        _buildViewModeItem(ViewMode.equalHeight, '等高', Icons.view_column_outlined),
+        _buildViewModeItem(
+          ViewMode.equalHeight,
+          '等高',
+          Icons.view_column_outlined,
+        ),
         _buildViewModeItem(ViewMode.grid, '方形', Icons.grid_view),
         const PopupMenuDivider(),
         _buildViewModeItem(ViewMode.list, '列表', Icons.list),
@@ -436,10 +444,10 @@ class _ViewModeMenu extends StatelessWidget {
   }
 
   PopupMenuItem<ViewMode> _buildViewModeItem(
-      ViewMode value,
-      String label,
-      IconData icon,
-      ) {
+    ViewMode value,
+    String label,
+    IconData icon,
+  ) {
     final isSelected = viewMode == value;
     return PopupMenuItem(
       value: value,
