@@ -113,7 +113,8 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  void _onGroupSelected(Group group) async {
+  // 🔄 改为返回Future的异步方法，以支持loading等待
+  Future<void> _onGroupSelected(Group group) async {
     if (_selectedGroup?.groupId == group.groupId) {
       debugPrint('设备组未变化，无需切换');
       return;
@@ -128,8 +129,14 @@ class _HomePageState extends State<HomePage> {
     debugPrint('开始切换设备组并建立 P2P 连接...');
     await widget.mineProvider.changeGroup(group.deviceCode ?? "");
 
+    // 🆕 更新本地保存的group
+    await MyInstance().setGroup(group);
+
     debugPrint('设备组切换完成，刷新存储信息');
     await _refreshDeviceStorage();
+
+    // 🆕 刷新groups列表以更新UI
+    _loadGroups();
   }
 
   void _onNavigationChanged(int index) {
@@ -153,7 +160,7 @@ class _HomePageState extends State<HomePage> {
           onNavigationChanged: _onNavigationChanged,
           groups: _groups,
           selectedGroup: _selectedGroup,
-          onGroupSelected: _onGroupSelected,
+          onGroupSelected: _onGroupSelected, // 🔄 传递异步回调
           currentUserId: _currentUserId,
         );
       case 1:
@@ -162,7 +169,7 @@ class _HomePageState extends State<HomePage> {
           onNavigationChanged: _onNavigationChanged,
           groups: _groups,
           selectedGroup: _selectedGroup,
-          onGroupSelected: _onGroupSelected,
+          onGroupSelected: _onGroupSelected, // 🔄 传递异步回调
           currentUserId: _currentUserId,
 
           // 🆕 传递Tab状态

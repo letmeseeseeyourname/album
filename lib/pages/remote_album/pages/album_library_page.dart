@@ -15,7 +15,7 @@ class AlbumLibraryPage extends StatefulWidget {
   final Function(int) onNavigationChanged;
   final List<Group>? groups;
   final Group? selectedGroup;
-  final Function(Group)? onGroupSelected;
+  final Future<void> Function(Group)? onGroupSelected; // 🔄 改为异步回调类型
   final int? currentUserId;
 
   // 🆕 接收外部Tab状态
