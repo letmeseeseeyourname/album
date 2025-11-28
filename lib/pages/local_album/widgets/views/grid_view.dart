@@ -178,6 +178,44 @@ class _FileGridViewState extends State<FileGridView> {
   }
 }
 
+/// 未上传状态图标组件
+class UnuploadedIcon extends StatelessWidget {
+  final double size;
+
+  const UnuploadedIcon({
+    super.key,
+    this.size = 20.0,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        color: Colors.black.withOpacity(0.5),
+        shape: BoxShape.circle,
+      ),
+      child: ClipOval(
+        child: Image.asset(
+          'assets/images/claude_white.png',
+          width: size,
+          height: size,
+          fit: BoxFit.cover,
+          errorBuilder: (context, error, stackTrace) {
+            // 如果图片加载失败，显示默认图标
+            return Icon(
+              Icons.cloud_off,
+              size: size * 0.7,
+              color: Colors.white,
+            );
+          },
+        ),
+      ),
+    );
+  }
+}
+
 /// 文件夹网格项
 class _FolderGridItem extends StatefulWidget {
   final FileItem item;
@@ -340,6 +378,9 @@ class _ImageGridItemState extends State<_ImageGridItem> {
 
   @override
   Widget build(BuildContext context) {
+    // 判断是否未上传（isUploaded 为 false 或 null 时显示图标）
+    final bool showUnuploadedIcon = widget.item.isUploaded != true;
+
     return MouseRegion(
       onEnter: (_) => setState(() => _isHovered = true),
       onExit: (_) => setState(() => _isHovered = false),
@@ -372,35 +413,49 @@ class _ImageGridItemState extends State<_ImageGridItem> {
                     Expanded(
                       child: AspectRatio(
                         aspectRatio: 1,
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(6),
-                          child: Image.file(
-                            File(widget.item.path),
-                            fit: BoxFit.cover,
-                            cacheWidth: 200,
-                            cacheHeight: 200,
-                            errorBuilder: (context, error, stackTrace) {
-                              return Container(
-                                color: Colors.grey.shade200,
-                                child: const Center(
-                                  child: Icon(Icons.broken_image, color: Colors.grey, size: 40),
-                                ),
-                              );
-                            },
-                            frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
-                              if (wasSynchronouslyLoaded) return child;
-                              return AnimatedOpacity(
-                                opacity: frame == null ? 0 : 1,
-                                duration: const Duration(milliseconds: 300),
-                                child: frame != null
-                                    ? child
-                                    : Container(
-                                  color: Colors.grey.shade100,
-                                  child: Icon(Icons.image, color: Colors.grey.shade300, size: 40),
-                                ),
-                              );
-                            },
-                          ),
+                        child: Stack(
+                          children: [
+                            // 图片
+                            ClipRRect(
+                              borderRadius: BorderRadius.circular(6),
+                              child: Image.file(
+                                File(widget.item.path),
+                                fit: BoxFit.cover,
+                                width: double.infinity,
+                                height: double.infinity,
+                                cacheWidth: 200,
+                                cacheHeight: 200,
+                                errorBuilder: (context, error, stackTrace) {
+                                  return Container(
+                                    color: Colors.grey.shade200,
+                                    child: const Center(
+                                      child: Icon(Icons.broken_image, color: Colors.grey, size: 40),
+                                    ),
+                                  );
+                                },
+                                frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
+                                  if (wasSynchronouslyLoaded) return child;
+                                  return AnimatedOpacity(
+                                    opacity: frame == null ? 0 : 1,
+                                    duration: const Duration(milliseconds: 300),
+                                    child: frame != null
+                                        ? child
+                                        : Container(
+                                      color: Colors.grey.shade100,
+                                      child: Icon(Icons.image, color: Colors.grey.shade300, size: 40),
+                                    ),
+                                  );
+                                },
+                              ),
+                            ),
+                            // 未上传状态图标 - 右下角
+                            if (showUnuploadedIcon)
+                              Positioned(
+                                right: 4,
+                                bottom: 4,
+                                child: UnuploadedIcon(size: 20),
+                              ),
+                          ],
                         ),
                       ),
                     ),
@@ -515,6 +570,9 @@ class _VideoGridItemState extends State<_VideoGridItem> {
 
   @override
   Widget build(BuildContext context) {
+    // 判断是否未上传
+    final bool showUnuploadedIcon = widget.item.isUploaded != true;
+
     return MouseRegion(
       onEnter: (_) => setState(() => _isHovered = true),
       onExit: (_) => setState(() => _isHovered = false),
@@ -570,6 +628,13 @@ class _VideoGridItemState extends State<_VideoGridItem> {
                                   ),
                                 ),
                               ),
+                              // 未上传状态图标 - 右下角
+                              if (showUnuploadedIcon)
+                                Positioned(
+                                  right: 4,
+                                  bottom: 4,
+                                  child: UnuploadedIcon(size: 20),
+                                ),
                             ],
                           ),
                         ),

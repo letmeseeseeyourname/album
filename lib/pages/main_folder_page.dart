@@ -1123,7 +1123,7 @@ class _MainFolderPageState extends State<MainFolderPage> {
               ),
             ),
             child: Text(
-              isUploading ? '继续同步' : '同步',  // 动态文字提示
+              isUploading ? '继续上传' : '上传',  // 动态文字提示
               style: const TextStyle(
                 fontSize: 16,
                 color: Colors.white,

@@ -1,4 +1,5 @@
 import 'dart:convert' as convert;
+import 'dart:io';
 
 import 'package:ablumwin/user/provider/mine_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -120,10 +121,42 @@ class MyInstance {
 
   // ========== 设置相关方法 ==========
 
+  /// 获取默认的 Windows 下载路径
+  Future<String> _getDefaultWindowsDownloadPath() async {
+    final userHome = Platform.environment['USERPROFILE'] ??
+        Platform.environment['HOME'] ?? '';
+    final downloadDir = Directory('$userHome\\Downloads\\亲选相册');
+
+    if (!await downloadDir.exists()) {
+      await downloadDir.create(recursive: true);
+    }
+
+    return downloadDir.path;
+  }
+
   /// 获取下载路径
-  Future<String?> getDownloadPath() async {
+  /// 如果没有设置则返回 Windows 系统默认下载路径
+  Future<String> getDownloadPath() async {
     SharedPreferences prefs = await SharedPreferences.getInstance();
-    return prefs.getString(_downloadPathKey);
+    final savedPath = prefs.getString(_downloadPathKey);
+
+    if (savedPath != null && savedPath.isNotEmpty) {
+      // 检查保存的路径是否存在
+      final dir = Directory(savedPath);
+      if (await dir.exists()) {
+        return savedPath;
+      }
+      // 路径不存在，尝试创建
+      try {
+        await dir.create(recursive: true);
+        return savedPath;
+      } catch (e) {
+        // 创建失败，返回默认路径
+      }
+    }
+
+    // 返回默认的 Windows 下载路径
+    return await _getDefaultWindowsDownloadPath();
   }
 
   /// 设置下载路径

@@ -135,7 +135,7 @@ class BottomActionBar extends StatelessWidget {
             ),
           ),
           child: Text(
-            isUploading ? '上传中...' : '同步',
+            isUploading ? '上传中...' : '上传',
             style: const TextStyle(
               fontSize: 16,
               color: Colors.white,

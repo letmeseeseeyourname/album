@@ -243,6 +243,8 @@ class _EqualHeightGalleryState extends State<EqualHeightGallery> {
     final itemData = itemLayout.itemData;
     final isSelected = widget.selectedIndices.contains(itemData.originalIndex);
     final showCheckbox = widget.isSelectionMode || isSelected;
+    // 判断是否未上传
+    final bool showUnuploadedIcon = itemData.item.isUploaded != true;
 
     switch (itemData.item.type) {
       case FileItemType.folder:
@@ -261,13 +263,14 @@ class _EqualHeightGalleryState extends State<EqualHeightGallery> {
         );
 
       case FileItemType.image:
-        return ImageItem(
+        return _ImageItemWithUploadStatus(
           key: ValueKey(itemData.item.path),
           item: itemData.item,
           width: itemLayout.width,
           height: height,
           isSelected: isSelected,
           showCheckbox: showCheckbox,
+          showUnuploadedIcon: showUnuploadedIcon,
           onTap: () => widget.onItemTap(itemData.originalIndex),
           onDoubleTap: () => widget.onItemDoubleTap(itemData.originalIndex),
           onLongPress: () => widget.onItemLongPress(itemData.originalIndex),
@@ -276,13 +279,14 @@ class _EqualHeightGalleryState extends State<EqualHeightGallery> {
         );
 
       case FileItemType.video:
-        return VideoItem(
+        return _VideoItemWithUploadStatus(
           key: ValueKey(itemData.item.path),
           item: itemData.item,
           width: itemLayout.width,
           height: height,
           isSelected: isSelected,
           showCheckbox: showCheckbox,
+          showUnuploadedIcon: showUnuploadedIcon,
           thumbnailPath: _cacheService.getVideoThumbnail(itemData.item.path),
           isLoadingThumbnail: _cacheService.isLoadingThumbnail(itemData.item.path),
           onTap: () => widget.onItemTap(itemData.originalIndex),
@@ -295,6 +299,163 @@ class _EqualHeightGalleryState extends State<EqualHeightGallery> {
       default:
         return const SizedBox.shrink();
     }
+  }
+}
+
+/// 带上传状态的图片项目包装组件
+class _ImageItemWithUploadStatus extends StatelessWidget {
+  final FileItem item;
+  final double width;
+  final double height;
+  final bool isSelected;
+  final bool showCheckbox;
+  final bool showUnuploadedIcon;
+  final VoidCallback onTap;
+  final VoidCallback onDoubleTap;
+  final VoidCallback onLongPress;
+  final VoidCallback onCheckboxToggle;
+  final CheckboxPosition checkboxPosition;
+
+  const _ImageItemWithUploadStatus({
+    super.key,
+    required this.item,
+    required this.width,
+    required this.height,
+    required this.isSelected,
+    required this.showCheckbox,
+    required this.showUnuploadedIcon,
+    required this.onTap,
+    required this.onDoubleTap,
+    required this.onLongPress,
+    required this.onCheckboxToggle,
+    required this.checkboxPosition,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      children: [
+        ImageItem(
+          item: item,
+          width: width,
+          height: height,
+          isSelected: isSelected,
+          showCheckbox: showCheckbox,
+          onTap: onTap,
+          onDoubleTap: onDoubleTap,
+          onLongPress: onLongPress,
+          onCheckboxToggle: onCheckboxToggle,
+          checkboxPosition: checkboxPosition,
+        ),
+        // 未上传状态图标 - 右下角
+        if (showUnuploadedIcon)
+          Positioned(
+            right: 4,
+            bottom: 4,
+            child: _UnuploadedIcon(size: 20),
+          ),
+      ],
+    );
+  }
+}
+
+/// 带上传状态的视频项目包装组件
+class _VideoItemWithUploadStatus extends StatelessWidget {
+  final FileItem item;
+  final double width;
+  final double height;
+  final bool isSelected;
+  final bool showCheckbox;
+  final bool showUnuploadedIcon;
+  final String? thumbnailPath;
+  final bool isLoadingThumbnail;
+  final VoidCallback onTap;
+  final VoidCallback onDoubleTap;
+  final VoidCallback onLongPress;
+  final VoidCallback onCheckboxToggle;
+  final CheckboxPosition checkboxPosition;
+
+  const _VideoItemWithUploadStatus({
+    super.key,
+    required this.item,
+    required this.width,
+    required this.height,
+    required this.isSelected,
+    required this.showCheckbox,
+    required this.showUnuploadedIcon,
+    this.thumbnailPath,
+    this.isLoadingThumbnail = false,
+    required this.onTap,
+    required this.onDoubleTap,
+    required this.onLongPress,
+    required this.onCheckboxToggle,
+    required this.checkboxPosition,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      children: [
+        VideoItem(
+          item: item,
+          width: width,
+          height: height,
+          isSelected: isSelected,
+          showCheckbox: showCheckbox,
+          thumbnailPath: thumbnailPath,
+          isLoadingThumbnail: isLoadingThumbnail,
+          onTap: onTap,
+          onDoubleTap: onDoubleTap,
+          onLongPress: onLongPress,
+          onCheckboxToggle: onCheckboxToggle,
+          checkboxPosition: checkboxPosition,
+        ),
+        // 未上传状态图标 - 右下角
+        if (showUnuploadedIcon)
+          Positioned(
+            right: 4,
+            bottom: 4,
+            child: _UnuploadedIcon(size: 20),
+          ),
+      ],
+    );
+  }
+}
+
+/// 未上传状态图标组件
+class _UnuploadedIcon extends StatelessWidget {
+  final double size;
+
+  const _UnuploadedIcon({
+    this.size = 20.0,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        color: Colors.black.withOpacity(0.5),
+        shape: BoxShape.circle,
+      ),
+      child: ClipOval(
+        child: Image.asset(
+          'assets/images/claude_white.png',
+          width: size,
+          height: size,
+          fit: BoxFit.cover,
+          errorBuilder: (context, error, stackTrace) {
+            // 如果图片加载失败，显示默认图标
+            return Icon(
+              Icons.cloud_off,
+              size: size * 0.7,
+              color: Colors.white,
+            );
+          },
+        ),
+      ),
+    );
   }
 }
 

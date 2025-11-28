@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:dio/dio.dart';
 import 'package:path/path.dart' as p;
+import '../../../user/my_instance.dart';
 import '../../../user/models/resource_list_model.dart';
 import '../../../network/constant_sign.dart';
 import '../../../services/transfer_speed_service.dart';
@@ -36,6 +37,9 @@ class DownloadQueueManager extends ChangeNotifier {
 
   // 获取所有任务
   List<DownloadTaskRecord> get downloadTasks => List.unmodifiable(_downloadTasks);
+
+  // 获取当前下载路径
+  String get downloadPath => _downloadPath;
 
   // 获取正在下载的任务数量
   int get activeDownloadCount => _activeTasks.length;
@@ -80,6 +84,33 @@ class DownloadQueueManager extends ChangeNotifier {
     }
   }
 
+  /// 使用 MyInstance 初始化（便捷方法）
+  Future<void> initializeWithMyInstance({
+    required int userId,
+    required int groupId,
+  }) async {
+    final downloadPath = await MyInstance().getDownloadPath();
+    await initialize(
+      userId: userId,
+      groupId: groupId,
+      downloadPath: downloadPath,
+    );
+  }
+
+  /// 更新下载路径
+  Future<void> updateDownloadPath(String newPath) async {
+    _downloadPath = newPath;
+
+    // 确保新目录存在
+    final dir = Directory(_downloadPath);
+    if (!await dir.exists()) {
+      await dir.create(recursive: true);
+    }
+
+    debugPrint('下载路径已更新为: $_downloadPath');
+    notifyListeners();
+  }
+
   /// 加载未完成的任务
   Future<void> _loadIncompleteTasks() async {
     if (_currentUserId == null || _currentGroupId == null) {
@@ -117,6 +148,13 @@ class DownloadQueueManager extends ChangeNotifier {
     if (_currentUserId == null || _currentGroupId == null) {
       debugPrint('错误：用户ID或群组ID为空');
       return;
+    }
+
+    // 确保使用最新的下载路径
+    final currentDownloadPath = await MyInstance().getDownloadPath();
+    if (currentDownloadPath != _downloadPath) {
+      _downloadPath = currentDownloadPath;
+      debugPrint('更新下载路径为: $_downloadPath');
     }
 
     final now = DateTime.now().millisecondsSinceEpoch;

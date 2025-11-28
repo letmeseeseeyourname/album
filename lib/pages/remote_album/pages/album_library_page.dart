@@ -210,19 +210,42 @@ class _AlbumLibraryPageState extends State<AlbumLibraryPage> {
                     ),
                   ),
 
-                  // 底部栏
-                  AlbumBottomBar(
-                    userId: widget.currentUserId,
-                    groupId: widget.selectedGroup?.groupId,
-                    selectionManager: _selectionManager,
-                    dataManager: _dataManager,
-                  ),
+                  // 🆕 底部栏 - 只在有选中项目时显示
+                  _buildBottomBar(),
                 ],
               ),
             ),
           ],
         ),
       ),
+    );
+  }
+
+  // 🆕 构建底部栏（根据选中状态显示/隐藏，带动画效果）
+  Widget _buildBottomBar() {
+    return AnimatedBuilder(
+      animation: _selectionManager,
+      builder: (context, child) {
+        final hasSelection = _selectionManager.hasSelection;
+
+        return AnimatedSlide(
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeInOut,
+          offset: hasSelection ? Offset.zero : const Offset(0, 1),
+          child: AnimatedOpacity(
+            duration: const Duration(milliseconds: 200),
+            opacity: hasSelection ? 1.0 : 0.0,
+            child: hasSelection
+                ? AlbumBottomBar(
+              userId: widget.currentUserId,
+              groupId: widget.selectedGroup?.groupId,
+              selectionManager: _selectionManager,
+              dataManager: _dataManager,
+            )
+                : const SizedBox.shrink(),
+          ),
+        );
+      },
     );
   }
 

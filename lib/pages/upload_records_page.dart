@@ -107,7 +107,7 @@ class _UploadRecordsPageState extends State<UploadRecordsPage>
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('已取消同步')),
+          const SnackBar(content: Text('已取消上传')),
         );
       }
     } catch (e) {
@@ -308,7 +308,7 @@ class _UploadRecordsPageState extends State<UploadRecordsPage>
               dividerColor: Colors.transparent,
               labelPadding: const EdgeInsets.symmetric(horizontal: 20),
               tabs: const [
-                Tab(text: '同步'),
+                Tab(text: '上传'),
                 Tab(text: '下载'),
               ],
             ),
@@ -330,7 +330,7 @@ class _UploadRecordsPageState extends State<UploadRecordsPage>
     if (_uploadTasks.isEmpty) {
       return const Center(
         child: Text(
-          '暂无同步记录',
+          '暂无上传记录',
           style: TextStyle(
             fontSize: 16,
             color: Colors.grey,
@@ -791,7 +791,7 @@ class _UploadRecordsPageState extends State<UploadRecordsPage>
         color = Colors.grey;
         break;
       case UploadTaskStatus.uploading:
-        text = '正在同步';
+        text = '正在上传';
         color = Colors.orange;
         break;
       case UploadTaskStatus.success:
@@ -826,7 +826,7 @@ class _UploadRecordsPageState extends State<UploadRecordsPage>
           TextButton(
             onPressed: () => _cancelUploadTask(task),
             child: const Text(
-              '取消同步',
+              '取消上传',
               style: TextStyle(
                 fontSize: 13,
                 color: Colors.grey,

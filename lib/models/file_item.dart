@@ -11,6 +11,7 @@ class FileItem {
   final FileItemType type;
   final int size; // 文件大小（字节）
   final String? thumbnail; // 缩略图路径（可选）
+  final bool? isUploaded; // 是否已上传：true=已上传, false/null=未上传
 
   FileItem({
     required this.name,
@@ -18,6 +19,7 @@ class FileItem {
     required this.type,
     this.size = 0,
     this.thumbnail,
+    this.isUploaded,
   });
 
   // 格式化文件大小
@@ -39,5 +41,24 @@ class FileItem {
   String get extension {
     final parts = name.split('.');
     return parts.length > 1 ? parts.last.toLowerCase() : '';
+  }
+
+  /// 创建带有更新字段的副本
+  FileItem copyWith({
+    String? name,
+    String? path,
+    FileItemType? type,
+    int? size,
+    String? thumbnail,
+    bool? isUploaded,
+  }) {
+    return FileItem(
+      name: name ?? this.name,
+      path: path ?? this.path,
+      type: type ?? this.type,
+      size: size ?? this.size,
+      thumbnail: thumbnail ?? this.thumbnail,
+      isUploaded: isUploaded ?? this.isUploaded,
+    );
   }
 }

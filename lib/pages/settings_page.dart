@@ -19,6 +19,7 @@ class _SettingsPageState extends State<SettingsPage> {
   String _currentVersion = '';
   bool _isCheckingUpdate = false;
   UpdateInfo? _updateInfo;
+  bool _isLoadingPath = true;
 
   final List<_MenuItem> _menuItems = [
     _MenuItem('常用设置', Icons.settings),
@@ -34,13 +35,26 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   Future<void> _loadSettings() async {
-    final downloadPath = await MyInstance().getDownloadPath();
-    final minimizeOnClose = await MyInstance().getMinimizeOnClose();
-
     setState(() {
-      _downloadPath = downloadPath ?? 'D:\\亲选相册';
-      _minimizeOnClose = minimizeOnClose;
+      _isLoadingPath = true;
     });
+
+    try {
+      // 使用 MyInstance 获取下载路径（会自动返回默认路径如果没有设置）
+      final downloadPath = await MyInstance().getDownloadPath();
+      final minimizeOnClose = await MyInstance().getMinimizeOnClose();
+
+      setState(() {
+        _downloadPath = downloadPath;
+        _minimizeOnClose = minimizeOnClose;
+        _isLoadingPath = false;
+      });
+    } catch (e) {
+      debugPrint('加载设置失败: $e');
+      setState(() {
+        _isLoadingPath = false;
+      });
+    }
   }
 
   Future<void> _loadVersion() async {
@@ -58,6 +72,15 @@ class _SettingsPageState extends State<SettingsPage> {
         _downloadPath = selectedDirectory;
       });
       await MyInstance().setDownloadPath(selectedDirectory);
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('下载路径已更改为: $selectedDirectory'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
     }
   }
 
@@ -263,12 +286,21 @@ class _SettingsPageState extends State<SettingsPage> {
             Row(
               children: [
                 Expanded(
-                  child: Text(
+                  child: _isLoadingPath
+                      ? const Text(
+                    '加载中...',
+                    style: TextStyle(
+                      color: Colors.grey,
+                      fontSize: 14,
+                    ),
+                  )
+                      : Text(
                     _downloadPath,
                     style: TextStyle(
                       color: Colors.grey.shade700,
                       fontSize: 14,
                     ),
+                    overflow: TextOverflow.ellipsis,
                   ),
                 ),
                 const SizedBox(width: 16),
@@ -283,6 +315,17 @@ class _SettingsPageState extends State<SettingsPage> {
                   child: const Text('浏览'),
                 ),
               ],
+            ),
+          ),
+
+          const SizedBox(height: 8),
+
+          // 提示信息
+          Text(
+            '如果没有设置，将默认保存到系统下载文件夹中的"亲选相册"目录',
+            style: TextStyle(
+              fontSize: 12,
+              color: Colors.grey.shade500,
             ),
           ),
 

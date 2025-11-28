@@ -1,14 +1,15 @@
-// album/components/album_bottom_bar.dart (集成下载队列管理器)
+// album/components/album_bottom_bar.dart (优化版 - 新样式)
 import 'package:flutter/material.dart';
+import 'package:file_picker/file_picker.dart';
 import 'dart:io';
+import '../../../user/my_instance.dart';
 import '../../../album/database/download_task_db_helper.dart';
 import '../../../album/manager/download_queue_manager.dart';
 import '../managers/selection_manager.dart';
 import '../managers/album_data_manager.dart';
 
-
 /// 相册底部栏组件
-/// 显示选中信息、下载按钮和下载队列状态
+/// 显示选中信息、磁盘空间、下载路径和下载按钮
 class AlbumBottomBar extends StatefulWidget {
   final SelectionManager selectionManager;
   final AlbumDataManager dataManager;
@@ -30,11 +31,14 @@ class AlbumBottomBar extends StatefulWidget {
 class _AlbumBottomBarState extends State<AlbumBottomBar> {
   final DownloadQueueManager _downloadManager = DownloadQueueManager.instance;
   bool _isInitialized = false;
+  String _downloadPath = '';
+  String _freeSpace = '计算中...';
 
   @override
   void initState() {
     super.initState();
     _initializeDownloadManager();
+    _loadDownloadPath();
   }
 
   Future<void> _initializeDownloadManager() async {
@@ -49,7 +53,7 @@ class _AlbumBottomBarState extends State<AlbumBottomBar> {
     debugPrint('使用的userId: $userId, groupId: $groupId');
 
     try {
-      final downloadPath = await _getDefaultDownloadPath();
+      final downloadPath = await MyInstance().getDownloadPath();
       await _downloadManager.initialize(
         userId: userId,
         groupId: groupId,
@@ -67,17 +71,93 @@ class _AlbumBottomBarState extends State<AlbumBottomBar> {
     }
   }
 
-  Future<String> _getDefaultDownloadPath() async {
-    // Windows 默认下载路径
-    final userHome = Platform.environment['USERPROFILE'] ??
-        Platform.environment['HOME'] ?? '';
-    final downloadDir = Directory('$userHome\\Downloads\\亲选相册');
+  Future<void> _loadDownloadPath() async {
+    try {
+      final path = await MyInstance().getDownloadPath();
+      final freeSpace = await _getDiskFreeSpace(path);
 
-    if (!await downloadDir.exists()) {
-      await downloadDir.create(recursive: true);
+      if (mounted) {
+        setState(() {
+          _downloadPath = path;
+          _freeSpace = freeSpace;
+        });
+      }
+    } catch (e) {
+      debugPrint('加载下载路径失败: $e');
     }
+  }
 
-    return downloadDir.path;
+  /// 获取磁盘剩余空间
+  Future<String> _getDiskFreeSpace(String path) async {
+    try {
+      if (Platform.isWindows) {
+        // 获取盘符
+        final driveLetter = path.substring(0, 2); // 例如 "D:"
+
+        final result = await Process.run(
+          'wmic',
+          ['logicaldisk', 'where', 'DeviceID="$driveLetter"', 'get', 'FreeSpace'],
+          runInShell: true,
+        );
+
+        if (result.exitCode == 0) {
+          final output = result.stdout.toString().trim();
+          final lines = output.split('\n');
+          if (lines.length >= 2) {
+            final freeBytes = int.tryParse(lines[1].trim());
+            if (freeBytes != null) {
+              return _formatBytes(freeBytes);
+            }
+          }
+        }
+      }
+      return '未知';
+    } catch (e) {
+      debugPrint('获取磁盘空间失败: $e');
+      return '未知';
+    }
+  }
+
+  String _formatBytes(int bytes) {
+    if (bytes < 1024) return '$bytes B';
+    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)}KB';
+    if (bytes < 1024 * 1024 * 1024) {
+      return '${(bytes / (1024 * 1024)).toStringAsFixed(1)}MB';
+    }
+    return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(0)}GB';
+  }
+
+  /// 修改下载路径
+  Future<void> _changeDownloadPath() async {
+    String? selectedDirectory = await FilePicker.platform.getDirectoryPath();
+
+    if (selectedDirectory != null) {
+      await MyInstance().setDownloadPath(selectedDirectory);
+
+      // 重新加载路径和空间信息
+      await _loadDownloadPath();
+
+      // 重新初始化下载管理器
+      if (_isInitialized) {
+        final userId = widget.userId ?? 1;
+        final groupId = widget.groupId ?? 1;
+
+        await _downloadManager.initialize(
+          userId: userId,
+          groupId: groupId,
+          downloadPath: selectedDirectory,
+        );
+      }
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('下载路径已更改为: $selectedDirectory'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    }
   }
 
   @override
@@ -90,24 +170,21 @@ class _AlbumBottomBarState extends State<AlbumBottomBar> {
       ]),
       builder: (context, child) {
         return Container(
-          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
           decoration: BoxDecoration(
-            color: Colors.grey.shade100,
+            color: Colors.white,
             border: Border(
-              top: BorderSide(color: Colors.grey.shade300),
+              top: BorderSide(color: Colors.grey.shade200),
             ),
           ),
           child: Row(
             children: [
-              // 左侧信息
+              // 左侧信息区域
               Expanded(
                 child: _buildInfoSection(),
               ),
-              // 中间下载队列状态
-              if (_isInitialized) _buildQueueStatus(),
-              const SizedBox(width: 16),
-              // 右侧按钮组
-              _buildActionButtons(context),
+              // 右侧下载按钮
+              _buildDownloadButton(context),
             ],
           ),
         );
@@ -116,185 +193,148 @@ class _AlbumBottomBarState extends State<AlbumBottomBar> {
   }
 
   Widget _buildInfoSection() {
-    final selectedSize = widget.dataManager.calculateSelectedSize(
-      widget.selectionManager.selectedResIds,
-    );
+    final selectedIds = widget.selectionManager.selectedResIds;
+    final hasSelection = selectedIds.isNotEmpty;
+
+    // 计算选中信息
+    String selectionInfo = '';
+    if (hasSelection) {
+      int totalSize = 0;
+      int imageCount = 0;
+      int videoCount = 0;
+
+      for (var id in selectedIds) {
+        final resources = widget.dataManager.getResourcesByIds({id});
+        if (resources.isNotEmpty) {
+          final resource = resources.first;
+          totalSize += resource.fileSize ?? 0;
+          if (resource.fileType == 'V') {
+            videoCount++;
+          } else {
+            imageCount++;
+          }
+        }
+      }
+
+      final sizeStr = _formatFileSize(totalSize);
+
+      // 构建选择信息字符串
+      List<String> parts = [];
+      if (imageCount > 0) {
+        parts.add('${imageCount}张照片');
+      }
+      if (videoCount > 0) {
+        parts.add('${videoCount}条视频');
+      }
+
+      selectionInfo = '已选：$sizeStr · ${parts.join('/')}';
+    }
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: [
+        // 第一行：选中信息
         Text(
-          selectedSize,
+          hasSelection ? selectionInfo : '共 ${widget.dataManager.allResources.length} 项',
           style: const TextStyle(
             fontSize: 14,
             fontWeight: FontWeight.w500,
+            color: Colors.black87,
           ),
         ),
         const SizedBox(height: 4),
-        Text(
-          '硬盘剩余空间：320GB',
-          style: TextStyle(
-            fontSize: 12,
-            color: Colors.grey.shade600,
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildQueueStatus() {
-    final activeCount = _downloadManager.activeDownloadCount;
-    final pendingCount = _downloadManager.pendingCount;
-    final completedCount = _downloadManager.completedCount;
-    final failedCount = _downloadManager.failedCount;
-
-    if (activeCount == 0 && pendingCount == 0 && failedCount == 0) {
-      if (completedCount > 0) {
-        return Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-          decoration: BoxDecoration(
-            color: Colors.green.shade50,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: Colors.green.shade200),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(Icons.check_circle, size: 16, color: Colors.green.shade700),
-              const SizedBox(width: 6),
-              Text(
-                '已完成 $completedCount 个下载',
-                style: TextStyle(
-                  fontSize: 12,
-                  color: Colors.green.shade700,
-                  fontWeight: FontWeight.w500,
-                ),
+        // 第二行：磁盘空间和下载路径
+        Row(
+          children: [
+            Text(
+              '硬盘剩余空间：$_freeSpace',
+              style: TextStyle(
+                fontSize: 12,
+                color: Colors.grey.shade500,
               ),
-            ],
-          ),
-        );
-      }
-      return const SizedBox.shrink();
-    }
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      decoration: BoxDecoration(
-        color: Colors.blue.shade50,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.blue.shade200),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          SizedBox(
-            width: 16,
-            height: 16,
-            child: CircularProgressIndicator(
-              strokeWidth: 2,
-              valueColor: AlwaysStoppedAnimation<Color>(Colors.blue.shade700),
             ),
-          ),
-          const SizedBox(width: 8),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                '下载中: $activeCount | 等待: $pendingCount',
-                style: TextStyle(
-                  fontSize: 12,
-                  color: Colors.blue.shade700,
-                  fontWeight: FontWeight.w500,
-                ),
+            const SizedBox(width: 24),
+            Text(
+              '下载位置：$_downloadPath',
+              style: TextStyle(
+                fontSize: 12,
+                color: Colors.grey.shade500,
               ),
-              if (failedCount > 0)
-                Text(
-                  '失败: $failedCount',
+            ),
+            const SizedBox(width: 12),
+            // 修改按钮
+            MouseRegion(
+              cursor: SystemMouseCursors.click,
+              child: GestureDetector(
+                onTap: _changeDownloadPath,
+                child: Text(
+                  '修改',
                   style: TextStyle(
-                    fontSize: 11,
-                    color: Colors.red.shade700,
+                    fontSize: 12,
+                    color: Colors.orange.shade700,
                   ),
                 ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildActionButtons(BuildContext context) {
-    final hasSelection = widget.selectionManager.hasSelection;
-    final hasActiveTasks = _downloadManager.activeDownloadCount > 0 ||
-        _downloadManager.pendingCount > 0;
-
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        // 查看队列按钮
-        if (hasActiveTasks || _downloadManager.downloadTasks.isNotEmpty)
-          TextButton.icon(
-            onPressed: () => _showDownloadQueue(context),
-            icon: const Icon(Icons.queue, size: 18),
-            label: Text('队列(${_downloadManager.downloadTasks.length})'),
-            style: TextButton.styleFrom(
-              foregroundColor: Colors.blue.shade700,
+              ),
             ),
-          ),
-        const SizedBox(width: 8),
-        // 添加到下载队列按钮
-        ElevatedButton.icon(
-          onPressed: hasSelection ? () => _handleAddToQueue(context) : null,
-          icon: const Icon(Icons.add_to_queue, size: 20),
-          label: Text(
-            hasSelection
-                ? '添加到队列 (${widget.selectionManager.selectionCount})'
-                : '添加到队列',
-          ),
-          style: ElevatedButton.styleFrom(
-            backgroundColor: Colors.black87,
-            foregroundColor: Colors.white,
-            disabledBackgroundColor: Colors.grey.shade300,
-            disabledForegroundColor: Colors.grey.shade600,
-            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(8),
-            ),
-          ),
+          ],
         ),
       ],
     );
   }
 
-  void _handleAddToQueue(BuildContext context) async {
-    debugPrint('=== 处理添加到队列 ===');
-    debugPrint('_isInitialized: $_isInitialized');
+  String _formatFileSize(int bytes) {
+    if (bytes < 1024) return '$bytes B';
+    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)}KB';
+    if (bytes < 1024 * 1024 * 1024) {
+      return '${(bytes / (1024 * 1024)).toStringAsFixed(1)}MB';
+    }
+    return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(2)}GB';
+  }
 
+  Widget _buildDownloadButton(BuildContext context) {
+    final hasSelection = widget.selectionManager.hasSelection;
+
+    return ElevatedButton(
+      onPressed: hasSelection ? () => _handleDownload(context) : null,
+      style: ElevatedButton.styleFrom(
+        backgroundColor: Colors.black87,
+        foregroundColor: Colors.white,
+        disabledBackgroundColor: Colors.grey.shade300,
+        disabledForegroundColor: Colors.grey.shade500,
+        padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 14),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(8),
+        ),
+        elevation: 0,
+      ),
+      child: const Text(
+        '下载',
+        style: TextStyle(
+          fontSize: 14,
+          fontWeight: FontWeight.w500,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _handleDownload(BuildContext context) async {
     if (!_isInitialized) {
-      debugPrint('错误: 下载管理器未初始化');
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('下载管理器正在初始化，请稍后再试'),
+          content: Text('下载服务正在初始化，请稍候...'),
           backgroundColor: Colors.orange,
         ),
       );
-
-      // 尝试重新初始化
-      await _initializeDownloadManager();
       return;
     }
 
-    // 获取选中的资源ID
     final selectedIds = widget.selectionManager.selectedResIds;
 
-    debugPrint('选中的ID数量: ${selectedIds.length}');
-    debugPrint('选中的ID列表: $selectedIds');
+    debugPrint('=== 处理下载 ===');
+    debugPrint('选中的资源ID数量: ${selectedIds.length}');
 
     if (selectedIds.isEmpty) {
-      debugPrint('错误: 没有选中任何资源');
-      if (!context.mounted) return;
-
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('请先选择要下载的文件'),
@@ -304,14 +344,12 @@ class _AlbumBottomBarState extends State<AlbumBottomBar> {
       return;
     }
 
-    // 通过ID获取资源对象
+    // 获取选中的资源
     final selectedResources = widget.dataManager.getResourcesByIds(selectedIds);
 
-    debugPrint('获取到的资源数量: ${selectedResources.length}');
-
-    for (int i = 0; i < selectedResources.length && i < 3; i++) {
-      final res = selectedResources[i];
-      debugPrint('资源${i+1}: ${res.fileName}');
+    debugPrint('找到的资源数量: ${selectedResources.length}');
+    for (var res in selectedResources) {
+      debugPrint('资源: ${res.fileName}');
       debugPrint('  resId: ${res.resId}');
       debugPrint('  filePath: ${res.originPath}');
       debugPrint('  fileSize: ${res.fileSize}');
