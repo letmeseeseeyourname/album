@@ -1,6 +1,11 @@
-// pages/album_library_page.dart (修改版 - 移除Tab栏)
+// pages/album_library_page.dart (修复版 - 初始化时获取当前P2P状态)
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import '../../../eventbus/event_bus.dart';
+import '../../../eventbus/p2p_events.dart';
 import '../../../user/models/group.dart';
+import '../../../user/provider/mine_provider.dart';
 import '../../../widgets/custom_title_bar.dart';
 import '../../../widgets/side_navigation.dart';
 import '../managers/album_data_manager.dart';
@@ -15,13 +20,14 @@ class AlbumLibraryPage extends StatefulWidget {
   final Function(int) onNavigationChanged;
   final List<Group>? groups;
   final Group? selectedGroup;
-  final Future<void> Function(Group)? onGroupSelected; // 🔄 改为异步回调类型
+  final Future<void> Function(Group)? onGroupSelected;
   final int? currentUserId;
 
-  // 🆕 接收外部Tab状态
+  // 接收外部Tab状态
   final int currentTabIndex;
   final Function(int) onTabChanged;
   final bool isGroupsLoading;
+
   const AlbumLibraryPage({
     super.key,
     required this.selectedNavIndex,
@@ -54,10 +60,22 @@ class _AlbumLibraryPageState extends State<AlbumLibraryPage> {
   bool _showPreview = false;
   int _previewIndex = -1;
 
+  // P2P 连接状态
+  P2pConnectionStatus _p2pStatus = P2pConnectionStatus.disconnected;
+  StreamSubscription? _p2pSubscription;
+  String? _p2pErrorMessage;
+
   @override
   void initState() {
     super.initState();
     _scrollController.addListener(_onScroll);
+
+    // 🆕 首先获取当前 P2P 连接状态（解决初始状态问题）
+    _p2pStatus = MyNetworkProvider().getCurrentP2pStatus();
+    debugPrint('AlbumLibraryPage 初始化 P2P 状态: $_p2pStatus');
+
+    // 监听 P2P 连接事件
+    _p2pSubscription = MCEventBus.on<P2pConnectionEvent>().listen(_onP2pEvent);
 
     // 初始加载数据
     _loadInitialData();
@@ -67,7 +85,7 @@ class _AlbumLibraryPageState extends State<AlbumLibraryPage> {
   void didUpdateWidget(AlbumLibraryPage oldWidget) {
     super.didUpdateWidget(oldWidget);
 
-    // 🆕 监听Tab变化
+    // 监听Tab变化
     if (oldWidget.currentTabIndex != widget.currentTabIndex) {
       _onTabSwitch();
     }
@@ -78,7 +96,30 @@ class _AlbumLibraryPageState extends State<AlbumLibraryPage> {
     _scrollController.dispose();
     _selectionManager.dispose();
     _dataManager.dispose();
+    _p2pSubscription?.cancel();
     super.dispose();
+  }
+
+  // 处理 P2P 事件
+  void _onP2pEvent(P2pConnectionEvent event) {
+    if (!mounted) return;
+
+    final previousStatus = _p2pStatus;
+
+    setState(() {
+      _p2pStatus = event.status;
+      _p2pErrorMessage = event.errorMessage;
+    });
+
+    debugPrint('AlbumLibraryPage 收到 P2P 事件: $event');
+
+    // 从断开/失败状态变为已连接时，自动重新加载数据
+    if (event.status == P2pConnectionStatus.connected &&
+        (previousStatus == P2pConnectionStatus.disconnected ||
+            previousStatus == P2pConnectionStatus.failed)) {
+      debugPrint('P2P 重连成功，重新加载相册数据');
+      _loadInitialData();
+    }
   }
 
   void _onScroll() {
@@ -95,7 +136,12 @@ class _AlbumLibraryPageState extends State<AlbumLibraryPage> {
   }
 
   void _loadInitialData() {
-    _dataManager.resetAndLoad(isPrivate: _isPersonalTab);
+    // 只在 P2P 已连接时加载数据
+    if (_p2pStatus == P2pConnectionStatus.connected) {
+      _dataManager.resetAndLoad(isPrivate: _isPersonalTab);
+    } else {
+      debugPrint('P2P 未连接，跳过数据加载');
+    }
   }
 
   void _onTabSwitch() {
@@ -104,7 +150,7 @@ class _AlbumLibraryPageState extends State<AlbumLibraryPage> {
 
     _dataManager.switchTab(_isPersonalTab);
 
-    if (!_dataManager.hasData) {
+    if (!_dataManager.hasData && _p2pStatus == P2pConnectionStatus.connected) {
       _dataManager.resetAndLoad(isPrivate: _isPersonalTab);
     }
   }
@@ -112,14 +158,19 @@ class _AlbumLibraryPageState extends State<AlbumLibraryPage> {
   void _resetAndLoad() {
     _selectionManager.clearSelection();
     _closePreview();
-    _dataManager.forceRefresh(isPrivate: _isPersonalTab);
+
+    // 只在 P2P 已连接时刷新
+    if (_p2pStatus == P2pConnectionStatus.connected) {
+      _dataManager.forceRefresh(isPrivate: _isPersonalTab);
+    }
   }
 
   void _loadMore() {
-    _dataManager.loadMore(isPrivate: _isPersonalTab);
+    if (_p2pStatus == P2pConnectionStatus.connected) {
+      _dataManager.loadMore(isPrivate: _isPersonalTab);
+    }
   }
 
-  // 🆕 使用外部传入的Tab索引
   bool get _isPersonalTab => widget.currentTabIndex == 0;
 
   void _openPreview(int index) {
@@ -160,7 +211,7 @@ class _AlbumLibraryPageState extends State<AlbumLibraryPage> {
         backgroundColor: const Color(0xFFF5E8DC),
         rightTitleBgColor: Colors.white,
 
-        // 🆕 传递Tab相关参数
+        // 传递Tab相关参数
         showTabs: true,
         currentTabIndex: widget.currentTabIndex,
         onTabChanged: widget.onTabChanged,
@@ -181,7 +232,7 @@ class _AlbumLibraryPageState extends State<AlbumLibraryPage> {
             Expanded(
               child: Column(
                 children: [
-                  // 🆕 只保留工具栏，Tab栏已移至CustomTitleBar
+                  // 工具栏
                   _buildToolbar(),
 
                   // 内容区域
@@ -211,7 +262,7 @@ class _AlbumLibraryPageState extends State<AlbumLibraryPage> {
                     ),
                   ),
 
-                  // 🆕 底部栏 - 只在有选中项目时显示
+                  // 底部栏 - 只在有选中项目时显示
                   _buildBottomBar(),
                 ],
               ),
@@ -222,7 +273,7 @@ class _AlbumLibraryPageState extends State<AlbumLibraryPage> {
     );
   }
 
-  // 🆕 构建底部栏（根据选中状态显示/隐藏，带动画效果）
+  // 构建底部栏（根据选中状态显示/隐藏，带动画效果）
   Widget _buildBottomBar() {
     return AnimatedBuilder(
       animation: _selectionManager,
@@ -250,7 +301,7 @@ class _AlbumLibraryPageState extends State<AlbumLibraryPage> {
     );
   }
 
-  // 🆕 简化的工具栏（不包含Tab栏）
+  // 简化的工具栏（不包含Tab栏）
   Widget _buildToolbar() {
     return Container(
       decoration: BoxDecoration(
@@ -263,8 +314,8 @@ class _AlbumLibraryPageState extends State<AlbumLibraryPage> {
         isGridView: _isGridView,
         onRefresh: _resetAndLoad,
         onToggleSelectAll: () {
-          // 🆕 切换全选/取消全选
-          if (_selectionManager.selectionCount == _dataManager.getAllResourceIds().length &&
+          if (_selectionManager.selectionCount ==
+              _dataManager.getAllResourceIds().length &&
               _dataManager.getAllResourceIds().isNotEmpty) {
             _selectionManager.clearSelection();
           } else {
@@ -285,6 +336,17 @@ class _AlbumLibraryPageState extends State<AlbumLibraryPage> {
   }
 
   Widget _buildMainContent() {
+    // 优先检查 P2P 连接状态
+    if (_p2pStatus == P2pConnectionStatus.disconnected ||
+        _p2pStatus == P2pConnectionStatus.failed) {
+      return _buildP2pDisconnectedView();
+    }
+
+    if (_p2pStatus == P2pConnectionStatus.connecting) {
+      return _buildP2pConnectingView();
+    }
+
+    // P2P 已连接，显示正常内容
     return AnimatedBuilder(
       animation: _dataManager,
       builder: (context, child) {
@@ -344,7 +406,7 @@ class _AlbumLibraryPageState extends State<AlbumLibraryPage> {
 
         return Stack(
           children: [
-            // 🆕 根据视图模式显示不同布局
+            // 根据视图模式显示不同布局
             _isGridView
                 ? AlbumGridView(
               groupedResources: _dataManager.groupedResources,
@@ -375,6 +437,79 @@ class _AlbumLibraryPageState extends State<AlbumLibraryPage> {
           ],
         );
       },
+    );
+  }
+
+  // P2P 断开连接视图
+  Widget _buildP2pDisconnectedView() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(
+            Icons.cloud_off,
+            size: 80,
+            color: Colors.grey.shade400,
+          ),
+          const SizedBox(height: 24),
+          Text(
+            'P2P 连接已断开',
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.w500,
+              color: Colors.grey.shade700,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            _p2pErrorMessage ?? '无法获取相册数据，请检查网络连接',
+            style: TextStyle(
+              fontSize: 14,
+              color: Colors.grey.shade500,
+            ),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 24),
+          ElevatedButton.icon(
+            onPressed: () {
+              MyNetworkProvider().reconnectP2p();
+            },
+            icon: const Icon(Icons.refresh),
+            label: const Text('重新连接'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFF5E8DC),
+              foregroundColor: Colors.black87,
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // P2P 连接中视图
+  Widget _buildP2pConnectingView() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const SizedBox(
+            width: 60,
+            height: 60,
+            child: CircularProgressIndicator(
+              strokeWidth: 3,
+            ),
+          ),
+          const SizedBox(height: 24),
+          Text(
+            '正在连接设备...',
+            style: TextStyle(
+              fontSize: 16,
+              color: Colors.grey.shade600,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

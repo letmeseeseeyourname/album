@@ -1,13 +1,17 @@
-// widgets/custom_title_bar.dart (修改版 - 支持Tab栏和传输速率显示)
+// widgets/custom_title_bar.dart (修复版 - 初始化时获取当前P2P状态)
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/svg.dart';
 import 'package:window_manager/window_manager.dart';
 import 'package:ablumwin/user/my_instance.dart';
+import '../eventbus/event_bus.dart';
+import '../eventbus/p2p_events.dart';
 import '../network/constant_sign.dart';
 import '../pages/settings_page.dart';
 import '../pages/upload_records_page.dart';
 import '../pages/user_info_page.dart';
 import '../services/transfer_speed_service.dart';
+import '../user/provider/mine_provider.dart';
 
 class CustomTitleBar extends StatefulWidget {
   final Widget? child;
@@ -16,10 +20,10 @@ class CustomTitleBar extends StatefulWidget {
   final Color? backgroundColor;
   final Color? rightTitleBgColor;
 
-  // 🆕 Tab相关参数
-  final bool showTabs; // 是否显示Tab栏（true=Tab栏, false=添加文件夹）
-  final int? currentTabIndex; // 当前Tab索引
-  final Function(int)? onTabChanged; // Tab切换回调
+  // Tab相关参数
+  final bool showTabs;
+  final int? currentTabIndex;
+  final Function(int)? onTabChanged;
 
   const CustomTitleBar({
     super.key,
@@ -28,8 +32,8 @@ class CustomTitleBar extends StatefulWidget {
     this.onAddFolder,
     this.backgroundColor = Colors.white,
     this.rightTitleBgColor = Colors.white,
-    this.showTabs = false,  // 默认不显示Tab栏
-    this.currentTabIndex = 0,  // 默认选中第一个Tab
+    this.showTabs = false,
+    this.currentTabIndex = 0,
     this.onTabChanged,
   });
 
@@ -40,10 +44,34 @@ class CustomTitleBar extends StatefulWidget {
 class _CustomTitleBarState extends State<CustomTitleBar> {
   bool isMaximized = false;
 
+  // P2P 连接状态
+  P2pConnectionStatus _p2pStatus = P2pConnectionStatus.disconnected;
+  StreamSubscription? _p2pSubscription;
+
   @override
   void initState() {
     super.initState();
     _checkMaximized();
+
+    // 🆕 首先获取当前 P2P 连接状态（解决初始状态问题）
+    _p2pStatus = MyNetworkProvider().getCurrentP2pStatus();
+    debugPrint('CustomTitleBar 初始化 P2P 状态: $_p2pStatus');
+
+    // 监听 P2P 连接事件
+    _p2pSubscription = MCEventBus.on<P2pConnectionEvent>().listen((event) {
+      if (mounted) {
+        debugPrint('CustomTitleBar 收到 P2P 事件: ${event.status}');
+        setState(() {
+          _p2pStatus = event.status;
+        });
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _p2pSubscription?.cancel();
+    super.dispose();
   }
 
   Future<void> _checkMaximized() async {
@@ -128,7 +156,80 @@ class _CustomTitleBarState extends State<CustomTitleBar> {
     );
   }
 
-  // 🆕 构建Tab栏
+  // 处理 P2P 图标点击
+  void _onP2pIconTap() {
+    if (_p2pStatus == P2pConnectionStatus.disconnected ||
+        _p2pStatus == P2pConnectionStatus.failed) {
+      // 断开或失败状态，点击重连
+      MyNetworkProvider().reconnectP2p();
+    }
+  }
+
+  // 获取 P2P 状态图标路径
+  String _getP2pIconPath() {
+    switch (_p2pStatus) {
+      case P2pConnectionStatus.connected:
+        return 'assets/icons/connected_device.svg';
+      case P2pConnectionStatus.connecting:
+        return 'assets/icons/connecting_device.svg';
+      case P2pConnectionStatus.disconnected:
+      case P2pConnectionStatus.failed:
+        return 'assets/icons/disconnect_device.svg';
+    }
+  }
+
+  // 获取 P2P 状态提示文字
+  String _getP2pTooltip() {
+    switch (_p2pStatus) {
+      case P2pConnectionStatus.connected:
+        return 'P2P 已连接';
+      case P2pConnectionStatus.connecting:
+        return 'P2P 连接中...';
+      case P2pConnectionStatus.disconnected:
+        return 'P2P 未连接，点击重连';
+      case P2pConnectionStatus.failed:
+        return 'P2P 连接失败，点击重试';
+    }
+  }
+
+  // 构建 P2P 状态图标
+  Widget _buildP2pStatusIcon() {
+    final isClickable = _p2pStatus == P2pConnectionStatus.disconnected ||
+        _p2pStatus == P2pConnectionStatus.failed;
+
+    return Tooltip(
+      message: _getP2pTooltip(),
+      child: InkWell(
+        onTap: isClickable ? _onP2pIconTap : null,
+        borderRadius: BorderRadius.circular(8),
+        child: Padding(
+          padding: const EdgeInsets.all(8.0),
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              SvgPicture.asset(
+                _getP2pIconPath(),
+                width: 20,
+                height: 20,
+              ),
+              // 连接中时显示加载动画
+              if (_p2pStatus == P2pConnectionStatus.connecting)
+                const SizedBox(
+                  width: 24,
+                  height: 24,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    valueColor: AlwaysStoppedAnimation<Color>(Colors.orange),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // 构建Tab栏
   Widget _buildTabBar() {
     return Container(
       height: 36,
@@ -156,7 +257,7 @@ class _CustomTitleBarState extends State<CustomTitleBar> {
     );
   }
 
-  // 🆕 构建单个Tab按钮
+  // 构建单个Tab按钮
   Widget _buildTabButton({
     required String label,
     required bool isSelected,
@@ -295,7 +396,7 @@ class _CustomTitleBarState extends State<CustomTitleBar> {
                             ),
                             child: Row(
                               children: [
-                                // 🆕 根据showTabs显示Tab栏或添加文件夹按钮
+                                // 根据showTabs显示Tab栏或添加文件夹按钮
                                 if (widget.showTabs)
                                   _buildTabBar()
                                 else
@@ -308,11 +409,13 @@ class _CustomTitleBarState extends State<CustomTitleBar> {
                                     ),
                                     label: const Text('添加文件夹'),
                                     style: ElevatedButton.styleFrom(
-                                      backgroundColor: const Color(0xFFF5F5F5),
+                                      backgroundColor:
+                                      const Color(0xFFF5F5F5),
                                       foregroundColor: Colors.black,
                                       elevation: 0,
                                       shape: RoundedRectangleBorder(
-                                        borderRadius: BorderRadius.circular(8),
+                                        borderRadius:
+                                        BorderRadius.circular(8),
                                       ),
                                       padding: const EdgeInsets.symmetric(
                                         horizontal: 16,
@@ -324,10 +427,17 @@ class _CustomTitleBarState extends State<CustomTitleBar> {
 
                                 // 传输速率显示
                                 TransferSpeedIndicator(
-                                  speedService: TransferSpeedService.instance,
+                                  speedService:
+                                  TransferSpeedService.instance,
                                 ),
 
                                 const SizedBox(width: 16),
+
+                                // P2P 连接状态图标（放在设置图标左侧）
+                                _buildP2pStatusIcon(),
+
+                                const SizedBox(width: 8),
+
                                 IconButton(
                                   icon: SvgPicture.asset(
                                     'assets/icons/setting_icon.svg',
@@ -392,7 +502,8 @@ class _CustomTitleBarState extends State<CustomTitleBar> {
                       WindowControlButton(
                         icon: Icons.close,
                         onPressed: () async {
-                          final minimizeOnClose = await MyInstance().getMinimizeOnClose();
+                          final minimizeOnClose =
+                          await MyInstance().getMinimizeOnClose();
                           if (minimizeOnClose) {
                             await windowManager.hide();
                           } else {

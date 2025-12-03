@@ -76,6 +76,9 @@ class MyNetworkProvider extends ChangeNotifier {
   DateTime lastGetAllGroupTime = DateTime.now();
   String currentP2pAccount = ''; // 当前P2P连接的账号
 
+  // 🆕 当前 P2P 连接状态（用于同步获取）
+  P2pConnectionStatus _currentP2pStatus = P2pConnectionStatus.disconnected;
+
   static final MyNetworkProvider _singleton = MyNetworkProvider._internal();
 
   MyNetworkProvider._internal();
@@ -85,6 +88,16 @@ class MyNetworkProvider extends ChangeNotifier {
       PackageInfo.fromPlatform().then((value) => _singleton.appInfo = value);
     }
     return _singleton;
+  }
+
+  // 🆕 获取当前 P2P 连接状态（同步方法，供 UI 初始化时使用）
+  P2pConnectionStatus getCurrentP2pStatus() {
+    return _currentP2pStatus;
+  }
+
+  // 🆕 获取当前 P2P 账号
+  String getCurrentP2pAccount() {
+    return currentP2pAccount;
   }
 
   ///清除登录标志
@@ -276,21 +289,10 @@ class MyNetworkProvider extends ChangeNotifier {
     if (responseModel.isSuccess) {
       await MyInstance().set(responseModel.model);
     }
+
+    notifyListeners();
     return responseModel;
   }
-
-  Future<ResponseModel<UserModel>> logout() async {
-    String url = "${AppConfig.userUrl()}/api/admin/auth/logout";
-    var uuid = await WinHelper.uuid();
-    ResponseModel<UserModel> responseModel =
-    await requestAndConvertResponseModel(
-      url,
-      formData: {"type": "主动", "clientType": "Windows", "deviceCode": uuid},
-      netMethod: NetMethod.post,
-    );
-    return responseModel;
-  }
-
 
   //api/admin/auth/getcode-by-phone
   Future<ResponseModel<String>> verifyCodeByPhone(
@@ -304,7 +306,6 @@ class MyNetworkProvider extends ChangeNotifier {
     );
     return responseModel;
   }
-
 
   Future<ResponseModel<User>> getUserInfo() async {
     String url = "${AppConfig.userUrl()}/api/admin/users/getUser";
@@ -320,6 +321,18 @@ class MyNetworkProvider extends ChangeNotifier {
     }
 
     notifyListeners();
+    return responseModel;
+  }
+
+  Future<ResponseModel<UserModel>> logout() async {
+    String url = "${AppConfig.userUrl()}/api/admin/auth/logout";
+    var uuid = await WinHelper.uuid();
+    ResponseModel<UserModel> responseModel =
+    await requestAndConvertResponseModel(
+      url,
+      formData: {"type": "主动", "clientType": "Windows", "deviceCode": uuid},
+      netMethod: NetMethod.post,
+    );
     return responseModel;
   }
 
@@ -388,6 +401,7 @@ class MyNetworkProvider extends ChangeNotifier {
       // 如果当前账号与要连接的账号相同，直接返回成功
       if (currentP2pAccount == p2pName) {
         debugPrint("P2P已连接到账号: $p2pName");
+        _currentP2pStatus = P2pConnectionStatus.connected; // 🆕 更新状态
         MCEventBus.fire(P2pConnectionEvent(
           status: P2pConnectionStatus.connected,
           p2pName: p2pName,
@@ -395,7 +409,8 @@ class MyNetworkProvider extends ChangeNotifier {
         return true;
       }
 
-      // 🆕 发送连接中事件
+      // 🆕 发送连接中事件，并更新状态
+      _currentP2pStatus = P2pConnectionStatus.connecting;
       MCEventBus.fire(P2pConnectionEvent(
         status: P2pConnectionStatus.connecting,
         p2pName: p2pName,
@@ -446,7 +461,8 @@ class MyNetworkProvider extends ChangeNotifier {
 
         debugPrint("✅ P2P连接成功: $p2pName");
 
-        // 🆕 发送连接成功事件
+        // 🆕 发送连接成功事件，并更新状态
+        _currentP2pStatus = P2pConnectionStatus.connected;
         MCEventBus.fire(P2pConnectionEvent(
           status: P2pConnectionStatus.connected,
           p2pName: p2pName,
@@ -471,7 +487,8 @@ class MyNetworkProvider extends ChangeNotifier {
         await p2pService.stop();
         currentP2pAccount = '';
 
-        // 🆕 发送连接失败事件
+        // 🆕 发送连接失败事件，并更新状态
+        _currentP2pStatus = P2pConnectionStatus.failed;
         MCEventBus.fire(P2pConnectionEvent(
           status: P2pConnectionStatus.failed,
           p2pName: p2pName,
@@ -484,7 +501,8 @@ class MyNetworkProvider extends ChangeNotifier {
       debugPrint("❌ P2P连接失败: $e");
       currentP2pAccount = '';
 
-      // 🆕 发送连接失败事件
+      // 🆕 发送连接失败事件，并更新状态
+      _currentP2pStatus = P2pConnectionStatus.failed;
       MCEventBus.fire(P2pConnectionEvent(
         status: P2pConnectionStatus.failed,
         p2pName: p2pName,
@@ -538,7 +556,8 @@ class MyNetworkProvider extends ChangeNotifier {
       currentP2pAccount = '';
       debugPrint("✅ P2P连接已完全断开");
 
-      // 🆕 发送断开连接事件
+      // 🆕 发送断开连接事件，并更新状态
+      _currentP2pStatus = P2pConnectionStatus.disconnected;
       MCEventBus.fire(P2pConnectionEvent(
         status: P2pConnectionStatus.disconnected,
         p2pName: oldAccount,
@@ -551,6 +570,39 @@ class MyNetworkProvider extends ChangeNotifier {
     }
   }
 
+  /// 🆕 重连 P2P（公开方法，供外部调用）
+  Future<bool> reconnectP2p() async {
+    try {
+      final deviceModel = MyInstance().deviceModel;
+      final p2pName = deviceModel?.p2pName ?? '';
+
+      if (p2pName.isEmpty) {
+        debugPrint("❌ 无法重连：缺少 P2P 名称");
+        _currentP2pStatus = P2pConnectionStatus.failed; // 🆕 更新状态
+        MCEventBus.fire(P2pConnectionEvent(
+          status: P2pConnectionStatus.failed,
+          errorMessage: "缺少 P2P 名称",
+        ));
+        return false;
+      }
+
+      debugPrint("开始重连 P2P: $p2pName");
+
+      // 先断开现有连接
+      currentP2pAccount = ''; // 清空以强制重连
+
+      // 重新连接
+      return await _loginP2p(p2pName);
+    } catch (e) {
+      debugPrint("❌ P2P 重连失败: $e");
+      _currentP2pStatus = P2pConnectionStatus.failed; // 🆕 更新状态
+      MCEventBus.fire(P2pConnectionEvent(
+        status: P2pConnectionStatus.failed,
+        errorMessage: e.toString(),
+      ));
+      return false;
+    }
+  }
 
   updateUserinfo() async {
     await getUserInfo();
