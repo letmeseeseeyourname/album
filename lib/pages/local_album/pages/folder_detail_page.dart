@@ -141,6 +141,25 @@ class _FolderDetailPageState extends State<FolderDetailPage> {
     }
   }
 
+  /// ✅ 刷新当前文件列表（用于上传成功后更新状态）
+  Future<void> _refreshFiles() async {
+    try {
+      final items = await _fileService.loadFiles(_pathController.currentPath);
+
+      // 预加载媒体缓存
+      _cacheService.preloadBatch(items);
+
+      if (mounted) {
+        setState(() {
+          _fileItems = items;
+        });
+      }
+    } catch (e) {
+      // 刷新失败时静默处理
+      debugPrint('Refresh files failed: $e');
+    }
+  }
+
   // ============ 导航相关 ============
 
   void _navigateToFolder(String folderPath, String folderName) {
@@ -285,7 +304,13 @@ class _FolderDetailPageState extends State<FolderDetailPage> {
     await _uploadCoordinator.startUpload(
       prepareResult.filePaths!,
           (String message, {bool isError = false}) => _showMessage(message, isError: isError),
-          () { if (mounted) setState(() {}); },
+          () {
+        if (mounted) {
+          setState(() {});
+          // ✅ 上传完成后刷新文件列表，更新上传状态图标
+          _refreshFiles();
+        }
+      },
     );
   }
 
@@ -518,7 +543,7 @@ class _StaticSideNavigation extends StatelessWidget {
         children: [
           const SizedBox(height: 8),
           _buildNavButton(Icons.home, '本地图库', true),
-          _buildNavButton(Icons.cloud, '相册图库', false),
+          _buildNavButton(Icons.cloud, '亲选相册', false),
         ],
       ),
     );

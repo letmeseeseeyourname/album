@@ -6,8 +6,9 @@ String _readCString(Array<Int8> array, int maxLength) {
   final buffer = StringBuffer();
   for (int i = 0; i < maxLength; i++) {
     final char = array[i];
-    if (char == 0) break; // null terminator
-    buffer.writeCharCode(char);
+    if (char == 0) break;
+    // 🆕 修复：将有符号字节转为无符号
+    buffer.writeCharCode(char & 0xFF);
   }
   return buffer.toString();
 }

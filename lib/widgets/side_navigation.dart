@@ -13,6 +13,7 @@ class SideNavigation extends StatefulWidget {
   final Group? selectedGroup;
   final Future<void> Function(Group)? onGroupSelected;
   final int? currentUserId;
+  final bool isGroupsLoading; // 🆕 Groups 加载状态
 
   const SideNavigation({
     super.key,
@@ -22,6 +23,7 @@ class SideNavigation extends StatefulWidget {
     this.selectedGroup,
     this.onGroupSelected,
     this.currentUserId,
+    this.isGroupsLoading = false, // 🆕 默认不加载
   });
 
   @override
@@ -33,13 +35,13 @@ class _SideNavigationState extends State<SideNavigation> {
   bool _isLoading = false;
   int? _loadingGroupIndex;
 
-  // 🆕 拖拽滑动相关
+  // 拖拽滑动相关
   final ScrollController _groupScrollController = ScrollController();
   bool _isDragging = false;
   double _dragStartX = 0;
   double _scrollStartOffset = 0;
 
-  // 🆕 Overlay提示框相关
+  // Overlay提示框相关
   OverlayEntry? _tooltipOverlay;
   final Map<int, GlobalKey> _itemKeys = {};
 
@@ -50,7 +52,7 @@ class _SideNavigationState extends State<SideNavigation> {
     super.dispose();
   }
 
-  // 🆕 显示提示框（智能定位，避免超出屏幕边缘）
+  // 显示提示框（智能定位，避免超出屏幕边缘）
   void _showTooltip(int index, Group group) {
     _removeTooltip();
 
@@ -62,7 +64,7 @@ class _SideNavigationState extends State<SideNavigation> {
     final size = renderBox.size;
 
     // 计算提示框文本宽度（估算）
-    final tooltipText = '${group.groupName ?? '未命名'}的家庭圈';
+    final tooltipText = group.groupName ?? '未命名';
     final estimatedWidth = tooltipText.length * 12.0 + 24; // 字体12 + padding
 
     // 按钮中心位置
@@ -71,7 +73,7 @@ class _SideNavigationState extends State<SideNavigation> {
     // 计算提示框左边缘位置，使小三角对准按钮中心
     double tooltipLeft = buttonCenterX - estimatedWidth / 2;
 
-    // 🆕 确保提示框不超出左边界（留8px边距）
+    // 确保提示框不超出左边界（留8px边距）
     if (tooltipLeft < 8) {
       tooltipLeft = 8;
     }
@@ -90,7 +92,7 @@ class _SideNavigationState extends State<SideNavigation> {
     Overlay.of(context).insert(_tooltipOverlay!);
   }
 
-  // 🆕 移除提示框
+  // 移除提示框
   void _removeTooltip() {
     _tooltipOverlay?.remove();
     _tooltipOverlay = null;
@@ -156,14 +158,14 @@ class _SideNavigationState extends State<SideNavigation> {
     }
   }
 
-  // 🆕 处理拖拽开始
+  // 处理拖拽开始
   void _onDragStart(DragStartDetails details) {
     _isDragging = true;
     _dragStartX = details.globalPosition.dx;
     _scrollStartOffset = _groupScrollController.offset;
   }
 
-  // 🆕 处理拖拽更新
+  // 处理拖拽更新
   void _onDragUpdate(DragUpdateDetails details) {
     if (!_isDragging) return;
 
@@ -175,7 +177,7 @@ class _SideNavigationState extends State<SideNavigation> {
     _groupScrollController.jumpTo(newOffset);
   }
 
-  // 🆕 处理拖拽结束
+  // 处理拖拽结束
   void _onDragEnd(DragEndDetails details) {
     _isDragging = false;
   }
@@ -197,20 +199,69 @@ class _SideNavigationState extends State<SideNavigation> {
           ),
           NavButton(
             svgPath: 'assets/icons/cloud_icon.svg',
-            label: '相册图库',
+            label: '亲选相册',
             isSelected: widget.selectedIndex == 1,
             onTap: () => widget.onNavigationChanged(1),
           ),
 
           const Spacer(),
 
-          // Group列表 - 底部
-          if (widget.groups != null &&
-              widget.groups!.isNotEmpty &&
-              widget.onGroupSelected != null)
-            _buildGroupsList(),
+          // 🆕 Group列表 - 支持 loading 状态
+          _buildGroupsSection(),
 
           const SizedBox(height: 8),
+        ],
+      ),
+    );
+  }
+
+  // 🆕 构建 Groups 区域（包含 loading 状态）
+  Widget _buildGroupsSection() {
+    // 如果没有 onGroupSelected 回调，不显示这个区域
+    if (widget.onGroupSelected == null) {
+      return const SizedBox.shrink();
+    }
+
+    // 如果正在加载，显示 loading 动画
+    if (widget.isGroupsLoading) {
+      return _buildGroupsLoading();
+    }
+
+    // 如果有数据，显示列表
+    if (widget.groups != null && widget.groups!.isNotEmpty) {
+      return _buildGroupsList();
+    }
+
+    // 加载完成但没有数据时不显示
+    return const SizedBox.shrink();
+  }
+
+  // 🆕 构建 Groups 加载动画
+  Widget _buildGroupsLoading() {
+    return Container(
+      height: 38,
+      padding: const EdgeInsets.symmetric(horizontal: 4),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          SizedBox(
+            width: 20,
+            height: 20,
+            child: CircularProgressIndicator(
+              strokeWidth: 2,
+              valueColor: AlwaysStoppedAnimation<Color>(
+                Colors.black.withOpacity(0.6),
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            '加载中...',
+            style: TextStyle(
+              fontSize: 12,
+              color: Colors.black.withOpacity(0.6),
+            ),
+          ),
         ],
       ),
     );
@@ -222,14 +273,14 @@ class _SideNavigationState extends State<SideNavigation> {
 
     return Container(
       height: 38,
-      padding: const EdgeInsets.symmetric(horizontal: 8),
-      // 🆕 使用GestureDetector支持拖拽滑动
+      padding: const EdgeInsets.symmetric(horizontal: 4),
+      // 使用GestureDetector支持拖拽滑动
       child: GestureDetector(
         onHorizontalDragStart: _onDragStart,
         onHorizontalDragUpdate: _onDragUpdate,
         onHorizontalDragEnd: _onDragEnd,
         child: ScrollConfiguration(
-          // 🆕 支持鼠标滚轮和拖拽
+          // 支持鼠标滚轮和拖拽
           behavior: ScrollConfiguration.of(context).copyWith(
             dragDevices: {
               PointerDeviceKind.touch,
@@ -241,7 +292,7 @@ class _SideNavigationState extends State<SideNavigation> {
             scrollDirection: Axis.horizontal,
             physics: const BouncingScrollPhysics(),
             itemCount: sortedGroups.length,
-            separatorBuilder: (context, index) => const SizedBox(width: 6),
+            separatorBuilder: (context, index) => const SizedBox(width: 5),
             itemBuilder: (context, index) {
               final group = sortedGroups[index];
               final isCurrentGroup = _isCurrentGroup(group);
@@ -249,7 +300,7 @@ class _SideNavigationState extends State<SideNavigation> {
               final isLoadingThis = _isLoading && _loadingGroupIndex == index;
               final isHovered = _hoveredGroupIndex == index;
 
-              // 🆕 为每个item创建GlobalKey
+              // 为每个item创建GlobalKey
               _itemKeys[index] ??= GlobalKey();
 
               return MouseRegion(
@@ -272,7 +323,7 @@ class _SideNavigationState extends State<SideNavigation> {
                     height: 32,
                     decoration: BoxDecoration(
                       color: isCurrentGroup ? Colors.black : Colors.white,
-                      // 🔄 始终有边框，悬浮时显示黑色，否则透明（保持尺寸一致）
+                      // 始终有边框，悬浮时显示黑色，否则透明（保持尺寸一致）
                       border: Border.all(
                         color: (isHovered && !isCurrentGroup)
                             ? Colors.black
@@ -312,9 +363,9 @@ class _SideNavigationState extends State<SideNavigation> {
     );
   }
 
-  // 🔄 构建悬浮提示框内容（使用Overlay显示，带小三角，支持动态位置）
+  // 构建悬浮提示框内容（使用Overlay显示，带小三角，支持动态位置）
   Widget _buildTooltipContent(Group group, double triangleOffset) {
-    final tooltipText = '${group.groupName ?? '未命名'}的家庭圈';
+    final tooltipText = group.groupName ?? '未命名';
 
     return Material(
       color: Colors.transparent,
@@ -352,7 +403,7 @@ class _SideNavigationState extends State<SideNavigation> {
   }
 }
 
-// 🆕 绘制小三角的Painter
+// 绘制小三角的Painter
 class _TrianglePainter extends CustomPainter {
   final Color color;
 

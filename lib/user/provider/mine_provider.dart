@@ -7,6 +7,7 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:semaphore_plus/semaphore_plus.dart';
 import '../../eventbus/event_bus.dart';
+import '../../eventbus/p2p_events.dart';
 import '../../network/constant_sign.dart';
 import '../../network/network_provider.dart';
 import '../../network/response/response_model.dart';
@@ -378,7 +379,8 @@ class MyNetworkProvider extends ChangeNotifier {
     return responseModel;
   }
 
-  ///TODO( add p2p connect )
+
+  /// 修改后的 _loginP2p 方法
   Future<bool> _loginP2p(String p2pName) async {
     try {
       final p2pService = PgTunnelService();
@@ -386,14 +388,23 @@ class MyNetworkProvider extends ChangeNotifier {
       // 如果当前账号与要连接的账号相同，直接返回成功
       if (currentP2pAccount == p2pName) {
         debugPrint("P2P已连接到账号: $p2pName");
+        MCEventBus.fire(P2pConnectionEvent(
+          status: P2pConnectionStatus.connected,
+          p2pName: p2pName,
+        ));
         return true;
       }
+
+      // 🆕 发送连接中事件
+      MCEventBus.fire(P2pConnectionEvent(
+        status: P2pConnectionStatus.connecting,
+        p2pName: p2pName,
+      ));
 
       // 如果有旧账号，先清理旧连接
       if (currentP2pAccount.isNotEmpty) {
         debugPrint("清理旧P2P连接: $currentP2pAccount");
         try {
-          // 删除旧连接
           await p2pService.connectDelete(
             peerId: currentP2pAccount,
             clientAddr: "127.0.0.1:9000",
@@ -402,7 +413,6 @@ class MyNetworkProvider extends ChangeNotifier {
             peerId: currentP2pAccount,
             clientAddr: "127.0.0.1:8080",
           );
-          // 停止隧道
           await p2pService.stop();
         } catch (e) {
           debugPrint("清理旧连接时出错: $e");
@@ -416,27 +426,127 @@ class MyNetworkProvider extends ChangeNotifier {
       // 启动隧道
       await p2pService.start(uuid);
 
-      // 添加连接 - 8080端口
-      await p2pService.connectAdd(
-        peerId: p2pName,
-        listenAddr: "127.0.0.1:8080",
-        clientAddr: "127.0.0.1:8080",
-      );
-
-      // 添加连接 - 9000端口
-      await p2pService.connectAdd(
-        peerId: p2pName,
-        listenAddr: "127.0.0.1:9000",
-        clientAddr: "127.0.0.1:9000",
-      );
-
-      // 更新当前账号
+      // 先更新账号，确保后续清理能正常工作
       currentP2pAccount = p2pName;
 
-      debugPrint("P2P连接成功: $p2pName");
+      try {
+        // 添加连接 - 8080端口
+        await p2pService.connectAdd(
+          peerId: p2pName,
+          listenAddr: "127.0.0.1:8080",
+          clientAddr: "127.0.0.1:8080",
+        );
+
+        // 添加连接 - 9000端口
+        await p2pService.connectAdd(
+          peerId: p2pName,
+          listenAddr: "127.0.0.1:9000",
+          clientAddr: "127.0.0.1:9000",
+        );
+
+        debugPrint("✅ P2P连接成功: $p2pName");
+
+        // 🆕 发送连接成功事件
+        MCEventBus.fire(P2pConnectionEvent(
+          status: P2pConnectionStatus.connected,
+          p2pName: p2pName,
+        ));
+
+        return true;
+      } catch (e) {
+        // 连接失败时回滚：清理已建立的连接
+        debugPrint("P2P连接部分失败，开始回滚: $e");
+        try {
+          await p2pService.connectDelete(
+            peerId: p2pName,
+            clientAddr: "127.0.0.1:8080",
+          );
+        } catch (_) {}
+        try {
+          await p2pService.connectDelete(
+            peerId: p2pName,
+            clientAddr: "127.0.0.1:9000",
+          );
+        } catch (_) {}
+        await p2pService.stop();
+        currentP2pAccount = '';
+
+        // 🆕 发送连接失败事件
+        MCEventBus.fire(P2pConnectionEvent(
+          status: P2pConnectionStatus.failed,
+          p2pName: p2pName,
+          errorMessage: e.toString(),
+        ));
+
+        rethrow;
+      }
+    } catch (e) {
+      debugPrint("❌ P2P连接失败: $e");
+      currentP2pAccount = '';
+
+      // 🆕 发送连接失败事件
+      MCEventBus.fire(P2pConnectionEvent(
+        status: P2pConnectionStatus.failed,
+        p2pName: p2pName,
+        errorMessage: e.toString(),
+      ));
+
+      return false;
+    }
+  }
+
+  /// 🆕 断开P2P连接（公开方法，供退出登录时调用）
+  /// 修改后的 disconnectP2p 方法
+  Future<bool> disconnectP2p() async {
+    try {
+      if (currentP2pAccount.isEmpty) {
+        debugPrint("P2P未连接，无需断开");
+        return true;
+      }
+
+      final p2pService = PgTunnelService();
+      final oldAccount = currentP2pAccount;
+      debugPrint("开始断开P2P连接: $oldAccount");
+
+      try {
+        await p2pService.connectDelete(
+          peerId: oldAccount,
+          clientAddr: "127.0.0.1:9000",
+        );
+        debugPrint("✅ 已删除 9000 端口连接");
+      } catch (e) {
+        debugPrint("⚠️ 删除 9000 端口连接时出错: $e");
+      }
+
+      try {
+        await p2pService.connectDelete(
+          peerId: oldAccount,
+          clientAddr: "127.0.0.1:8080",
+        );
+        debugPrint("✅ 已删除 8080 端口连接");
+      } catch (e) {
+        debugPrint("⚠️ 删除 8080 端口连接时出错: $e");
+      }
+
+      try {
+        await p2pService.stop();
+        debugPrint("✅ P2P隧道已停止");
+      } catch (e) {
+        debugPrint("⚠️ 停止P2P隧道时出错: $e");
+      }
+
+      currentP2pAccount = '';
+      debugPrint("✅ P2P连接已完全断开");
+
+      // 🆕 发送断开连接事件
+      MCEventBus.fire(P2pConnectionEvent(
+        status: P2pConnectionStatus.disconnected,
+        p2pName: oldAccount,
+      ));
+
       return true;
     } catch (e) {
-      debugPrint("P2P连接失败: $e");
+      debugPrint("❌ 断开P2P连接失败: $e");
       return false;
     }
   }

@@ -88,7 +88,7 @@ class FolderDetailBottomBar extends StatelessWidget {
               ),
             ),
             child: Text(
-              isUploading ? '继续上传' : '长传',  // ✅ 动态文字提示
+              isUploading ? '继续上传' : '上传',  // ✅ 动态文字提示
               style: const TextStyle(
                 fontSize: 16,
                 color: Colors.white,

@@ -1,157 +1,245 @@
 // services/file_service.dart
 import 'dart:io';
-import 'package:flutter/foundation.dart';
+import 'package:path/path.dart' as p;
 import '../../../models/file_item.dart';
+import '../../../album/database/database_helper.dart';
+import '../../../album/models/local_file_item.dart' as db; // 数据库中的 FileItem
+import '../../../user/my_instance.dart';
 
-/// 文件服务类 - 负责文件系统相关操作
+/// 文件服务 - 负责加载文件列表并查询上传状态
 class FileService {
-  // 支持的媒体文件扩展名
-  static const List<String> imageExtensions = [
-    'bmp', 'gif', 'jpg', 'jpeg', 'png', 'webp', 'wbmp', 'heic'
-  ];
+  final DatabaseHelper _dbHelper = DatabaseHelper.instance;
 
-  static const List<String> videoExtensions = [
-    'mp4', 'mov', 'avi', '3gp', 'mkv', '3gp2'
-  ];
+  /// 支持的图片扩展名
+  static const Set<String> _imageExtensions = {
+    'jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'heic', 'heif'
+  };
+
+  /// 支持的视频扩展名
+  static const Set<String> _videoExtensions = {
+    'mp4', 'mov', 'avi', 'mkv', 'wmv', 'flv', 'webm', 'm4v', '3gp'
+  };
 
   /// 加载指定路径下的文件列表
+  ///
+  /// ✅ 会查询数据库获取每个文件的上传状态
   Future<List<FileItem>> loadFiles(String path) async {
-    return compute(_loadFilesInBackground, path);
+    final directory = Directory(path);
+    if (!await directory.exists()) {
+      return [];
+    }
+
+    final entities = await directory.list().toList();
+    final items = <FileItem>[];
+
+    // 获取用户信息用于查询数据库
+    final userId = MyInstance().user?.user?.id?.toString() ?? '';
+    final deviceCode = MyInstance().deviceCode;
+
+    // ✅ 批量获取已上传文件的路径集合（性能优化）
+    final uploadedPaths = await _getUploadedFilePaths(userId, deviceCode);
+
+    for (final entity in entities) {
+      final name = p.basename(entity.path);
+
+      // 跳过隐藏文件
+      if (name.startsWith('.')) continue;
+
+      if (entity is Directory) {
+        items.add(FileItem(
+          name: name,
+          path: entity.path,
+          type: FileItemType.folder,
+          size: 0,
+          isUploaded: null, // 文件夹不需要显示上传状态
+        ));
+      } else if (entity is File) {
+        final extension = p.extension(name).toLowerCase().replaceFirst('.', '');
+        final type = _getFileType(extension);
+
+        // 只处理图片和视频
+        if (type == FileItemType.image || type == FileItemType.video) {
+          final stat = await entity.stat();
+
+          // ✅ 检查文件是否已上传（通过路径匹配）
+          final isUploaded = uploadedPaths.contains(entity.path);
+
+          items.add(FileItem(
+            name: name,
+            path: entity.path,
+            type: type,
+            size: stat.size,
+            isUploaded: isUploaded,
+          ));
+        }
+      }
+    }
+
+    // 排序：文件夹在前，然后按名称排序
+    items.sort((a, b) {
+      if (a.type == FileItemType.folder && b.type != FileItemType.folder) {
+        return -1;
+      } else if (a.type != FileItemType.folder && b.type == FileItemType.folder) {
+        return 1;
+      }
+      return a.name.toLowerCase().compareTo(b.name.toLowerCase());
+    });
+
+    return items;
   }
 
-  /// 递归获取所有媒体文件路径
-  Future<List<String>> getAllMediaFilesRecursive(String path) async {
-    return compute(_getAllMediaFilesRecursive, path);
+  /// ✅ 获取已上传文件的路径集合
+  ///
+  /// 通过查询数据库，获取 status == 2（上传成功）的文件路径
+  Future<Set<String>> _getUploadedFilePaths(String userId, String deviceCode) async {
+    if (userId.isEmpty || deviceCode.isEmpty) {
+      return {};
+    }
+
+    try {
+      // 获取该用户和设备下所有已上传的文件
+      final List<db.FileItem> dbFiles = await _dbHelper.fetchFilesByUserAndDevice(userId, deviceCode);
+
+      // 筛选 status == 2（上传成功）的文件路径
+      final uploadedPaths = <String>{};
+      for (final file in dbFiles) {
+        // status: 0=待上传, 1=上传中, 2=上传成功
+        if (file.status == 2 && file.filePath.isNotEmpty) {
+          uploadedPaths.add(file.filePath);
+        }
+      }
+
+      return uploadedPaths;
+    } catch (e) {
+      print('Error fetching uploaded files: $e');
+      return {};
+    }
   }
 
-  /// 分析文件列表的统计数据
-  Future<UploadAnalysisResult> analyzeFilesForUpload(List<String> filePaths) async {
-    return compute(_analyzeFilesForUpload, filePaths);
-  }
-
-  /// 判断文件类型
-  static FileItemType? getFileType(String extension) {
-    final ext = extension.toLowerCase();
-    if (imageExtensions.contains(ext)) {
+  /// 根据扩展名判断文件类型
+  FileItemType _getFileType(String extension) {
+    if (_imageExtensions.contains(extension)) {
       return FileItemType.image;
-    } else if (videoExtensions.contains(ext)) {
+    } else if (_videoExtensions.contains(extension)) {
       return FileItemType.video;
     }
-    return null;
+    return FileItemType.folder; // 其他类型暂时返回 folder，实际不会显示
+  }
+
+  /// 获取指定文件夹下的所有媒体文件路径（递归）
+  Future<List<String>> getMediaFilePaths(String folderPath) async {
+    final paths = <String>[];
+    final directory = Directory(folderPath);
+
+    if (!await directory.exists()) {
+      return paths;
+    }
+
+    await for (final entity in directory.list(recursive: true)) {
+      if (entity is File) {
+        final extension = p.extension(entity.path).toLowerCase().replaceFirst('.', '');
+        if (_imageExtensions.contains(extension) || _videoExtensions.contains(extension)) {
+          paths.add(entity.path);
+        }
+      }
+    }
+
+    return paths;
+  }
+
+  /// 统计文件夹中的媒体文件
+  Future<Map<String, int>> countMediaFiles(String folderPath) async {
+    int imageCount = 0;
+    int videoCount = 0;
+    int totalSize = 0;
+
+    final directory = Directory(folderPath);
+    if (!await directory.exists()) {
+      return {'images': 0, 'videos': 0, 'totalSize': 0};
+    }
+
+    await for (final entity in directory.list(recursive: true)) {
+      if (entity is File) {
+        final extension = p.extension(entity.path).toLowerCase().replaceFirst('.', '');
+        if (_imageExtensions.contains(extension)) {
+          imageCount++;
+          totalSize += await entity.length();
+        } else if (_videoExtensions.contains(extension)) {
+          videoCount++;
+          totalSize += await entity.length();
+        }
+      }
+    }
+
+    return {
+      'images': imageCount,
+      'videos': videoCount,
+      'totalSize': totalSize,
+    };
+  }
+
+  /// ✅ 递归获取文件夹下所有媒体文件路径
+  /// 供 UploadCoordinator 调用
+  Future<List<String>> getAllMediaFilesRecursive(String folderPath) async {
+    final paths = <String>[];
+    final directory = Directory(folderPath);
+
+    if (!await directory.exists()) {
+      return paths;
+    }
+
+    await for (final entity in directory.list(recursive: true)) {
+      if (entity is File) {
+        final extension = p.extension(entity.path).toLowerCase().replaceFirst('.', '');
+        if (_imageExtensions.contains(extension) || _videoExtensions.contains(extension)) {
+          paths.add(entity.path);
+        }
+      }
+    }
+
+    return paths;
+  }
+
+  /// ✅ 分析待上传文件列表
+  /// 返回图片数量、视频数量和总字节数
+  Future<FileAnalysisResult> analyzeFilesForUpload(List<String> filePaths) async {
+    int imageCount = 0;
+    int videoCount = 0;
+    int totalBytes = 0;
+
+    for (final filePath in filePaths) {
+      final file = File(filePath);
+      if (!await file.exists()) continue;
+
+      final extension = p.extension(filePath).toLowerCase().replaceFirst('.', '');
+      final fileSize = await file.length();
+
+      if (_imageExtensions.contains(extension)) {
+        imageCount++;
+        totalBytes += fileSize;
+      } else if (_videoExtensions.contains(extension)) {
+        videoCount++;
+        totalBytes += fileSize;
+      }
+    }
+
+    return FileAnalysisResult(
+      imageCount: imageCount,
+      videoCount: videoCount,
+      totalBytes: totalBytes,
+    );
   }
 }
 
-// ============ 后台隔离区运行的静态方法 ============
-
-/// 用于返回上传分析结果的模型
-class UploadAnalysisResult {
+/// 文件分析结果
+class FileAnalysisResult {
   final int imageCount;
   final int videoCount;
   final int totalBytes;
 
-  UploadAnalysisResult(this.imageCount, this.videoCount, this.totalBytes);
-}
-
-/// 后台加载文件列表
-Future<List<FileItem>> _loadFilesInBackground(String path) async {
-  final directory = Directory(path);
-  final entities = await directory.list().toList();
-
-  final items = <FileItem>[];
-
-  for (var entity in entities) {
-    if (entity is Directory) {
-      items.add(
-        FileItem(
-          name: entity.path.split(Platform.pathSeparator).last,
-          path: entity.path,
-          type: FileItemType.folder,
-        ),
-      );
-    } else if (entity is File) {
-      final ext = entity.path.split('.').last.toLowerCase();
-      final type = FileService.getFileType(ext);
-
-      if (type != null) {
-        final stat = await entity.stat();
-        items.add(
-          FileItem(
-            name: entity.path.split(Platform.pathSeparator).last,
-            path: entity.path,
-            type: type,
-            size: stat.size,
-          ),
-        );
-      }
-    }
-  }
-
-  // 排序：文件夹在前，然后按名称排序
-  items.sort((a, b) {
-    if (a.type == FileItemType.folder && b.type != FileItemType.folder) {
-      return -1;
-    }
-    if (a.type != FileItemType.folder && b.type == FileItemType.folder) {
-      return 1;
-    }
-    return a.name.toLowerCase().compareTo(b.name.toLowerCase());
+  FileAnalysisResult({
+    required this.imageCount,
+    required this.videoCount,
+    required this.totalBytes,
   });
-
-  return items;
-}
-
-/// 递归获取所有媒体文件路径
-Future<List<String>> _getAllMediaFilesRecursive(String path) async {
-  final mediaPaths = <String>[];
-  final directory = Directory(path);
-  if (!await directory.exists()) return mediaPaths;
-
-  const mediaExtensions = [
-    ...FileService.imageExtensions,
-    ...FileService.videoExtensions,
-  ];
-
-  try {
-    await for (var entity in directory.list(recursive: true)) {
-      if (entity is File) {
-        final ext = entity.path.split('.').last.toLowerCase();
-        if (mediaExtensions.contains(ext)) {
-          mediaPaths.add(entity.path);
-        }
-      }
-    }
-  } catch (e) {
-    print('Error accessing directory $path: $e');
-  }
-
-  return mediaPaths;
-}
-
-/// 分析最终上传文件列表的统计数据
-Future<UploadAnalysisResult> _analyzeFilesForUpload(List<String> filePaths) async {
-  int imageCount = 0;
-  int videoCount = 0;
-  int totalBytes = 0;
-
-  for (final path in filePaths) {
-    try {
-      final file = File(path);
-      final stat = await file.stat();
-      if (stat.type == FileSystemEntityType.file) {
-        final ext = path.split('.').last.toLowerCase();
-
-        if (FileService.imageExtensions.contains(ext)) {
-          imageCount++;
-          totalBytes += stat.size;
-        } else if (FileService.videoExtensions.contains(ext)) {
-          videoCount++;
-          totalBytes += stat.size;
-        }
-      }
-    } catch (e) {
-      // 忽略无法访问的文件
-    }
-  }
-
-  return UploadAnalysisResult(imageCount, videoCount, totalBytes);
 }

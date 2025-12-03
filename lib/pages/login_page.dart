@@ -46,9 +46,9 @@ class _LoginPageState extends State<LoginPage> {
     passwordController.addListener(_validatePassword);
     verifyCodeController.addListener(_validateVerifyCode);
 
-    Future.delayed(Duration(seconds: 1), () {
-      phoneController.text = "15323783167";
-      passwordController.text = "123456";
+    Future.delayed(Duration(seconds: 1), () {//15323783167  123456
+      phoneController.text = "";
+      passwordController.text = "";
     });
   }
 

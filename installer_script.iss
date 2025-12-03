@@ -1,8 +1,8 @@
 ; Flutter Windows 应用程序 Inno Setup 配置文件
 ; 请根据你的实际项目信息修改以下配置
 
-#define MyAppName "ablumwin"
-#define MyAppVersion "1.0.0"
+#define MyAppName "亲选相册"
+#define MyAppVersion "1.0.3"
 #define MyAppPublisher "joykee"
 #define MyAppURL "https://www.joykee.com"
 #define MyAppExeName "ablumwin.exe"

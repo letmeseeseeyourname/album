@@ -14,7 +14,7 @@ class StaticSideNavigation extends StatelessWidget {
         children: [
           const SizedBox(height: 8),
           _buildNavButton(Icons.home, '本地图库', true),
-          _buildNavButton(Icons.cloud, '相册图库', false),
+          _buildNavButton(Icons.cloud, '亲选相册', false),
         ],
       ),
     );

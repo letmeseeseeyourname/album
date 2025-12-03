@@ -66,7 +66,7 @@ class AlbumToolbar extends StatelessWidget {
     }
 
     return const Text(
-      '相册图库',
+      '亲选相册',
       style: TextStyle(
         fontSize: 20,
         fontWeight: FontWeight.bold,

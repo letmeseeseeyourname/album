@@ -21,7 +21,7 @@ class AlbumLibraryPage extends StatefulWidget {
   // 🆕 接收外部Tab状态
   final int currentTabIndex;
   final Function(int) onTabChanged;
-
+  final bool isGroupsLoading;
   const AlbumLibraryPage({
     super.key,
     required this.selectedNavIndex,
@@ -32,6 +32,7 @@ class AlbumLibraryPage extends StatefulWidget {
     this.currentUserId,
     required this.currentTabIndex,
     required this.onTabChanged,
+    this.isGroupsLoading = false,
   });
 
   @override

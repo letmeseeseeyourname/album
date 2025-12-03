@@ -97,7 +97,7 @@ class MainFolderPage extends StatefulWidget {
   final Group? selectedGroup;
   final Future<void> Function(Group)? onGroupSelected; // 🔄 改为异步回调类型
   final int? currentUserId;
-
+  final bool isGroupsLoading;
   const MainFolderPage({
     super.key,
     this.selectedNavIndex = 0,
@@ -106,6 +106,7 @@ class MainFolderPage extends StatefulWidget {
     this.selectedGroup,
     this.onGroupSelected,
     this.currentUserId,
+    this.isGroupsLoading = false,
   });
 
   @override

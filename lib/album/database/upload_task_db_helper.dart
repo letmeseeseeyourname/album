@@ -99,7 +99,7 @@ class UploadFileTaskManager {
   UploadFileTaskManager._init();
 
   static const _dbName = 'upload_tasks.db';
-  static const _dbVersion = 5; // ✅ 版本升级到4
+  static const _dbVersion = 6; // ✅ 版本升级到6，修复列缺失问题
   static const _table = 'upload_tasks';
 
   Database? _db;
@@ -146,20 +146,22 @@ class UploadFileTaskManager {
           await db.execute('CREATE INDEX IF NOT EXISTS idx_${_table}_status ON $_table(status);');
         },
         onUpgrade: (db, oldVersion, newVersion) async {
-          // ✅ 从版本3升级到版本4：添加 file_count 和 total_size 字段
-          if (oldVersion < 4) {
-            try {
-              // 尝试添加新字段（如果已存在会报错，忽略即可）
-              await db.execute('ALTER TABLE $_table ADD COLUMN file_count INTEGER NOT NULL DEFAULT 0;');
-            } catch (e) {
-              debugPrint('file_count column may already exist: $e');
-            }
+          debugPrint('Upgrading database from version $oldVersion to $newVersion');
 
-            try {
-              await db.execute('ALTER TABLE $_table ADD COLUMN total_size INTEGER NOT NULL DEFAULT 0;');
-            } catch (e) {
-              debugPrint('total_size column may already exist: $e');
-            }
+          // ✅ 确保 file_count 和 total_size 列存在（无论从哪个版本升级）
+          // 这样可以修复之前可能升级失败导致的列缺失问题
+          try {
+            await db.execute('ALTER TABLE $_table ADD COLUMN file_count INTEGER NOT NULL DEFAULT 0;');
+            debugPrint('Added file_count column successfully');
+          } catch (e) {
+            debugPrint('file_count column may already exist: $e');
+          }
+
+          try {
+            await db.execute('ALTER TABLE $_table ADD COLUMN total_size INTEGER NOT NULL DEFAULT 0;');
+            debugPrint('Added total_size column successfully');
+          } catch (e) {
+            debugPrint('total_size column may already exist: $e');
           }
 
           // 向下兼容：处理版本2升级

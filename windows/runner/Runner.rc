@@ -69,7 +69,7 @@ IDI_APP_ICON            ICON                    "resources\\app_icon.ico"
 #if defined(FLUTTER_VERSION)
 #define VERSION_AS_STRING FLUTTER_VERSION
 #else
-#define VERSION_AS_STRING "1.0.0"
+#define VERSION_AS_STRING "1.0.1"
 #endif
 
 VS_VERSION_INFO VERSIONINFO
@@ -90,11 +90,11 @@ BEGIN
         BLOCK "040904e4"
         BEGIN
             VALUE "CompanyName", "joykee" "\0"
-            VALUE "FileDescription", "Firmly album" "\0"
+            VALUE "FileDescription", "亲选相册" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
             VALUE "InternalName", "album" "\0"
             VALUE "LegalCopyright", "Copyright (C) 2025 com.joykee. All rights reserved." "\0"
-            VALUE "OriginalFilename", "亲选相册.exe" "\0"
+            VALUE "OriginalFilename", "ablumwin.exe" "\0"
             VALUE "ProductName", "亲选相册" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END

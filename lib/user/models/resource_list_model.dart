@@ -1,4 +1,3 @@
-
 import 'package:json_annotation/json_annotation.dart';
 import 'package:intl/intl.dart';
 
@@ -11,8 +10,8 @@ class ResourceListModel extends Object {
   List<ResList> resList;
 
   ResourceListModel(
-    this.resList,
-  );
+      this.resList,
+      );
 
   factory ResourceListModel.fromJson(Map<String, dynamic> srcJson) =>
       _$ResourceListModelFromJson(srcJson);
@@ -151,44 +150,39 @@ class ResList {
   });
 
   factory ResList.fromJson(Map<String, dynamic> json) => ResList(
-        resId: json['resId'] as String?,
-        thumbnailPath: json['thumbnailPath'] as String?,
-        mediumPath: json['mediumPath'] as String?,
-        originPath: json['originPath'] as String?,
-        resType: json['resType'] as String?,
-        fileType: json['fileType'] as String?,
-        fileName: json['fileName'] as String?,
-        createDate: (json['createDate'] == null || (json['createDate'] as String).isEmpty)
-            ? null
-            : DateTime.parse(DateFormaterManager.pad(json['createDate'] as String)),
-        updateDate: (json['updateDate'] == null || (json['updateDate'] as String).isEmpty)
-            ? null
-            : DateTime.parse(DateFormaterManager.pad(json['updateDate'] as String)),
-        photoDate: ( json['photoDate'] == null || (json['photoDate'] as String).isEmpty)
-            ? null
-            : DateTime.parse(DateFormaterManager.pad(json['photoDate'] as String)),
-        fileSize: (json['fileSize'] as num?)?.toInt(),
-        duration: (json['duration'] as num?)?.toInt(),
-        width: (json['width'] as num?)?.toInt(),
-        height: (json['height'] as num?)?.toInt(),
-        shareUserId: (json['shareUserId'] as num?)?.toInt(),
-        shareUserName: json['shareUserName'] as String?,
-        shareUserHeadUrl: json['shareUserHeadUrl'] as String?,
-        personLabels:
-            ((json['personLabels'] ?? json['personLabel']) as List<dynamic>?)
-                ?.map((e) => PersonLabel.fromJson(e as Map<String, dynamic>))
-                .toList(),
-        deviceName: json['deviceName'] as String?,
-        locate: ((json['locate'] ?? json['locateLabels']) as List<dynamic>?)
-            ?.map((e) => Locate.fromJson(e as Map<String, dynamic>))
-            .toList(),
-        scence: (json['scence'] as List<dynamic>?)
-            ?.map((e) => Scence.fromJson(e as Map<String, dynamic>))
-            .toList(),
-        address: json['address'] as String?,
-        storeContent: json['storeContent'] as String?,
-        isPrivate: json['isPrivate'] as String?,
-      );
+    resId: json['resId'] as String?,
+    thumbnailPath: json['thumbnailPath'] as String?,
+    mediumPath: json['mediumPath'] as String?,
+    originPath: json['originPath'] as String?,
+    resType: json['resType'] as String?,
+    fileType: json['fileType'] as String?,
+    fileName: json['fileName'] as String?,
+    // 🔄 使用 safeParse 安全解析日期
+    createDate: DateFormaterManager.safeParse(json['createDate'] as String?),
+    updateDate: DateFormaterManager.safeParse(json['updateDate'] as String?),
+    photoDate: DateFormaterManager.safeParse(json['photoDate'] as String?),
+    fileSize: (json['fileSize'] as num?)?.toInt(),
+    duration: (json['duration'] as num?)?.toInt(),
+    width: (json['width'] as num?)?.toInt(),
+    height: (json['height'] as num?)?.toInt(),
+    shareUserId: (json['shareUserId'] as num?)?.toInt(),
+    shareUserName: json['shareUserName'] as String?,
+    shareUserHeadUrl: json['shareUserHeadUrl'] as String?,
+    personLabels:
+    ((json['personLabels'] ?? json['personLabel']) as List<dynamic>?)
+        ?.map((e) => PersonLabel.fromJson(e as Map<String, dynamic>))
+        .toList(),
+    deviceName: json['deviceName'] as String?,
+    locate: ((json['locate'] ?? json['locateLabels']) as List<dynamic>?)
+        ?.map((e) => Locate.fromJson(e as Map<String, dynamic>))
+        .toList(),
+    scence: (json['scence'] as List<dynamic>?)
+        ?.map((e) => Scence.fromJson(e as Map<String, dynamic>))
+        .toList(),
+    address: json['address'] as String?,
+    storeContent: json['storeContent'] as String?,
+    isPrivate: json['isPrivate'] as String?,
+  );
 
   Map<String, dynamic> toJson() => _$ResListToJson(this);
 

@@ -108,7 +108,7 @@ class _UserInfoPageState extends State<UserInfoPage> {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('确认退出'),
-        content: const Text('是否确认退出登录？\n\n退出后将清除所有本地数据，包括：\n• 用户信息\n• 文件记录\n• 上传/下载任务\n• 文件夹列表\n• 缓存数据'),
+        content: const Text('是否确认退出登录？\n\n退出后将清除所有本地数据，包括：\n• 用户信息\n• 文件记录\n• 上传/下载任务\n• 文件夹列表\n• 缓存数据\n• P2P连接'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
@@ -137,6 +137,9 @@ class _UserInfoPageState extends State<UserInfoPage> {
     });
 
     try {
+      // 🆕 0. 断开P2P连接（优先执行）
+      await _disconnectP2pConnection();
+
       // 1. 调用登出接口
       await LoginService.logout();
 
@@ -188,6 +191,22 @@ class _UserInfoPageState extends State<UserInfoPage> {
           ),
         );
       }
+    }
+  }
+
+  // 🆕 断开P2P连接
+  Future<void> _disconnectP2pConnection() async {
+    try {
+      debugPrint('🔌 开始断开P2P连接...');
+      final result = await MyInstance().mineProvider.disconnectP2p();
+      if (result) {
+        debugPrint('✅ P2P连接已断开');
+      } else {
+        debugPrint('⚠️ P2P连接断开返回失败');
+      }
+    } catch (e) {
+      debugPrint('❌ 断开P2P连接异常: $e');
+      // 不抛出异常，继续执行后续清理操作
     }
   }
 

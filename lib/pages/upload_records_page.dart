@@ -227,35 +227,6 @@ class _UploadRecordsPageState extends State<UploadRecordsPage>
           Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              // 设置按钮
-              IconButton(
-                icon: const Icon(Icons.settings_outlined, size: 20),
-                onPressed: () {},
-                tooltip: '设置',
-              ),
-              // 排序按钮
-              IconButton(
-                icon: const Icon(Icons.sort, size: 20),
-                onPressed: () {},
-                tooltip: '排序',
-              ),
-              const SizedBox(width: 8),
-              // 最小化按钮
-              _WindowButton(
-                icon: Icons.minimize,
-                onPressed: () => windowManager.minimize(),
-              ),
-              // 最大化按钮
-              _WindowButton(
-                icon: Icons.crop_square,
-                onPressed: () async {
-                  if (await windowManager.isMaximized()) {
-                    await windowManager.unmaximize();
-                  } else {
-                    await windowManager.maximize();
-                  }
-                },
-              ),
               // 关闭按钮
               _WindowButton(
                 icon: Icons.close,
