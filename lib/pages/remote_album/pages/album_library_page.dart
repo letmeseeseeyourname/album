@@ -1,4 +1,4 @@
-// pages/album_library_page.dart (修复版 - 修复时序问题和 Tab 缓存问题)
+// pages/album_library_page.dart (修改版 - 采用 Flex 布局模式)
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -107,7 +107,6 @@ class _AlbumLibraryPageState extends State<AlbumLibraryPage> {
   }
 
   // 处理 Group 切换事件
-  // 🔑 关键修复：GroupChangedEvent 是在 p6Login 完成后才发送的，此时可以安全加载数据
   void _onGroupChanged(GroupChangedEvent event) async {
     if (!mounted) return;
 
@@ -117,7 +116,7 @@ class _AlbumLibraryPageState extends State<AlbumLibraryPage> {
     _selectionManager.clearSelection();
     _closePreview();
 
-    // 🔑 关键修复：先清空所有 Tab 的缓存（个人和家庭）
+    // 先清空所有 Tab 的缓存（个人和家庭）
     await _dataManager.clearAllCache();
 
     // 再加载当前 Tab 的数据
@@ -134,9 +133,6 @@ class _AlbumLibraryPageState extends State<AlbumLibraryPage> {
     });
 
     debugPrint('AlbumLibraryPage 收到 P2P 事件: $event');
-
-    // 🔑 关键修复：不在这里触发数据加载！
-    // P2P connected 不代表 p6Login 已完成，数据加载由 GroupChangedEvent 触发
   }
 
   void _onScroll() {
@@ -167,7 +163,7 @@ class _AlbumLibraryPageState extends State<AlbumLibraryPage> {
 
     _dataManager.switchTab(_isPersonalTab);
 
-    // 🔑 修复：如果切换后的 Tab 没有数据，则加载数据
+    // 如果切换后的 Tab 没有数据，则加载数据
     if (!_dataManager.hasData && _p2pStatus == P2pConnectionStatus.connected) {
       _dataManager.resetAndLoad(isPrivate: _isPersonalTab);
     }
@@ -190,6 +186,8 @@ class _AlbumLibraryPageState extends State<AlbumLibraryPage> {
   }
 
   bool get _isPersonalTab => widget.currentTabIndex == 0;
+
+  // ============ 预览相关 ============
 
   void _openPreview(int index) {
     setState(() {
@@ -221,6 +219,8 @@ class _AlbumLibraryPageState extends State<AlbumLibraryPage> {
     }
   }
 
+  // ============ UI 构建 ============
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -246,48 +246,59 @@ class _AlbumLibraryPageState extends State<AlbumLibraryPage> {
               currentUserId: widget.currentUserId,
             ),
 
-            // 主内容区
+            // 主内容区 - 使用 Flex 布局
             Expanded(
-              child: Column(
+              child: Row(
                 children: [
-                  // 工具栏
-                  _buildToolbar(),
-
-                  // 内容区域
+                  // 相册列表区域 - 动态 flex
                   Expanded(
-                    child: Stack(
-                      children: [
-                        // 主内容区（相册列表）
-                        _buildMainContent(),
+                    flex: _showPreview ? 3 : 1,
+                    child: Container(
+                      color: Colors.white,
+                      child: Column(
+                        children: [
+                          // 工具栏
+                          _buildToolbar(),
 
-                        // 右侧预览面板（覆盖在上方）
-                        if (_showPreview)
-                          Positioned(
-                            top: 0,
-                            right: 0,
-                            bottom: 0,
-                            child: AlbumPreviewPanel(
-                              mediaItems: _dataManager.allResources,
-                              previewIndex: _previewIndex,
-                              onClose: _closePreview,
-                              onPrevious: _previousMedia,
-                              onNext: _nextMedia,
-                              canGoPrevious: _previewIndex > 0,
-                              canGoNext: _previewIndex < _dataManager.allResources.length - 1,
-                            ),
-                          ),
-                      ],
+                          // 内容区域
+                          Expanded(child: _buildMainContent()),
+
+                          // 底部栏
+                          _buildBottomBar(),
+                        ],
+                      ),
                     ),
                   ),
 
-                  // 底部栏 - 只在有选中项目时显示
-                  _buildBottomBar(),
+                  // 预览区域 - 固定 flex:2
+                  if (_showPreview)
+                    Expanded(
+                      flex: 2,
+                      child: _buildPreviewPanel(),
+                    ),
                 ],
               ),
             ),
           ],
         ),
       ),
+    );
+  }
+
+  // 构建预览面板
+  Widget _buildPreviewPanel() {
+    if (_previewIndex < 0 || _previewIndex >= _dataManager.allResources.length) {
+      return Container(color: Colors.white);
+    }
+
+    return AlbumPreviewPanel(
+      mediaItems: _dataManager.allResources,
+      previewIndex: _previewIndex,
+      onClose: _closePreview,
+      onPrevious: _previousMedia,
+      onNext: _nextMedia,
+      canGoPrevious: _previewIndex > 0,
+      canGoNext: _previewIndex < _dataManager.allResources.length - 1,
     );
   }
 
@@ -319,7 +330,7 @@ class _AlbumLibraryPageState extends State<AlbumLibraryPage> {
     );
   }
 
-  // 简化的工具栏（不包含Tab栏）
+  // 工具栏
   Widget _buildToolbar() {
     return Container(
       decoration: BoxDecoration(
@@ -433,6 +444,7 @@ class _AlbumLibraryPageState extends State<AlbumLibraryPage> {
               onItemClick: _openPreview,
               scrollController: _scrollController,
               isGridView: true,
+              showPreview: _showPreview, // 🆕 传递预览状态
             )
                 : AlbumGridView(
               groupedResources: _dataManager.groupedResources,
@@ -441,6 +453,7 @@ class _AlbumLibraryPageState extends State<AlbumLibraryPage> {
               onItemClick: _openPreview,
               scrollController: _scrollController,
               isGridView: false,
+              showPreview: _showPreview, // 🆕 传递预览状态
             ),
 
             if (_dataManager.isLoading && _dataManager.hasData)

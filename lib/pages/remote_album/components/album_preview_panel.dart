@@ -1,4 +1,4 @@
-// album/components/album_preview_panel.dart
+// album/components/album_preview_panel.dart (修改版 - 适配 Flex 布局)
 import 'package:flutter/material.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
@@ -7,6 +7,7 @@ import '../../../user/models/resource_list_model.dart';
 
 /// 相册预览面板
 /// 负责右侧的媒体预览显示
+/// 修改：移除固定宽度，适配 Flex 布局
 class AlbumPreviewPanel extends StatefulWidget {
   final List<ResList> mediaItems;
   final int previewIndex;
@@ -153,14 +154,9 @@ class _AlbumPreviewPanelState extends State<AlbumPreviewPanel> {
 
     final item = widget.mediaItems[widget.previewIndex];
 
+    // 移除固定宽度，让 Expanded 控制宽度
     return Container(
-      width: 500,
-      decoration: BoxDecoration(
-        color: Colors.white,
-        border: Border(
-          left: BorderSide(color: Colors.grey.shade300),
-        ),
-      ),
+      color: Colors.white,
       child: Column(
         children: [
           // 顶部标题栏
@@ -169,8 +165,6 @@ class _AlbumPreviewPanelState extends State<AlbumPreviewPanel> {
           Expanded(
             child: _buildMediaContent(item),
           ),
-          // 底部信息
-          _buildBottomInfo(item),
         ],
       ),
     );
@@ -184,6 +178,7 @@ class _AlbumPreviewPanelState extends State<AlbumPreviewPanel> {
       decoration: BoxDecoration(
         color: Colors.white,
         border: Border(
+          left: BorderSide(color: Colors.grey.shade300),
           bottom: BorderSide(color: Colors.grey.shade300),
         ),
       ),
@@ -199,6 +194,17 @@ class _AlbumPreviewPanelState extends State<AlbumPreviewPanel> {
                 fontWeight: FontWeight.w500,
               ),
               overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          // 索引显示
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            child: Text(
+              '${widget.previewIndex + 1} / ${widget.mediaItems.length}',
+              style: TextStyle(
+                fontSize: 12,
+                color: Colors.grey.shade600,
+              ),
             ),
           ),
           // 右侧关闭按钮
@@ -220,54 +226,77 @@ class _AlbumPreviewPanelState extends State<AlbumPreviewPanel> {
 
   /// 媒体内容区
   Widget _buildMediaContent(ResList item) {
-    return Stack(
-      children: [
-        // 主内容
-        Center(
-          child: item.fileType == 'V'
-              ? _buildVideoPreview()
-              : _buildImagePreview(item),
+    return Container(
+      decoration: BoxDecoration(
+        border: Border(
+          left: BorderSide(color: Colors.grey.shade300),
         ),
+      ),
+      child: Stack(
+        children: [
+          // 主内容
+          Center(
+            child: item.fileType == 'V'
+                ? _buildVideoPreview()
+                : _buildImagePreview(item),
+          ),
 
-        // 左侧切换按钮
-        if (widget.canGoPrevious)
-          Positioned(
-            left: 16,
-            top: 0,
-            bottom: item.fileType == 'V' ? 64 : 0,
-            child: Center(
-              child: _buildNavigationButton(
-                icon: Icons.chevron_left,
-                onPressed: widget.onPrevious,
-                tooltip: '上一个',
+          // 左侧切换按钮
+          if (widget.canGoPrevious)
+            Positioned(
+              left: 16,
+              top: 0,
+              bottom: item.fileType == 'V' ? 64 : 0,
+              child: Center(
+                child: _buildNavigationButton(
+                  icon: Icons.chevron_left,
+                  onPressed: widget.onPrevious,
+                  tooltip: '上一个',
+                ),
               ),
             ),
-          ),
 
-        // 右侧切换按钮
-        if (widget.canGoNext)
-          Positioned(
-            right: 16,
-            top: 0,
-            bottom: item.fileType == 'V' ? 64 : 0,
-            child: Center(
-              child: _buildNavigationButton(
-                icon: Icons.chevron_right,
-                onPressed: widget.onNext,
-                tooltip: '下一个',
+          // 右侧切换按钮
+          if (widget.canGoNext)
+            Positioned(
+              right: 16,
+              top: 0,
+              bottom: item.fileType == 'V' ? 64 : 0,
+              child: Center(
+                child: _buildNavigationButton(
+                  icon: Icons.chevron_right,
+                  onPressed: widget.onNext,
+                  tooltip: '下一个',
+                ),
               ),
             ),
-          ),
 
-        // 视频控制栏（仅视频时显示）
-        if (item.fileType == 'V' && _videoController != null)
-          Positioned(
-            left: 0,
-            right: 0,
-            bottom: 0,
-            child: _buildVideoControls(),
-          ),
-      ],
+          // 视频播放/暂停按钮（居中显示）
+          if (item.fileType == 'V' && _videoController != null && !_isPlaying)
+            Positioned.fill(
+              bottom: 64,
+              child: Center(
+                child: IconButton(
+                  icon: Icon(
+                    Icons.play_circle_outline,
+                    size: 80,
+                    color: Colors.white.withOpacity(0.8),
+                  ),
+                  onPressed: _togglePlayPause,
+                ),
+              ),
+            ),
+
+          // 视频控制栏（仅视频时显示）
+          if (item.fileType == 'V' && _videoController != null)
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 0,
+              child: _buildVideoControls(),
+            ),
+        ],
+      ),
     );
   }
 
@@ -470,113 +499,6 @@ class _AlbumPreviewPanelState extends State<AlbumPreviewPanel> {
         ],
       ),
     );
-  }
-
-  /// 底部信息区
-  Widget _buildBottomInfo(ResList item) {
-    final fileSize = _formatFileSize(item.fileSize ?? 0);
-    final dimensions = item.width != null && item.height != null
-        ? '${item.width} × ${item.height}'
-        : '';
-
-    return SizedBox(
-      height: 100,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        decoration: BoxDecoration(
-          color: Colors.grey.shade50,
-          border: Border(
-            top: BorderSide(color: Colors.grey.shade300),
-          ),
-        ),
-        child: SingleChildScrollView(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (item.photoDate != null) ...[
-                _buildInfoRow(
-                  icon: Icons.calendar_today,
-                  label: '拍摄时间',
-                  value: _formatDate(item.photoDate!),
-                ),
-                const SizedBox(height: 5),
-              ],
-              if (dimensions.isNotEmpty) ...[
-                _buildInfoRow(
-                  icon: Icons.photo_size_select_actual,
-                  label: '尺寸',
-                  value: dimensions,
-                ),
-                const SizedBox(height: 5),
-              ],
-              _buildInfoRow(
-                icon: Icons.storage,
-                label: '大小',
-                value: fileSize,
-              ),
-              if (item.fileType == 'V' && item.duration != null) ...[
-                const SizedBox(height: 5),
-                _buildInfoRow(
-                  icon: Icons.access_time,
-                  label: '时长',
-                  value: _formatDuration(item.duration!),
-                ),
-              ],
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  /// 信息行
-  Widget _buildInfoRow({
-    required IconData icon,
-    required String label,
-    required String value,
-  }) {
-    return Row(
-      children: [
-        Icon(icon, size: 14, color: Colors.grey.shade600),
-        const SizedBox(width: 6),
-        Text(
-          '$label: ',
-          style: TextStyle(
-            fontSize: 11,
-            color: Colors.grey.shade600,
-            fontWeight: FontWeight.w500,
-          ),
-        ),
-        Expanded(
-          child: Text(
-            value,
-            style: TextStyle(
-              fontSize: 11,
-              color: Colors.grey.shade800,
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-
-  String _formatFileSize(int bytes) {
-    if (bytes <= 0) return '0 B';
-    const suffixes = ['B', 'KB', 'MB', 'GB'];
-    var i = 0;
-    double size = bytes.toDouble();
-
-    while (size >= 1024 && i < suffixes.length - 1) {
-      size /= 1024;
-      i++;
-    }
-
-    return '${size.toStringAsFixed(2)} ${suffixes[i]}';
-  }
-
-  String _formatDate(DateTime date) {
-    return '${date.year}年${date.month}月${date.day}日 ${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}';
   }
 
   String _formatDuration(int seconds) {

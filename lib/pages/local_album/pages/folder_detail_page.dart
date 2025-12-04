@@ -1,10 +1,9 @@
-// pages/folder_detail_page.dart
+// pages/folder_detail_page.dart (修改版 - 适配新的 PreviewPanel)
 import 'package:flutter/material.dart';
 import 'package:ablumwin/user/my_instance.dart';
 
 import '../../../album/manager/local_folder_upload_manager.dart';
 import '../controllers/path_navigation_controller.dart';
-import '../controllers/preview_controller.dart';
 import '../controllers/selection_controller.dart';
 import '../controllers/upload_coordinator.dart';
 import '../../../models/file_item.dart';
@@ -30,6 +29,7 @@ import '../../../widgets/side_navigation.dart';
 /// - 使用 FileViewFactory 统一管理视图
 /// - 使用 MediaCacheService 统一管理缓存
 /// - 组件化和模块化设计
+/// - PreviewPanel 内部管理视频播放器
 class FolderDetailPage extends StatefulWidget {
   final FolderInfo folder;
   final int selectedNavIndex;
@@ -55,13 +55,17 @@ class _FolderDetailPageState extends State<FolderDetailPage> {
   // 控制器
   late final PathNavigationController _pathController;
   late final SelectionController _selectionController;
-  late final PreviewController _previewController;
   late final UploadCoordinator _uploadCoordinator;
 
   // 状态
   List<FileItem> _fileItems = [];
   bool _isLoading = true;
   ViewMode _viewMode = ViewMode.grid;
+
+  // 预览状态（简化版，不再需要 PreviewController）
+  bool _showPreview = false;
+  int _previewIndex = -1;
+  List<FileItem> _mediaItems = []; // 只包含图片和视频的列表
 
   @override
   void initState() {
@@ -75,7 +79,6 @@ class _FolderDetailPageState extends State<FolderDetailPage> {
   @override
   void dispose() {
     _uploadCoordinator.removeListener(_onUploadProgressChanged);
-    _previewController.dispose();
     super.dispose();
   }
 
@@ -92,7 +95,6 @@ class _FolderDetailPageState extends State<FolderDetailPage> {
     _pathController.initializePath(widget.folder.path, widget.folder.name);
 
     _selectionController = SelectionController();
-    _previewController = PreviewController();
 
     _uploadCoordinator = UploadCoordinator(
       LocalFolderUploadManager(),
@@ -119,7 +121,7 @@ class _FolderDetailPageState extends State<FolderDetailPage> {
       _isLoading = true;
       _fileItems.clear();
       _selectionController.reset();
-      _previewController.closePreview();
+      _closePreview();
     });
 
     try {
@@ -132,6 +134,8 @@ class _FolderDetailPageState extends State<FolderDetailPage> {
         setState(() {
           _fileItems = items;
           _isLoading = false;
+          // 更新媒体列表
+          _updateMediaItems();
         });
       }
     } catch (e) {
@@ -141,7 +145,14 @@ class _FolderDetailPageState extends State<FolderDetailPage> {
     }
   }
 
-  /// ✅ 刷新当前文件列表（用于上传成功后更新状态）
+  /// 更新媒体项列表（只包含图片和视频）
+  void _updateMediaItems() {
+    _mediaItems = _fileItems
+        .where((item) => item.type == FileItemType.image || item.type == FileItemType.video)
+        .toList();
+  }
+
+  /// 刷新当前文件列表
   Future<void> _refreshFiles() async {
     try {
       final items = await _fileService.loadFiles(_pathController.currentPath);
@@ -152,10 +163,10 @@ class _FolderDetailPageState extends State<FolderDetailPage> {
       if (mounted) {
         setState(() {
           _fileItems = items;
+          _updateMediaItems();
         });
       }
     } catch (e) {
-      // 刷新失败时静默处理
       debugPrint('Refresh files failed: $e');
     }
   }
@@ -208,36 +219,46 @@ class _FolderDetailPageState extends State<FolderDetailPage> {
     });
   }
 
-  // ============ 预览相关 ============
+  // ============ 预览相关（简化版）============
 
   void _openPreview(int index) {
-    setState(() => _previewController.openPreview(index, _fileItems));
-    _loadPreviewMedia();
-  }
+    final item = _fileItems[index];
+    // 只预览图片和视频
+    if (item.type != FileItemType.image && item.type != FileItemType.video) {
+      return;
+    }
 
-  void _closePreview() {
-    setState(() => _previewController.closePreview());
-  }
-
-  void _loadPreviewMedia() {
-    final item = _previewController.getCurrentPreviewItem();
-    if (item != null && item.type == FileItemType.video) {
-      _previewController.initVideoPlayer(item.path, (playing) {
-        if (mounted) setState(() {});
+    // 找到在媒体列表中的索引
+    final mediaIndex = _mediaItems.indexOf(item);
+    if (mediaIndex >= 0) {
+      setState(() {
+        _showPreview = true;
+        _previewIndex = mediaIndex;
       });
-    } else {
-      _previewController.disposeVideoPlayer();
     }
   }
 
+  void _closePreview() {
+    setState(() {
+      _showPreview = false;
+      _previewIndex = -1;
+    });
+  }
+
   void _previousMedia() {
-    setState(() => _previewController.previousMedia());
-    _loadPreviewMedia();
+    if (_previewIndex > 0) {
+      setState(() {
+        _previewIndex--;
+      });
+    }
   }
 
   void _nextMedia() {
-    setState(() => _previewController.nextMedia());
-    _loadPreviewMedia();
+    if (_previewIndex < _mediaItems.length - 1) {
+      setState(() {
+        _previewIndex++;
+      });
+    }
   }
 
   void _openFullScreenViewer(int index) {
@@ -268,38 +289,43 @@ class _FolderDetailPageState extends State<FolderDetailPage> {
   // ============ 上传相关 ============
 
   void _onUploadProgressChanged() {
-    if (mounted) setState(() {});
+    if (mounted) {
+      setState(() {});
+    }
   }
 
   Future<void> _handleSync() async {
-    if (_selectionController.selectedCount == 0) {
-      _showMessage('请先选择要上传的文件或文件夹', isError: true);
+    // 检查是否有选中的文件
+    final selectedItems = _selectionController.selectedIndices
+        .map((index) => _fileItems[index])
+        .toList();
+
+    if (selectedItems.isEmpty) {
+      _showMessage('请先选择要上传的图片或视频', isError: true);
       return;
     }
 
-    final selectedItems = _selectionController.getSelectedItems(_fileItems);
-    final hasFolder = selectedItems.any((item) => item.type == FileItemType.folder);
-    if (hasFolder) {
-      _showMessage('正在扫描选中的文件夹，请稍候...', isError: false);
-    }
-
+    // 准备上传 - 新API只需传入选中的项目列表
     final prepareResult = await _uploadCoordinator.prepareUpload(selectedItems);
 
     if (!prepareResult.success) {
-      _showMessage(prepareResult.message!, isError: true);
+      _showMessage(prepareResult.message ?? '准备上传失败', isError: true);
       return;
     }
 
+    if (prepareResult.filePaths == null || prepareResult.filePaths!.isEmpty) {
+      return;
+    }
+
+    // 显示确认对话框
     final confirmed = await _showConfirmDialog(
       prepareResult.filePaths!,
-      prepareResult.imageCount!,
-      prepareResult.videoCount!,
-      prepareResult.totalSizeMB!,
+      prepareResult.imageCount ?? 0,
+      prepareResult.videoCount ?? 0,
+      prepareResult.totalSizeMB ?? 0,
     );
 
     if (!confirmed) return;
-
-    setState(() => _selectionController.cancelSelection());
 
     await _uploadCoordinator.startUpload(
       prepareResult.filePaths!,
@@ -307,7 +333,6 @@ class _FolderDetailPageState extends State<FolderDetailPage> {
           () {
         if (mounted) {
           setState(() {});
-          // ✅ 上传完成后刷新文件列表，更新上传状态图标
           _refreshFiles();
         }
       },
@@ -354,7 +379,8 @@ class _FolderDetailPageState extends State<FolderDetailPage> {
           ),
         ],
       ),
-    ) ?? false;
+    ) ??
+        false;
   }
 
   void _showMessage(String message, {bool isError = false}) {
@@ -425,13 +451,13 @@ class _FolderDetailPageState extends State<FolderDetailPage> {
             )
                 : const _StaticSideNavigation(),
 
-            // 主内容区域
+            // 主内容区域 - 使用 Flex 布局
             Expanded(
               child: Row(
                 children: [
                   // 文件列表区域
                   Expanded(
-                    flex: _previewController.showPreview ? 3 : 1,
+                    flex: _showPreview ? 3 : 1,
                     child: Container(
                       color: Colors.white,
                       child: Column(
@@ -445,8 +471,7 @@ class _FolderDetailPageState extends State<FolderDetailPage> {
                   ),
 
                   // 预览区域
-                  if (_previewController.showPreview)
-                    Expanded(flex: 2, child: _buildPreviewPanel()),
+                  if (_showPreview) Expanded(flex: 2, child: _buildPreviewPanel()),
                 ],
               ),
             ),
@@ -457,8 +482,8 @@ class _FolderDetailPageState extends State<FolderDetailPage> {
   }
 
   Widget _buildTopBar() {
-    final isSelectAllChecked = _selectionController.selectedCount == _fileItems.length &&
-        _selectionController.selectedCount > 0;
+    final isSelectAllChecked =
+        _selectionController.selectedCount == _fileItems.length && _selectionController.selectedCount > 0;
 
     return FolderDetailTopBar(
       pathSegments: _pathController.pathSegments,
@@ -489,21 +514,21 @@ class _FolderDetailPageState extends State<FolderDetailPage> {
   }
 
   Widget _buildPreviewPanel() {
-    final item = _previewController.getCurrentPreviewItem();
-    if (item == null) return Container();
+    if (_previewIndex < 0 || _previewIndex >= _mediaItems.length) {
+      return Container(color: Colors.white);
+    }
+
+    final item = _mediaItems[_previewIndex];
 
     return PreviewPanel(
       item: item,
-      currentIndex: _previewController.previewIndex,
-      totalCount: _previewController.mediaItems.length,
-      isPlaying: _previewController.isPlaying,
-      videoController: _previewController.videoController,
+      currentIndex: _previewIndex,
+      totalCount: _mediaItems.length,
       onClose: _closePreview,
       onPrevious: _previousMedia,
       onNext: _nextMedia,
-      onTogglePlayPause: _previewController.togglePlayPause,
-      canGoPrevious: _previewController.previewIndex > 0,
-      canGoNext: _previewController.previewIndex < _previewController.mediaItems.length - 1,
+      canGoPrevious: _previewIndex > 0,
+      canGoNext: _previewIndex < _mediaItems.length - 1,
     );
   }
 

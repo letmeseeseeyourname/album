@@ -1,13 +1,14 @@
-// album/components/album_grid_item.dart (最优版 - 智能裁剪)
+// album/components/album_grid_item.dart (优化版 - 超时处理)
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../../../network/constant_sign.dart';
 import '../../../user/models/resource_list_model.dart';
 
-/// 相册网格项组件（最优版）
+/// 相册网格项组件（优化版）
 /// 负责单个相册项的显示和交互
-/// 使用智能裁剪策略，尽量显示完整内容
-class AlbumGridItem extends StatelessWidget {
+/// 添加缩略图加载超时处理
+class AlbumGridItem extends StatefulWidget {
   final ResList resource;
   final int globalIndex;
   final bool isSelected;
@@ -34,21 +35,96 @@ class AlbumGridItem extends StatelessWidget {
   });
 
   @override
+  State<AlbumGridItem> createState() => _AlbumGridItemState();
+}
+
+class _AlbumGridItemState extends State<AlbumGridItem> {
+  // 加载超时时间（秒）
+  static const int _loadTimeoutSeconds = 5;
+
+  // 加载状态
+  bool _isLoading = true;
+  bool _loadFailed = false;
+  Timer? _timeoutTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    _startTimeoutTimer();
+  }
+
+  @override
+  void dispose() {
+    _timeoutTimer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  void didUpdateWidget(AlbumGridItem oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // 如果资源变化，重置状态
+    if (oldWidget.resource.resId != widget.resource.resId) {
+      _resetLoadingState();
+    }
+  }
+
+  void _resetLoadingState() {
+    _timeoutTimer?.cancel();
+    setState(() {
+      _isLoading = true;
+      _loadFailed = false;
+    });
+    _startTimeoutTimer();
+  }
+
+  void _startTimeoutTimer() {
+    _timeoutTimer?.cancel();
+    _timeoutTimer = Timer(const Duration(seconds: _loadTimeoutSeconds), () {
+      if (mounted && _isLoading) {
+        setState(() {
+          _loadFailed = true;
+          _isLoading = false;
+        });
+        debugPrint('缩略图加载超时: ${widget.resource.thumbnailPath}');
+      }
+    });
+  }
+
+  void _onImageLoaded() {
+    _timeoutTimer?.cancel();
+    if (mounted) {
+      setState(() {
+        _isLoading = false;
+        _loadFailed = false;
+      });
+    }
+  }
+
+  void _onImageError() {
+    _timeoutTimer?.cancel();
+    if (mounted) {
+      setState(() {
+        _isLoading = false;
+        _loadFailed = true;
+      });
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
     return MouseRegion(
-      onEnter: (_) => onHover?.call(),
-      onExit: (_) => onHoverExit?.call(),
+      onEnter: (_) => widget.onHover?.call(),
+      onExit: (_) => widget.onHoverExit?.call(),
       child: GestureDetector(
-        onTap: onTap,
-        onDoubleTap: onDoubleTap,
+        onTap: widget.onTap,
+        onDoubleTap: widget.onDoubleTap,
         child: AspectRatio(
           aspectRatio: 1,
           child: Container(
             decoration: BoxDecoration(
-              // 使用深灰色背景，让裁剪更自然
               color: Colors.grey.shade900,
               borderRadius: BorderRadius.circular(8),
-              border: isSelected
+              border: widget.isSelected
                   ? Border.all(color: Colors.orange, width: 3)
                   : null,
             ),
@@ -60,10 +136,10 @@ class AlbumGridItem extends StatelessWidget {
                   // 缩略图
                   _buildThumbnail(),
                   // 视频时长标签
-                  if (resource.fileType == 'V')
+                  if (widget.resource.fileType == 'V')
                     _buildVideoDurationLabel(),
                   // 复选框
-                  if (shouldShowCheckbox)
+                  if (widget.shouldShowCheckbox)
                     _buildCheckbox(),
                 ],
               ),
@@ -74,19 +150,17 @@ class AlbumGridItem extends StatelessWidget {
     );
   }
 
-  /// 构建缩略图（智能填充）
+  /// 构建缩略图（带超时处理）
   Widget _buildThumbnail() {
-    if (resource.thumbnailPath == null || resource.thumbnailPath!.isEmpty) {
-      return _buildPlaceholder();
+    // 如果没有缩略图路径或加载失败，显示默认图
+    if (widget.resource.thumbnailPath == null ||
+        widget.resource.thumbnailPath!.isEmpty ||
+        _loadFailed) {
+      return _buildDefaultThumbnail();
     }
 
-    final imageUrl = "${AppConfig.minio()}/${resource.thumbnailPath!}";
-    // debugPrint("imageUrl: $imageUrl");
-    // 根据图片的宽高比决定填充方式
+    final imageUrl = "${AppConfig.minio()}/${widget.resource.thumbnailPath!}";
     final aspectRatio = _getImageAspectRatio();
-
-    // 如果接近正方形(0.9-1.1)，使用 cover 填充
-    // 如果是竖图或横图，使用 contain 保持完整性
     final fitMode = (aspectRatio > 0.9 && aspectRatio < 1.1)
         ? BoxFit.cover
         : BoxFit.contain;
@@ -96,21 +170,30 @@ class AlbumGridItem extends StatelessWidget {
       fit: fitMode,
       width: double.infinity,
       height: double.infinity,
-      // 对于非正方形图片，适当增加缓存尺寸以保证清晰度
       memCacheWidth: fitMode == BoxFit.contain ? 400 : 300,
       memCacheHeight: fitMode == BoxFit.contain ? 400 : 300,
       maxWidthDiskCache: 400,
       maxHeightDiskCache: 400,
-      placeholder: (context, url) => Container(
-        color: Colors.grey.shade800,
-        child: const Center(
-          child: CircularProgressIndicator(
-            strokeWidth: 2,
-            valueColor: AlwaysStoppedAnimation<Color>(Colors.orange),
-          ),
-        ),
-      ),
-      errorWidget: (context, url, error) => _buildPlaceholder(),
+      placeholder: (context, url) => _buildLoadingPlaceholder(),
+      errorWidget: (context, url, error) {
+        // 确保状态更新
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _onImageError();
+        });
+        return _buildDefaultThumbnail();
+      },
+      imageBuilder: (context, imageProvider) {
+        // 图片加载成功
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _onImageLoaded();
+        });
+        return Image(
+          image: imageProvider,
+          fit: fitMode,
+          width: double.infinity,
+          height: double.infinity,
+        );
+      },
       fadeInDuration: const Duration(milliseconds: 200),
       fadeOutDuration: const Duration(milliseconds: 100),
     );
@@ -118,27 +201,155 @@ class AlbumGridItem extends StatelessWidget {
 
   /// 获取图片的宽高比
   double _getImageAspectRatio() {
-    if (resource.width != null &&
-        resource.height != null &&
-        resource.height! > 0) {
-      return resource.width! / resource.height!;
+    if (widget.resource.width != null &&
+        widget.resource.height != null &&
+        widget.resource.height! > 0) {
+      return widget.resource.width! / widget.resource.height!;
     }
-    // 默认假设是正方形
     return 1.0;
   }
 
-  /// 构建占位图
-  Widget _buildPlaceholder() {
+  /// 构建加载中的占位图
+  Widget _buildLoadingPlaceholder() {
+    final isVideo = widget.resource.fileType == 'V';
+
     return Container(
-      color: Colors.grey.shade800,
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: isVideo
+              ? [const Color(0xFF3A3A5C), const Color(0xFF2A2A4C)]
+              : [Colors.grey.shade700, Colors.grey.shade800],
+        ),
+      ),
       child: Center(
-        child: Icon(
-          resource.fileType == 'V' ? Icons.videocam : Icons.image,
-          color: Colors.grey.shade400,
-          size: 32,
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const SizedBox(
+              width: 24,
+              height: 24,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                valueColor: AlwaysStoppedAnimation<Color>(Colors.orange),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              '加载中...',
+              style: TextStyle(
+                color: Colors.white.withOpacity(0.5),
+                fontSize: 10,
+              ),
+            ),
+          ],
         ),
       ),
     );
+  }
+
+  /// 构建默认缩略图（加载失败或超时时显示）
+  Widget _buildDefaultThumbnail() {
+    final isVideo = widget.resource.fileType == 'V';
+
+    return Container(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: isVideo
+              ? [const Color(0xFF3A3A5C), const Color(0xFF2A2A4C)]
+              : [const Color(0xFF4A5568), const Color(0xFF2D3748)],
+        ),
+      ),
+      child: Stack(
+        children: [
+          // 背景图案
+          Positioned.fill(
+            child: CustomPaint(
+              painter: _ThumbnailPatternPainter(
+                color: Colors.white.withOpacity(0.03),
+              ),
+            ),
+          ),
+          // 中心图标
+          Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Container(
+                  width: 48,
+                  height: 48,
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.1),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(
+                    isVideo ? Icons.videocam_rounded : Icons.image_rounded,
+                    color: Colors.white.withOpacity(0.7),
+                    size: 24,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                // 文件名
+                if (widget.resource.fileName != null && widget.resource.fileName!.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    child: Text(
+                      _truncateFileName(widget.resource.fileName!),
+                      style: TextStyle(
+                        color: Colors.white.withOpacity(0.5),
+                        fontSize: 10,
+                        fontWeight: FontWeight.w400,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.center,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          // 文件类型角标
+          Positioned(
+            left: 8,
+            top: 8,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                color: Colors.black.withOpacity(0.3),
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: Text(
+                isVideo ? 'VIDEO' : 'IMAGE',
+                style: TextStyle(
+                  color: Colors.white.withOpacity(0.7),
+                  fontSize: 8,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 0.5,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 截断文件名
+  String _truncateFileName(String fileName) {
+    if (fileName.length <= 12) return fileName;
+
+    final dotIndex = fileName.lastIndexOf('.');
+    if (dotIndex > 0 && dotIndex < fileName.length - 1) {
+      final name = fileName.substring(0, dotIndex);
+      final ext = fileName.substring(dotIndex);
+      if (name.length > 8) {
+        return '${name.substring(0, 6)}...$ext';
+      }
+    }
+    return '${fileName.substring(0, 9)}...';
   }
 
   /// 构建视频时长标签
@@ -152,12 +363,23 @@ class AlbumGridItem extends StatelessWidget {
           color: Colors.black54,
           borderRadius: BorderRadius.circular(4),
         ),
-        child: Text(
-          _formatDuration(resource.duration ?? 0),
-          style: const TextStyle(
-            color: Colors.white,
-            fontSize: 11,
-          ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(
+              Icons.play_arrow_rounded,
+              color: Colors.white,
+              size: 12,
+            ),
+            const SizedBox(width: 2),
+            Text(
+              _formatDuration(widget.resource.duration ?? 0),
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 11,
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -170,17 +392,17 @@ class AlbumGridItem extends StatelessWidget {
       right: 8,
       child: GestureDetector(
         onTap: () {
-          onCheckboxTap?.call();
+          widget.onCheckboxTap?.call();
         },
         behavior: HitTestBehavior.opaque,
         child: Container(
           width: 24,
           height: 24,
           decoration: BoxDecoration(
-            color: isSelected ? Colors.orange : Colors.white,
+            color: widget.isSelected ? Colors.orange : Colors.white,
             shape: BoxShape.circle,
             border: Border.all(
-              color: isSelected ? Colors.orange : Colors.grey.shade400,
+              color: widget.isSelected ? Colors.orange : Colors.grey.shade400,
               width: 2,
             ),
             boxShadow: const [
@@ -191,7 +413,7 @@ class AlbumGridItem extends StatelessWidget {
               ),
             ],
           ),
-          child: isSelected
+          child: widget.isSelected
               ? const Icon(
             Icons.check,
             color: Colors.white,
@@ -217,4 +439,40 @@ class AlbumGridItem extends StatelessWidget {
       return '$minutes:${secs.toString().padLeft(2, '0')}';
     }
   }
+}
+
+/// 默认缩略图背景图案绘制器
+class _ThumbnailPatternPainter extends CustomPainter {
+  final Color color;
+
+  _ThumbnailPatternPainter({required this.color});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = color
+      ..strokeWidth = 1
+      ..style = PaintingStyle.stroke;
+
+    const spacing = 20.0;
+
+    for (double x = 0; x < size.width; x += spacing) {
+      canvas.drawLine(
+        Offset(x, 0),
+        Offset(x, size.height),
+        paint,
+      );
+    }
+
+    for (double y = 0; y < size.height; y += spacing) {
+      canvas.drawLine(
+        Offset(0, y),
+        Offset(size.width, y),
+        paint,
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
