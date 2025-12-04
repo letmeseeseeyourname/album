@@ -105,15 +105,31 @@ class _SideNavigationState extends State<SideNavigation> {
     }
 
     List<Group> sortedGroups = List.from(widget.groups!);
-    String currentDeviceCode = MyInstance().deviceCode;
 
+    // 🆕 使用 MyInstance().group 作为当前选中的 group
+    Group? currentGroup = MyInstance().group;
+
+    if (currentGroup == null) {
+      return sortedGroups;
+    }
+
+    // 🆕 更新 MyInstance().deviceCode 为当前 group 的 deviceCode
+    if (currentGroup.deviceCode != null &&
+        currentGroup.deviceCode!.isNotEmpty &&
+        MyInstance().deviceCode != currentGroup.deviceCode) {
+      MyInstance().deviceCode = currentGroup.deviceCode!;
+      debugPrint('更新 deviceCode: ${currentGroup.deviceCode}');
+    }
+
+    // 找到当前 group 在列表中的索引（通过 groupId 匹配）
     int currentGroupIndex = sortedGroups.indexWhere((group) {
-      return group.deviceCode == currentDeviceCode;
+      return group.groupId == currentGroup.groupId;
     });
 
+    // 如果找到且不在第一位，则移到第一位
     if (currentGroupIndex > 0) {
-      Group currentGroup = sortedGroups.removeAt(currentGroupIndex);
-      sortedGroups.insert(0, currentGroup);
+      Group matchedGroup = sortedGroups.removeAt(currentGroupIndex);
+      sortedGroups.insert(0, matchedGroup);
     }
 
     return sortedGroups;

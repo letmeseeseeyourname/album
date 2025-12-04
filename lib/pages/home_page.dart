@@ -1,4 +1,4 @@
-// pages/home_page.dart (优化版 - 添加 Groups 加载状态)
+// pages/home_page.dart (优化版 - Groups 快速显示)
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -41,7 +41,7 @@ class _HomePageState extends State<HomePage> {
   Group? _selectedGroup;
   int? _currentUserId;
 
-  // 🆕 Groups 加载状态
+  // Groups 加载状态
   bool _isGroupsLoading = true;
 
   // EventBus 订阅引用
@@ -60,7 +60,8 @@ class _HomePageState extends State<HomePage> {
 
     _groupChangedSubscription = MCEventBus.on<GroupChangedEvent>().listen((event) {
       if (mounted) {
-        _loadGroups();
+        // 🆕 GroupChangedEvent 表示 P2P 连接完成，刷新存储信息
+        _onGroupConnectionComplete();
       }
     });
 
@@ -80,18 +81,24 @@ class _HomePageState extends State<HomePage> {
 
   Future<void> _initializeConnection() async {
     if (!mounted) return;
+    await MyInstance().getGroup();
+    debugPrint('恢复上次选中的 group: ${MyInstance().group?.groupName}');
 
-    debugPrint('开始初始化 P2P 连接...');
+    debugPrint('开始初始化...');
     await _reloadData();
 
-    if (_selectedGroup != null) {
-      debugPrint('设备组已选择: ${_selectedGroup?.groupName}, 开始刷新数据');
-      await _refreshDeviceStorage();
-      _onPeriodicCallback();
-      debugPrint('P2P 连接初始化完成');
-    } else {
-      debugPrint('未找到可用的设备组');
-    }
+    // 🆕 不再在这里等待 P2P 连接，P2P 连接会异步进行
+    // 连接完成后会通过 GroupChangedEvent 通知
+    debugPrint('Groups 列表加载完成，P2P 连接正在后台进行...');
+  }
+
+  /// 🆕 当 Group 连接完成时调用（P2P + P6Login 都完成）
+  void _onGroupConnectionComplete() {
+    if (!mounted) return;
+
+    debugPrint('Group 连接完成，刷新数据');
+    _loadGroups();
+    _refreshDeviceStorage();
   }
 
   void _onPeriodicCallback() {
@@ -136,16 +143,17 @@ class _HomePageState extends State<HomePage> {
 
     debugPrint('开始加载设备组数据...');
 
-    // 🆕 开始加载，设置 loading 状态
+    // 开始加载，设置 loading 状态
     setState(() {
       _isGroupsLoading = true;
     });
 
+    // 🆕 优化后的 getAllGroups() 会快速返回（P2P 连接异步进行）
     var response = await widget.mineProvider.getAllGroups();
 
     if (!mounted) return;
 
-    // 🆕 加载完成，取消 loading 状态
+    // 加载完成，取消 loading 状态
     setState(() {
       _isGroupsLoading = false;
     });
@@ -175,16 +183,13 @@ class _HomePageState extends State<HomePage> {
       _selectedGroup = group;
     });
 
-    debugPrint('开始切换设备组并建立 P2P 连接...');
-    await widget.mineProvider.changeGroup(group.deviceCode ?? "");
-
-    if (!mounted) return;
-
     // 更新本地保存的group
     await MyInstance().setGroup(group);
 
-    debugPrint('设备组切换完成，刷新存储信息');
-    await _refreshDeviceStorage();
+    debugPrint('开始切换设备组并建立 P2P 连接...');
+
+    // 🆕 changeGroup 会异步建立连接，完成后发送 GroupChangedEvent
+    await widget.mineProvider.changeGroup(group.deviceCode ?? "");
 
     if (!mounted) return;
 
@@ -216,7 +221,7 @@ class _HomePageState extends State<HomePage> {
           selectedGroup: _selectedGroup,
           onGroupSelected: _onGroupSelected,
           currentUserId: _currentUserId,
-          isGroupsLoading: _isGroupsLoading, // 🆕 传递 loading 状态
+          isGroupsLoading: _isGroupsLoading,
         );
       case 1:
         return AlbumLibraryPage(
@@ -228,7 +233,7 @@ class _HomePageState extends State<HomePage> {
           currentUserId: _currentUserId,
           currentTabIndex: _albumTabIndex,
           onTabChanged: _onAlbumTabChanged,
-          isGroupsLoading: _isGroupsLoading, // 🆕 传递 loading 状态
+          isGroupsLoading: _isGroupsLoading,
         );
       default:
         return MainFolderPage(
@@ -238,7 +243,7 @@ class _HomePageState extends State<HomePage> {
           selectedGroup: _selectedGroup,
           onGroupSelected: _onGroupSelected,
           currentUserId: _currentUserId,
-          isGroupsLoading: _isGroupsLoading, // 🆕 传递 loading 状态
+          isGroupsLoading: _isGroupsLoading,
         );
     }
   }

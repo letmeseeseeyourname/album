@@ -1,4 +1,4 @@
-// album/managers/album_data_manager.dart (修复下载问题)
+// album/managers/album_data_manager.dart (修复版 - 添加 clearAllCache 方法)
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -6,7 +6,7 @@ import 'dart:convert';
 import '../../../album/provider/album_provider.dart';
 import '../../../user/models/resource_list_model.dart';
 
-/// 相册数据管理器（优化版 - 修复下载问题）
+/// 相册数据管理器（优化版 - 修复 Group 切换问题）
 /// 负责数据加载、分页、分组、缓存等逻辑
 class AlbumDataManager extends ChangeNotifier {
   final AlbumProvider _albumProvider = AlbumProvider();
@@ -62,6 +62,40 @@ class AlbumDataManager extends ChangeNotifier {
   String? get errorMessage => _errorMessage;
   bool get hasData => _allResources.isNotEmpty;
 
+  /// 🆕 清空所有缓存（用于 Group 切换时）
+  /// 这会清空两个 Tab 的所有内存缓存和本地缓存
+  Future<void> clearAllCache() async {
+    debugPrint('清空所有相册缓存（Group 切换）');
+
+    // 清空内存缓存 - 个人相册
+    _cachedResources[true]!.clear();
+    _cachedGroupedResources[true]!.clear();
+    _cachedPages[true] = 1;
+    _cachedHasMore[true] = true;
+    _resourceIndexes[true]!.clear();
+
+    // 清空内存缓存 - 家庭相册
+    _cachedResources[false]!.clear();
+    _cachedGroupedResources[false]!.clear();
+    _cachedPages[false] = 1;
+    _cachedHasMore[false] = true;
+    _resourceIndexes[false]!.clear();
+
+    // 清空当前状态
+    _allResources.clear();
+    _groupedResources.clear();
+    _resourceIndex.clear();
+    _currentPage = 1;
+    _hasMore = true;
+    _errorMessage = null;
+
+    // 清空本地缓存
+    await _clearLocalCache(true);
+    await _clearLocalCache(false);
+
+    notifyListeners();
+  }
+
   /// 切换 Tab（不重新加载数据）
   void switchTab(bool isPrivate) {
     if (_currentIsPrivate != isPrivate) {
@@ -88,6 +122,8 @@ class AlbumDataManager extends ChangeNotifier {
 
   /// 重置并加载数据
   Future<void> resetAndLoad({required bool isPrivate}) async {
+    debugPrint('重置并加载数据: isPrivate=$isPrivate');
+
     _currentIsPrivate = isPrivate;
 
     // 检查内存缓存
@@ -123,6 +159,8 @@ class AlbumDataManager extends ChangeNotifier {
 
   /// 强制刷新（清空缓存重新加载）
   Future<void> forceRefresh({required bool isPrivate}) async {
+    debugPrint('强制刷新: isPrivate=$isPrivate');
+
     _currentIsPrivate = isPrivate;
 
     // 清空所有缓存
@@ -338,7 +376,7 @@ class AlbumDataManager extends ChangeNotifier {
       final prefs = await SharedPreferences.getInstance();
       final cacheKey = '$_cacheKeyPrefix${isPrivate ? "private" : "family"}';
       await prefs.remove(cacheKey);
-      debugPrint('清空本地缓存');
+      debugPrint('清空本地缓存: $cacheKey');
     } catch (e) {
       debugPrint('清空缓存失败: $e');
     }

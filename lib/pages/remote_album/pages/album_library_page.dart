@@ -1,9 +1,10 @@
-// pages/album_library_page.dart (修复版 - 初始化时获取当前P2P状态)
+// pages/album_library_page.dart (修复版 - 修复时序问题和 Tab 缓存问题)
 import 'dart:async';
 
 import 'package:flutter/material.dart';
 import '../../../eventbus/event_bus.dart';
 import '../../../eventbus/p2p_events.dart';
+import '../../../pages/home_page.dart'; // 导入 GroupChangedEvent
 import '../../../user/models/group.dart';
 import '../../../user/provider/mine_provider.dart';
 import '../../../widgets/custom_title_bar.dart';
@@ -63,6 +64,7 @@ class _AlbumLibraryPageState extends State<AlbumLibraryPage> {
   // P2P 连接状态
   P2pConnectionStatus _p2pStatus = P2pConnectionStatus.disconnected;
   StreamSubscription? _p2pSubscription;
+  StreamSubscription? _groupChangedSubscription;
   String? _p2pErrorMessage;
 
   @override
@@ -70,12 +72,15 @@ class _AlbumLibraryPageState extends State<AlbumLibraryPage> {
     super.initState();
     _scrollController.addListener(_onScroll);
 
-    // 🆕 首先获取当前 P2P 连接状态（解决初始状态问题）
+    // 获取当前 P2P 连接状态
     _p2pStatus = MyNetworkProvider().getCurrentP2pStatus();
     debugPrint('AlbumLibraryPage 初始化 P2P 状态: $_p2pStatus');
 
-    // 监听 P2P 连接事件
+    // 监听 P2P 连接事件（仅用于更新 UI 状态，不触发数据加载）
     _p2pSubscription = MCEventBus.on<P2pConnectionEvent>().listen(_onP2pEvent);
+
+    // 监听 Group 切换事件（在此事件中触发数据加载）
+    _groupChangedSubscription = MCEventBus.on<GroupChangedEvent>().listen(_onGroupChanged);
 
     // 初始加载数据
     _loadInitialData();
@@ -97,14 +102,31 @@ class _AlbumLibraryPageState extends State<AlbumLibraryPage> {
     _selectionManager.dispose();
     _dataManager.dispose();
     _p2pSubscription?.cancel();
+    _groupChangedSubscription?.cancel();
     super.dispose();
   }
 
-  // 处理 P2P 事件
-  void _onP2pEvent(P2pConnectionEvent event) {
+  // 处理 Group 切换事件
+  // 🔑 关键修复：GroupChangedEvent 是在 p6Login 完成后才发送的，此时可以安全加载数据
+  void _onGroupChanged(GroupChangedEvent event) async {
     if (!mounted) return;
 
-    final previousStatus = _p2pStatus;
+    debugPrint('AlbumLibraryPage 收到 GroupChangedEvent，开始刷新数据');
+
+    // 清除选中状态和预览
+    _selectionManager.clearSelection();
+    _closePreview();
+
+    // 🔑 关键修复：先清空所有 Tab 的缓存（个人和家庭）
+    await _dataManager.clearAllCache();
+
+    // 再加载当前 Tab 的数据
+    _dataManager.forceRefresh(isPrivate: _isPersonalTab);
+  }
+
+  // 处理 P2P 事件（仅更新 UI 状态）
+  void _onP2pEvent(P2pConnectionEvent event) {
+    if (!mounted) return;
 
     setState(() {
       _p2pStatus = event.status;
@@ -113,13 +135,8 @@ class _AlbumLibraryPageState extends State<AlbumLibraryPage> {
 
     debugPrint('AlbumLibraryPage 收到 P2P 事件: $event');
 
-    // 从断开/失败状态变为已连接时，自动重新加载数据
-    if (event.status == P2pConnectionStatus.connected &&
-        (previousStatus == P2pConnectionStatus.disconnected ||
-            previousStatus == P2pConnectionStatus.failed)) {
-      debugPrint('P2P 重连成功，重新加载相册数据');
-      _loadInitialData();
-    }
+    // 🔑 关键修复：不在这里触发数据加载！
+    // P2P connected 不代表 p6Login 已完成，数据加载由 GroupChangedEvent 触发
   }
 
   void _onScroll() {
@@ -150,6 +167,7 @@ class _AlbumLibraryPageState extends State<AlbumLibraryPage> {
 
     _dataManager.switchTab(_isPersonalTab);
 
+    // 🔑 修复：如果切换后的 Tab 没有数据，则加载数据
     if (!_dataManager.hasData && _p2pStatus == P2pConnectionStatus.connected) {
       _dataManager.resetAndLoad(isPrivate: _isPersonalTab);
     }

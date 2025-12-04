@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:ablumwin/pages/remote_album/managers/album_data_manager.dart';
 import 'package:crypto/crypto.dart';
 import 'package:flutter/material.dart';
 import 'package:package_info_plus/package_info_plus.dart';
@@ -108,6 +109,7 @@ class MyNetworkProvider extends ChangeNotifier {
     await MyInstance().set(null);
     await MyInstance().setGroup(null);
     MyInstance().deviceCode = "";
+    await AlbumDataManager().clearAllCache();
   }
 
   doP6login() async {
@@ -116,14 +118,18 @@ class MyNetworkProvider extends ChangeNotifier {
     return p6loginResp;
   }
 
+  /// 🆕 优化版：获取所有 Groups（快速返回，不等待 P2P 连接）
   Future<ResponseModel<MyAllGroupsModel>> getAllGroups({bool force = false}) async {
     await sm.acquire();
+
+    // 缓存检查
     if (!force && DateTime.now().difference(lastGetAllGroupTime).inSeconds < 5 &&
         groupResp != null &&
         groupResp!.isSuccess) {
       sm.release();
       return groupResp!;
     }
+
     String url = "${AppConfig.userUrl()}/api/admin/group/get-all-groups";
 
     ResponseModel<MyAllGroupsModel> responseModel =
@@ -131,36 +137,60 @@ class MyNetworkProvider extends ChangeNotifier {
       url,
       netMethod: NetMethod.get,
     );
+
     if (responseModel.isSuccess) {
       MyInstance().groups = responseModel.model?.groups ?? [];
       var allGroup = responseModel.model?.groups ?? [];
+
       if (allGroup.isEmpty) {
         notifyListeners();
         sm.release();
         MyInstance().p6deviceInfoModel = null;
         return responseModel;
       }
+
+      // 确定要选中的 group
       var selectGroupId = MyInstance().group?.groupId;
       var group = allGroup
-          .where(
-            (element) => element.groupId == selectGroupId,
-      )
+          .where((element) => element.groupId == selectGroupId)
           .toList()
           .firstOrNull;
+
       if (group == null) {
         group = allGroup[0];
         await MyInstance().setGroup(group);
       }
-      await changeGroup(group.deviceCode ?? "");
+
+      // 🆕 关键优化：先通知 UI 更新（显示 groups 列表）
       notifyListeners();
+
+      // 🆕 记录时间和响应，释放信号量
+      lastGetAllGroupTime = DateTime.now();
+      groupResp = responseModel;
+      sm.release();
+
+      // 🆕 异步建立 P2P 连接（不阻塞 UI）
+      _connectToGroupAsync(group.deviceCode ?? "");
+
+      return responseModel;
     } else {
-      // mygroups = MyAllGroupsModel(groups: [], total: 0);
       notifyListeners();
+      lastGetAllGroupTime = DateTime.now();
+      groupResp = responseModel;
+      sm.release();
+      return responseModel;
     }
-    lastGetAllGroupTime = DateTime.now();
-    groupResp = responseModel;
-    sm.release();
-    return responseModel;
+  }
+
+  /// 🆕 异步连接到 Group（不阻塞调用者）
+  Future<void> _connectToGroupAsync(String deviceCode) async {
+    try {
+      debugPrint('开始异步建立 P2P 连接: $deviceCode');
+      await changeGroup(deviceCode);
+      debugPrint('异步 P2P 连接完成: $deviceCode');
+    } catch (e) {
+      debugPrint('异步 P2P 连接失败: $e');
+    }
   }
 
 
