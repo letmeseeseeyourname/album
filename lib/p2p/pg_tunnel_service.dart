@@ -16,6 +16,49 @@ class _EventMessage {
   _EventMessage(this.eventId, this.param);
 }
 
+/// 对端设备信息结果类
+class PgTunnelPeerInfoResult {
+  final String peerId;
+  final int connectionType;
+  final String peerAddr;
+  final int tunnelCount;
+
+  PgTunnelPeerInfoResult({
+    required this.peerId,
+    required this.connectionType,
+    required this.peerAddr,
+    required this.tunnelCount,
+  });
+
+  /// 获取连接类型名称
+  String get connectionTypeName {
+    switch (connectionType) {
+      case 0:
+        return 'Unknown';
+      case 1:
+        return 'Direct (P2P)';
+      case 2:
+        return 'Relay';
+      case 3:
+        return 'UPnP';
+      default:
+        return 'Type($connectionType)';
+    }
+  }
+
+  /// 是否是直连
+  bool get isDirect => connectionType == 1;
+
+  /// 是否是中继
+  bool get isRelay => connectionType == 2;
+
+  @override
+  String toString() {
+    return 'PgTunnelPeerInfoResult(peerId: $peerId, type: $connectionTypeName, '
+        'addr: $peerAddr, tunnels: $tunnelCount)';
+  }
+}
+
 /// P2P Tunnel 服务
 class PgTunnelService {
   static final PgTunnelService _instance = PgTunnelService._internal();
@@ -332,6 +375,45 @@ class PgTunnelService {
       return statusPtr.ref.uStatus;
     } finally {
       malloc.free(statusPtr);
+    }
+  }
+
+  /// 获取对端设备信息
+  ///
+  /// [peerId] 对端设备ID
+  /// 返回 [PgTunnelPeerInfoResult] 包含对端信息
+  Future<PgTunnelPeerInfoResult> getPeerInfo(String peerId) async {
+    if (!_isRunning) {
+      throw Exception('Tunnel is not running');
+    }
+
+    final peerIdPtr = peerId.toNativeUtf8();
+    final peerInfoPtr = malloc<PgTunnelPeerInfo>();
+
+    try {
+      final result = _bindings.pgTunnelPeerInfoGet(peerIdPtr, peerInfoPtr);
+
+      if (result != PgTunnelError.ok) {
+        throw Exception(
+            'Failed to get peer info: ${PgTunnelError.getErrorMessage(result)}');
+      }
+
+      final info = PgTunnelPeerInfoResult(
+        peerId: peerInfoPtr.ref.peerId,
+        connectionType: peerInfoPtr.ref.uCnntType,
+        peerAddr: peerInfoPtr.ref.peerAddr,
+        tunnelCount: peerInfoPtr.ref.uTunnelCount,
+      );
+
+      debugPrint('Peer Info - ID: ${info.peerId}, '
+          'Type: ${info.connectionTypeName}, '
+          'Addr: ${info.peerAddr}, '
+          'Tunnels: ${info.tunnelCount}');
+
+      return info;
+    } finally {
+      malloc.free(peerIdPtr);
+      malloc.free(peerInfoPtr);
     }
   }
 

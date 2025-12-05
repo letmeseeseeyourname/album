@@ -12,6 +12,7 @@ import '../pages/upload_records_page.dart';
 import '../pages/user_info_page.dart';
 import '../services/transfer_speed_service.dart';
 import '../user/provider/mine_provider.dart';
+import 'connection_status_dialog.dart';
 
 class CustomTitleBar extends StatefulWidget {
   final Widget? child;
@@ -156,12 +157,21 @@ class _CustomTitleBarState extends State<CustomTitleBar> {
     );
   }
 
-  // 处理 P2P 图标点击
+// 处理 P2P 图标点击
   void _onP2pIconTap() {
-    if (_p2pStatus == P2pConnectionStatus.disconnected ||
-        _p2pStatus == P2pConnectionStatus.failed) {
+    switch (_p2pStatus) {
+      case P2pConnectionStatus.connected:
+      // 已连接状态，点击显示连接状态详情弹窗
+        showConnectionStatusDialog(context);
+        break;
+      case P2pConnectionStatus.disconnected:
+      case P2pConnectionStatus.failed:
       // 断开或失败状态，点击重连
-      MyNetworkProvider().reconnectP2p();
+        MyNetworkProvider().reconnectP2p();
+        break;
+      case P2pConnectionStatus.connecting:
+      // 连接中状态，不做任何操作
+        break;
     }
   }
 
@@ -194,8 +204,7 @@ class _CustomTitleBarState extends State<CustomTitleBar> {
 
   // 构建 P2P 状态图标
   Widget _buildP2pStatusIcon() {
-    final isClickable = _p2pStatus == P2pConnectionStatus.disconnected ||
-        _p2pStatus == P2pConnectionStatus.failed;
+    final isClickable = _p2pStatus != P2pConnectionStatus.connecting;
 
     return Tooltip(
       message: _getP2pTooltip(),

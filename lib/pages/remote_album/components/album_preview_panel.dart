@@ -1,13 +1,14 @@
-// album/components/album_preview_panel.dart (修改版 - 适配 Flex 布局)
+// album/components/album_preview_panel.dart (修复版 v9)
+// 修复：使用 CachedNetworkImage 加载图片，添加占位图
 import 'package:flutter/material.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import '../../../network/constant_sign.dart';
 import '../../../user/models/resource_list_model.dart';
 
 /// 相册预览面板
 /// 负责右侧的媒体预览显示
-/// 修改：移除固定宽度，适配 Flex 布局
 class AlbumPreviewPanel extends StatefulWidget {
   final List<ResList> mediaItems;
   final int previewIndex;
@@ -154,7 +155,6 @@ class _AlbumPreviewPanelState extends State<AlbumPreviewPanel> {
 
     final item = widget.mediaItems[widget.previewIndex];
 
-    // 移除固定宽度，让 Expanded 控制宽度
     return Container(
       color: Colors.white,
       child: Column(
@@ -345,40 +345,105 @@ class _AlbumPreviewPanelState extends State<AlbumPreviewPanel> {
     );
   }
 
-  /// 图片预览
+  /// 图片预览 - 使用 CachedNetworkImage
   Widget _buildImagePreview(ResList item) {
+    // 优先使用高清图，依次降级
     final imageUrl = item.originPath ?? item.mediumPath ?? item.thumbnailPath;
 
     if (imageUrl == null || imageUrl.isEmpty) {
-      return Center(
-        child: Icon(
-          Icons.image,
-          size: 64,
-          color: Colors.grey.shade400,
-        ),
-      );
+      return _buildPlaceholder();
     }
+
+    final fullUrl = "${AppConfig.minio()}/$imageUrl";
 
     return Container(
       color: Colors.grey.shade100,
-      child: Image.network(
-        "${AppConfig.minio()}/$imageUrl",
+      child: CachedNetworkImage(
+        imageUrl: fullUrl,
         fit: BoxFit.contain,
-        loadingBuilder: (context, child, loadingProgress) {
-          if (loadingProgress == null) return child;
-          return const Center(
-            child: CircularProgressIndicator(),
-          );
+        // 预览需要更高分辨率
+        memCacheWidth: 1920,
+        memCacheHeight: 1080,
+        placeholder: (context, url) => _buildLoadingWidget(),
+        errorWidget: (context, url, error) {
+          debugPrint('预览图片加载失败: $url, error: $error');
+          return _buildErrorWidget();
         },
-        errorBuilder: (context, error, stackTrace) {
-          return Center(
-            child: Icon(
-              Icons.broken_image,
+      ),
+    );
+  }
+
+  /// 加载中组件
+  Widget _buildLoadingWidget() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const CircularProgressIndicator(),
+          const SizedBox(height: 16),
+          Text(
+            '加载中...',
+            style: TextStyle(
+              color: Colors.grey.shade600,
+              fontSize: 14,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 错误/占位组件
+  Widget _buildErrorWidget() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          SizedBox(
+            width: 80,
+            height: 65,
+            child: Image.asset(
+              'assets/images/image_placeholder.png',
+              fit: BoxFit.contain,
+              errorBuilder: (context, error, stackTrace) {
+                return Icon(
+                  Icons.broken_image,
+                  size: 64,
+                  color: Colors.grey.shade400,
+                );
+              },
+            ),
+          ),
+          const SizedBox(height: 16),
+          Text(
+            '图片加载失败',
+            style: TextStyle(
+              color: Colors.grey.shade600,
+              fontSize: 14,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 占位组件
+  Widget _buildPlaceholder() {
+    return Center(
+      child: SizedBox(
+        width: 80,
+        height: 65,
+        child: Image.asset(
+          'assets/images/image_placeholder.png',
+          fit: BoxFit.contain,
+          errorBuilder: (context, error, stackTrace) {
+            return Icon(
+              Icons.image,
               size: 64,
               color: Colors.grey.shade400,
-            ),
-          );
-        },
+            );
+          },
+        ),
       ),
     );
   }

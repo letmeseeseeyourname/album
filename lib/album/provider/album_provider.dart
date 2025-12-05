@@ -6,13 +6,12 @@ import '../../network/constant_sign.dart';
 import '../../network/network_provider.dart';
 import '../../network/response/response_model.dart';
 import '../../user/models/resource_list_model.dart';
-import '../../user/native_bridge.dart';
 import '../models/file_detail_model.dart';
 import '../models/file_upload_model.dart';
 import '../models/file_upload_response_model.dart';
 
 class AlbumProvider extends ChangeNotifier{
-  static final int myPageSize = 100;
+  static final int myPageSize = 1000;
 
   //nass/ps/storage/reportSyncTaskFiles
   Future<ResponseModel<bool>> reportSyncTaskFiles(

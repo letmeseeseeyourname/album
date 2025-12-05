@@ -399,6 +399,35 @@ class MyNetworkProvider extends ChangeNotifier {
 
     return responseModel;
   }
+  /// 🆕 检查服务器连接状态（用于连接状态弹窗）
+  Future<bool> checkServerStatus() async {
+    try {
+      String url = "${AppConfig.userUrl()}/api/admin/users/getUser";
+      ResponseModel<User> responseModel =
+      await requestAndConvertResponseModel(url, netMethod: NetMethod.get);
+      return responseModel.isSuccess;
+    } catch (e) {
+      debugPrint('检查服务器状态异常: $e');
+      return false;
+    }
+  }
+
+  Future<bool> getUploadPath() async {
+    try {
+      String url = "${AppConfig.hostUrl()}/nass/ps/storage/getUploadPath";
+      ResponseModel responseModel = await requestAndConvertResponseModel(
+          url,
+          formData: {
+            "type": "H"
+          },
+          netMethod: NetMethod.post);
+      return responseModel.isSuccess;
+    } catch (e) {
+      debugPrint('getUploadPath 异常: $e');
+      return false;
+    }
+  }
+
   //nass/ps/storage/getStorageInfo
   Future<ResponseModel<P6DeviceInfoModel>> getStorageInfo() async {
     String url = "${AppConfig.hostUrl()}/nass/ps/storage/getStorageInfo";

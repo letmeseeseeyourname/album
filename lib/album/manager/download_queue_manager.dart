@@ -1,4 +1,4 @@
-// download_queue_manager.dart
+// download_queue_manager.dart (修复版 - 添加连接预热和自动重试)
 import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
@@ -11,7 +11,7 @@ import '../../../services/transfer_speed_service.dart';
 import '../database/download_task_db_helper.dart';
 
 
-/// 下载队列管理器
+/// 下载队列管理器（修复版 - 解决 P2P 隧道冷启动问题）
 class DownloadQueueManager extends ChangeNotifier {
   static final DownloadQueueManager instance = DownloadQueueManager._init();
   DownloadQueueManager._init();
@@ -31,6 +31,17 @@ class DownloadQueueManager extends ChangeNotifier {
 
   // 最大并发下载数
   static const int maxConcurrentDownloads = 3;
+
+  // 🆕 连接错误自动重试次数
+  static const int _maxConnectionRetries = 2;
+
+  // 🆕 记录每个任务的重试次数
+  final Map<String, int> _taskRetryCount = {};
+
+  // 🆕 连接预热状态（避免重复预热）
+  bool _isConnectionWarmedUp = false;
+  DateTime? _lastWarmUpTime;
+  static const Duration _warmUpValidDuration = Duration(minutes: 5);
 
   // 下载目录
   String _downloadPath = '';
@@ -140,6 +151,76 @@ class DownloadQueueManager extends ChangeNotifier {
     }
   }
 
+  /// 🆕 预热连接（唤醒 P2P 隧道）
+  Future<bool> _warmUpConnection() async {
+    // 检查是否需要预热
+    if (_isConnectionWarmedUp && _lastWarmUpTime != null) {
+      final elapsed = DateTime.now().difference(_lastWarmUpTime!);
+      if (elapsed < _warmUpValidDuration) {
+        debugPrint('连接预热仍有效，跳过预热');
+        return true;
+      }
+    }
+
+    final baseUrl = AppConfig.minio();
+    debugPrint('开始预热连接: $baseUrl');
+
+    try {
+      // 发送轻量级 HEAD 请求唤醒隧道
+      await _dio.head(
+        baseUrl,
+        options: Options(
+          sendTimeout: const Duration(seconds: 5),
+          receiveTimeout: const Duration(seconds: 5),
+          validateStatus: (status) => true, // 接受任何状态码
+        ),
+      );
+
+      _isConnectionWarmedUp = true;
+      _lastWarmUpTime = DateTime.now();
+      debugPrint('连接预热成功');
+      return true;
+    } catch (e) {
+      debugPrint('连接预热失败（这是正常的，隧道可能正在建立）: $e');
+
+      // 等待一小段时间让隧道建立
+      await Future.delayed(const Duration(milliseconds: 500));
+
+      // 再试一次
+      try {
+        await _dio.head(
+          baseUrl,
+          options: Options(
+            sendTimeout: const Duration(seconds: 5),
+            receiveTimeout: const Duration(seconds: 5),
+            validateStatus: (status) => true,
+          ),
+        );
+
+        _isConnectionWarmedUp = true;
+        _lastWarmUpTime = DateTime.now();
+        debugPrint('连接预热第二次尝试成功');
+        return true;
+      } catch (e2) {
+        debugPrint('连接预热第二次尝试也失败: $e2');
+        // 即使预热失败，也继续下载，让下载逻辑处理重试
+        return false;
+      }
+    }
+  }
+
+  /// 🆕 检查是否是连接关闭错误（P2P 隧道冷启动问题）
+  bool _isConnectionClosedError(dynamic error) {
+    final errorStr = error.toString().toLowerCase();
+    return errorStr.contains('connection closed') ||
+        errorStr.contains('connection reset') ||
+        errorStr.contains('socket') ||
+        errorStr.contains('broken pipe') ||
+        (error is DioException &&
+            error.type == DioExceptionType.unknown &&
+            error.error is HttpException);
+  }
+
   /// 添加下载任务（从资源列表）
   Future<void> addDownloadTasks(List<ResList> resources) async {
     debugPrint('=== addDownloadTasks 开始 ===');
@@ -224,7 +305,14 @@ class DownloadQueueManager extends ChangeNotifier {
         // 批量保存到数据库
         await _dbHelper.insertTasks(newTasks);
         debugPrint('成功保存到数据库: ${newTasks.length}个任务');
+
+        // 🆕 下载前预热连接
+        await _warmUpConnection();
+
         notifyListeners();
+
+        // 实际添加的任务数量
+        debugPrint('实际添加的任务数量: ${newTasks.length}');
 
         // 自动开始下载
         _processNextDownload();
@@ -308,6 +396,9 @@ class DownloadQueueManager extends ChangeNotifier {
           headers: downloadedSize > 0
               ? {'Range': 'bytes=$downloadedSize-'}
               : null,
+          // 🆕 增加超时时间，给 P2P 隧道更多建立连接的时间
+          sendTimeout: const Duration(seconds: 30),
+          receiveTimeout: const Duration(seconds: 60),
         ),
         onReceiveProgress: (received, total) {
           final totalSize = downloadedSize + total;
@@ -342,6 +433,9 @@ class DownloadQueueManager extends ChangeNotifier {
       // 下载完成
       debugPrint('下载完成: ${task.fileName}');
 
+      // 🆕 清除重试计数
+      _taskRetryCount.remove(taskId);
+
       final index = _downloadTasks.indexWhere((t) => t.taskId == taskId);
       if (index != -1) {
         _downloadTasks[index] = _downloadTasks[index].copyWith(
@@ -363,6 +457,8 @@ class DownloadQueueManager extends ChangeNotifier {
       if (e is DioException && CancelToken.isCancel(e)) {
         // 用户取消
         debugPrint('下载取消: ${task.fileName}');
+        _taskRetryCount.remove(taskId); // 清除重试计数
+
         final index = _downloadTasks.indexWhere((t) => t.taskId == taskId);
         if (index != -1) {
           _downloadTasks[index] = _downloadTasks[index].copyWith(
@@ -379,8 +475,55 @@ class DownloadQueueManager extends ChangeNotifier {
           status: DownloadTaskStatus.canceled,
         );
       } else {
-        // 下载失败
+        // 🆕 检查是否是连接关闭错误，如果是则自动重试
+        final isConnectionError = _isConnectionClosedError(e);
+        final currentRetry = _taskRetryCount[taskId] ?? 0;
+
         debugPrint('下载失败: ${task.fileName}, 错误: $e');
+        debugPrint('是否连接错误: $isConnectionError, 当前重试次数: $currentRetry');
+
+        if (isConnectionError && currentRetry < _maxConnectionRetries) {
+          // 自动重试
+          _taskRetryCount[taskId] = currentRetry + 1;
+          debugPrint('连接错误，将在1秒后自动重试 (${currentRetry + 1}/$_maxConnectionRetries)');
+
+          // 标记连接需要重新预热
+          _isConnectionWarmedUp = false;
+
+          // 更新状态为待下载
+          final index = _downloadTasks.indexWhere((t) => t.taskId == taskId);
+          if (index != -1) {
+            _downloadTasks[index] = _downloadTasks[index].copyWith(
+              status: DownloadTaskStatus.pending,
+              updatedAt: DateTime.now().millisecondsSinceEpoch,
+            );
+            notifyListeners();
+          }
+
+          await _dbHelper.updateStatus(
+            taskId: taskId,
+            userId: _currentUserId!,
+            groupId: _currentGroupId!,
+            status: DownloadTaskStatus.pending,
+          );
+
+          // 清理当前活动任务，延迟后重试
+          _activeTasks.remove(taskId);
+
+          // 延迟重试，给隧道时间恢复
+          Future.delayed(const Duration(seconds: 1), () async {
+            // 预热连接
+            await _warmUpConnection();
+            // 重新处理下载队列
+            _processNextDownload();
+          });
+
+          return; // 不执行 finally 中的 _processNextDownload
+        }
+
+        // 超过重试次数或非连接错误，标记为失败
+        _taskRetryCount.remove(taskId);
+
         final index = _downloadTasks.indexWhere((t) => t.taskId == taskId);
         if (index != -1) {
           _downloadTasks[index] = _downloadTasks[index].copyWith(
@@ -440,6 +583,9 @@ class DownloadQueueManager extends ChangeNotifier {
 
   /// 取消下载
   Future<void> cancelDownload(String taskId) async {
+    // 清除重试计数
+    _taskRetryCount.remove(taskId);
+
     // 停止下载
     await pauseDownload(taskId);
 
@@ -465,6 +611,9 @@ class DownloadQueueManager extends ChangeNotifier {
 
   /// 重试失败的下载
   Future<void> retryDownload(String taskId) async {
+    // 重置重试计数
+    _taskRetryCount.remove(taskId);
+
     final index = _downloadTasks.indexWhere((t) => t.taskId == taskId);
     if (index != -1) {
       _downloadTasks[index] = _downloadTasks[index].copyWith(
@@ -481,6 +630,8 @@ class DownloadQueueManager extends ChangeNotifier {
         status: DownloadTaskStatus.pending,
       );
 
+      // 先预热连接再下载
+      await _warmUpConnection();
       _processNextDownload();
     }
   }
@@ -504,6 +655,9 @@ class DownloadQueueManager extends ChangeNotifier {
       }
     }
     notifyListeners();
+
+    // 🆕 恢复前预热连接
+    await _warmUpConnection();
 
     // 开始处理队列
     for (int i = 0; i < maxConcurrentDownloads; i++) {
@@ -580,6 +734,7 @@ class DownloadQueueManager extends ChangeNotifier {
       cancelToken.cancel();
     }
     _activeTasks.clear();
+    _taskRetryCount.clear();
     _dio.close();
     super.dispose();
   }
