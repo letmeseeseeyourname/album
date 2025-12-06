@@ -51,16 +51,25 @@ class PhotoUrlHelper {
     return getFullUrl(originPath);
   }
 
-  /// 获取预览用的最佳 URL（优先高清）
+  /// 获取预览用的最佳 URL
+  /// [preferHighQuality] 为 true 时优先高清，为 false 时优先缩略图
   static String? getPreviewUrl({
     String? originPath,
     String? mediumPath,
     String? thumbnailPath,
+    bool preferHighQuality = false,
   }) {
-    // 优先使用原图，其次中等尺寸，最后缩略图
-    return getFullUrl(originPath) ??
-        getFullUrl(mediumPath) ??
-        getFullUrl(thumbnailPath);
+    if (preferHighQuality) {
+      // 优先使用原图，其次中等尺寸，最后缩略图
+      return getFullUrl(originPath) ??
+          getFullUrl(mediumPath) ??
+          getFullUrl(thumbnailPath);
+    } else {
+      // 优先使用中等尺寸（平衡质量和加载速度），其次缩略图，最后原图
+      return getFullUrl(mediumPath) ??
+          getFullUrl(thumbnailPath) ??
+          getFullUrl(originPath);
+    }
   }
 
   /// 获取网格/列表显示用的 URL（优先缩略图）

@@ -1,16 +1,16 @@
-// album/components/album_grid_item.dart (优化版 v9)
+// album/components/album_grid_item.dart (优化版 v10)
 //
 // 改进点：
-// 1. 使用 CachedNetworkImage 替代手动管理的 ImageLoadManager
-// 2. 使用 assets/images/image_placeholder.png 作为占位符
-// 3. 简化代码，提高可维护性
+// 1. 使用 CachedNetworkImage
+// 2. 使用 PhotoUrlHelper 统一处理 URL
+// 3. 使用 assets/images/image_placeholder.png 作为占位符
 
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
-import '../../../network/constant_sign.dart';
 import '../../../user/models/resource_list_model.dart';
+import '../../../utils/photo_url_helper.dart';
 
-/// 相册网格项组件（优化版 v9）
+/// 相册网格项组件（优化版 v10）
 /// 使用 CachedNetworkImage 进行图片加载和缓存
 class AlbumGridItem extends StatelessWidget {
   final ResList resource;
@@ -38,11 +38,10 @@ class AlbumGridItem extends StatelessWidget {
     this.onHoverExit,
   });
 
-  String? get _imageUrl {
-    final path = resource.thumbnailPath;
-    if (path == null || path.isEmpty) return null;
-    return "${AppConfig.minio()}/$path";
-  }
+  String? get _imageUrl => PhotoUrlHelper.getGridUrl(
+    thumbnailPath: resource.thumbnailPath,
+    mediumPath: resource.mediumPath,
+  );
 
   @override
   Widget build(BuildContext context) {
@@ -95,7 +94,10 @@ class AlbumGridItem extends StatelessWidget {
       memCacheHeight: cacheSize,
       fit: _getBoxFit(),
       placeholder: (context, url) => _buildPlaceholder(),
-      errorWidget: (context, url, error) => _buildPlaceholder(),
+      errorWidget: (context, url, error) {
+        debugPrint('网格图片加载失败: $url, error: $error');
+        return _buildPlaceholder();
+      },
     );
   }
 

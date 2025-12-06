@@ -1,9 +1,9 @@
-// album/components/album_grid_view.dart (优化版 v9)
+// album/components/album_grid_view.dart (优化版 v10)
 //
 // 改进点：
-// 1. 移除 ImageLoadManager 依赖，使用 CachedNetworkImage
-// 2. 简化滚动处理逻辑
-// 3. 增加 cacheExtent 预加载
+// 1. 使用 CachedNetworkImage
+// 2. 使用 PhotoUrlHelper 统一处理 URL
+// 3. 简化代码
 
 import 'dart:async';
 import 'package:flutter/material.dart';
@@ -11,12 +11,12 @@ import 'package:cached_network_image/cached_network_image.dart';
 import '../../../user/models/resource_list_model.dart';
 import '../../../models/media_item.dart';
 import '../../../widgets/media_viewer_page.dart';
-import '../../../network/constant_sign.dart';
 import '../managers/selection_manager.dart';
+import '../../../utils/photo_url_helper.dart';
 import 'album_grid_item.dart';
 import 'package:intl/intl.dart';
 
-/// 相册网格视图组件（优化版 v9）
+/// 相册网格视图组件（优化版 v10）
 class AlbumGridView extends StatelessWidget {
   final Map<String, List<ResList>> groupedResources;
   final List<ResList> allResources;
@@ -347,16 +347,13 @@ class _ListThumbnail extends StatelessWidget {
 
   const _ListThumbnail({required this.resource});
 
-  String? get _imageUrl {
-    final path = resource.thumbnailPath;
-    if (path == null || path.isEmpty) return null;
-    return "${AppConfig.minio()}/$path";
-  }
-
   @override
   Widget build(BuildContext context) {
     final isVideo = resource.fileType == 'V';
-    final url = _imageUrl;
+    final url = PhotoUrlHelper.getGridUrl(
+      thumbnailPath: resource.thumbnailPath,
+      mediumPath: resource.mediumPath,
+    );
 
     return ClipRRect(
       borderRadius: BorderRadius.circular(6),

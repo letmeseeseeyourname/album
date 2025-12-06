@@ -4,6 +4,7 @@ import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:window_manager/window_manager.dart';
@@ -51,6 +52,9 @@ class _MediaViewerPageState extends State<MediaViewerPage> {
 
   // 控制栏自动隐藏计时器
   Timer? _hideControlsTimer;
+
+  // 图片重载 key
+  int _imageReloadKey = 0;
 
   @override
   void initState() {
@@ -150,6 +154,7 @@ class _MediaViewerPageState extends State<MediaViewerPage> {
       _imagePosition = Offset.zero;
       _scale = 1.0;
       _baseScale = 1.0;
+      _imageReloadKey = 0;
     });
   }
 
@@ -157,6 +162,7 @@ class _MediaViewerPageState extends State<MediaViewerPage> {
     if (currentIndex > 0) {
       setState(() {
         currentIndex--;
+        _imageReloadKey = 0;
         _loadCurrentMedia();
       });
       _showControls(); // 切换媒体时显示控制栏
@@ -167,6 +173,7 @@ class _MediaViewerPageState extends State<MediaViewerPage> {
     if (currentIndex < widget.mediaItems.length - 1) {
       setState(() {
         currentIndex++;
+        _imageReloadKey = 0;
         _loadCurrentMedia();
       });
       _showControls(); // 切换媒体时显示控制栏
@@ -432,24 +439,45 @@ class _MediaViewerPageState extends State<MediaViewerPage> {
               );
             },
           )
-              : Image.network(
-            "${AppConfig.minio()}/${currentItem.networkUrl!}",
+              : CachedNetworkImage(
+            key: ValueKey('${currentItem.networkUrl}_$_imageReloadKey'),
+            imageUrl: "${AppConfig.minio()}/${currentItem.networkUrl!}",
+            cacheKey: '${currentItem.networkUrl}_$_imageReloadKey',
             fit: BoxFit.contain,
-            loadingBuilder: (context, child, loadingProgress) {
-              if (loadingProgress == null) return child;
+            fadeInDuration: const Duration(milliseconds: 200),
+            fadeOutDuration: const Duration(milliseconds: 100),
+            placeholder: (context, url) => const Center(
+              child: CircularProgressIndicator(color: Colors.white),
+            ),
+            errorWidget: (context, url, error) {
+              debugPrint('图片加载失败: $url, $error');
               return Center(
-                child: CircularProgressIndicator(
-                  value: loadingProgress.expectedTotalBytes != null
-                      ? loadingProgress.cumulativeBytesLoaded /
-                      loadingProgress.expectedTotalBytes!
-                      : null,
-                  color: Colors.white,
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Icon(Icons.broken_image, color: Colors.white54, size: 64),
+                    const SizedBox(height: 16),
+                    const Text(
+                      '图片加载失败',
+                      style: TextStyle(color: Colors.white54, fontSize: 14),
+                    ),
+                    const SizedBox(height: 16),
+                    ElevatedButton.icon(
+                      onPressed: () {
+                        setState(() {
+                          _imageReloadKey++;
+                        });
+                      },
+                      icon: const Icon(Icons.refresh, size: 18),
+                      label: const Text('重新加载'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.orange,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                      ),
+                    ),
+                  ],
                 ),
-              );
-            },
-            errorBuilder: (context, error, stackTrace) {
-              return const Center(
-                child: Icon(Icons.error, color: Colors.white, size: 64),
               );
             },
           ),
@@ -506,9 +534,15 @@ class _MediaViewerPageState extends State<MediaViewerPage> {
                 ),
               ),
             ),
+            Text(
+              '${currentIndex + 1} / ${widget.mediaItems.length}',
+              style: const TextStyle(color: Colors.white70, fontSize: 14),
+            ),
+            const SizedBox(width: 16),
             IconButton(
               icon: const Icon(Icons.info_outline, color: Colors.white, size: 24),
               onPressed: _showMediaInfo,
+              tooltip: '媒体信息',
             ),
           ],
         ),
@@ -518,12 +552,12 @@ class _MediaViewerPageState extends State<MediaViewerPage> {
 
   Widget _buildVideoControls() {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         gradient: LinearGradient(
           begin: Alignment.bottomCenter,
           end: Alignment.topCenter,
-          colors: [Colors.black.withOpacity(0.8), Colors.transparent],
+          colors: [Colors.black.withOpacity(0.7), Colors.transparent],
         ),
       ),
       child: Column(
@@ -540,7 +574,7 @@ class _MediaViewerPageState extends State<MediaViewerPage> {
               Expanded(
                 child: SliderTheme(
                   data: SliderThemeData(
-                    trackHeight: 3,
+                    trackHeight: 4,
                     thumbShape: const RoundSliderThumbShape(
                       enabledThumbRadius: 6,
                     ),
@@ -549,9 +583,10 @@ class _MediaViewerPageState extends State<MediaViewerPage> {
                     ),
                   ),
                   child: Slider(
-                    value: _duration.inMilliseconds > 0
-                        ? _position.inMilliseconds.toDouble()
-                        : 0.0,
+                    value: _position.inMilliseconds.toDouble().clamp(
+                      0.0,
+                      _duration.inMilliseconds.toDouble(),
+                    ),
                     max: _duration.inMilliseconds.toDouble(),
                     onChanged: (value) {
                       _seekTo(Duration(milliseconds: value.toInt()));

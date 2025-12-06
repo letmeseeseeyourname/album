@@ -1,14 +1,13 @@
-// album/components/album_preview_panel.dart (修复版 v9)
-// 修复：使用 CachedNetworkImage 加载图片，添加占位图
+// album/components/album_preview_panel.dart (修复版 - 解决图片被压缩问题)
 import 'package:flutter/material.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
-import 'package:cached_network_image/cached_network_image.dart';
 import '../../../network/constant_sign.dart';
 import '../../../user/models/resource_list_model.dart';
 
 /// 相册预览面板
-/// 负责右侧的媒体预览显示
+/// 修复：图片预览被压缩的问题
 class AlbumPreviewPanel extends StatefulWidget {
   final List<ResList> mediaItems;
   final int previewIndex;
@@ -42,6 +41,9 @@ class _AlbumPreviewPanelState extends State<AlbumPreviewPanel> {
   double _volume = 1.0;
   bool _showControls = true;
 
+  // 用于触发图片重新加载的 key
+  int _imageReloadKey = 0;
+
   @override
   void initState() {
     super.initState();
@@ -52,6 +54,7 @@ class _AlbumPreviewPanelState extends State<AlbumPreviewPanel> {
   void didUpdateWidget(AlbumPreviewPanel oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.previewIndex != widget.previewIndex) {
+      _imageReloadKey = 0;  // 切换图片时重置
       _loadMedia();
     }
   }
@@ -88,7 +91,6 @@ class _AlbumPreviewPanelState extends State<AlbumPreviewPanel> {
     final fullUrl = "${AppConfig.minio()}/$url";
     _videoPlayer!.open(Media(fullUrl));
 
-    // 监听播放状态
     _videoPlayer!.stream.playing.listen((playing) {
       if (mounted) {
         setState(() {
@@ -97,7 +99,6 @@ class _AlbumPreviewPanelState extends State<AlbumPreviewPanel> {
       }
     });
 
-    // 监听播放进度
     _videoPlayer!.stream.position.listen((position) {
       if (mounted) {
         setState(() {
@@ -106,7 +107,6 @@ class _AlbumPreviewPanelState extends State<AlbumPreviewPanel> {
       }
     });
 
-    // 监听视频时长
     _videoPlayer!.stream.duration.listen((duration) {
       if (mounted) {
         setState(() {
@@ -115,7 +115,6 @@ class _AlbumPreviewPanelState extends State<AlbumPreviewPanel> {
       }
     });
 
-    // 监听音量
     _videoPlayer!.stream.volume.listen((volume) {
       if (mounted) {
         setState(() {
@@ -159,9 +158,7 @@ class _AlbumPreviewPanelState extends State<AlbumPreviewPanel> {
       color: Colors.white,
       child: Column(
         children: [
-          // 顶部标题栏
           _buildHeader(item),
-          // 媒体内容区（包含左右切换按钮）
           Expanded(
             child: _buildMediaContent(item),
           ),
@@ -185,7 +182,6 @@ class _AlbumPreviewPanelState extends State<AlbumPreviewPanel> {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          // 左侧文件名
           Expanded(
             child: Text(
               item.fileName ?? 'Unknown',
@@ -196,7 +192,6 @@ class _AlbumPreviewPanelState extends State<AlbumPreviewPanel> {
               overflow: TextOverflow.ellipsis,
             ),
           ),
-          // 索引显示
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 12),
             child: Text(
@@ -207,7 +202,6 @@ class _AlbumPreviewPanelState extends State<AlbumPreviewPanel> {
               ),
             ),
           ),
-          // 右侧关闭按钮
           IconButton(
             icon: const Icon(Icons.close, size: 20),
             onPressed: widget.onClose,
@@ -224,7 +218,7 @@ class _AlbumPreviewPanelState extends State<AlbumPreviewPanel> {
     );
   }
 
-  /// 媒体内容区
+  /// 媒体内容区 - 修复版
   Widget _buildMediaContent(ResList item) {
     return Container(
       decoration: BoxDecoration(
@@ -234,8 +228,8 @@ class _AlbumPreviewPanelState extends State<AlbumPreviewPanel> {
       ),
       child: Stack(
         children: [
-          // 主内容
-          Center(
+          // 🔑 修复：使用 Positioned.fill 确保图片/视频填满整个区域
+          Positioned.fill(
             child: item.fileType == 'V'
                 ? _buildVideoPreview()
                 : _buildImagePreview(item),
@@ -271,7 +265,7 @@ class _AlbumPreviewPanelState extends State<AlbumPreviewPanel> {
               ),
             ),
 
-          // 视频播放/暂停按钮（居中显示）
+          // 视频播放/暂停按钮
           if (item.fileType == 'V' && _videoController != null && !_isPlaying)
             Positioned.fill(
               bottom: 64,
@@ -287,7 +281,7 @@ class _AlbumPreviewPanelState extends State<AlbumPreviewPanel> {
               ),
             ),
 
-          // 视频控制栏（仅视频时显示）
+          // 视频控制栏
           if (item.fileType == 'V' && _videoController != null)
             Positioned(
               left: 0,
@@ -345,105 +339,76 @@ class _AlbumPreviewPanelState extends State<AlbumPreviewPanel> {
     );
   }
 
-  /// 图片预览 - 使用 CachedNetworkImage
+  /// 图片预览 - 修复版：正确处理竖向图片
   Widget _buildImagePreview(ResList item) {
-    // 优先使用高清图，依次降级
     final imageUrl = item.originPath ?? item.mediumPath ?? item.thumbnailPath;
 
     if (imageUrl == null || imageUrl.isEmpty) {
-      return _buildPlaceholder();
+      return Center(
+        child: Icon(
+          Icons.image,
+          size: 64,
+          color: Colors.grey.shade400,
+        ),
+      );
     }
 
-    final fullUrl = "${AppConfig.minio()}/$imageUrl";
-
+    // 🔑 关键修复：使用 Container + alignment + CachedNetworkImage 组合
+    // Container 会填满父容器（Positioned.fill 提供的约束）
+    // alignment: Alignment.center 让图片居中
+    // CachedNetworkImage 的 fit: BoxFit.contain 确保图片保持宽高比完整显示
     return Container(
       color: Colors.grey.shade100,
+      alignment: Alignment.center,
       child: CachedNetworkImage(
-        imageUrl: fullUrl,
+        key: ValueKey('${item.resId ?? imageUrl}_$_imageReloadKey'),
+        imageUrl: "${AppConfig.minio()}/$imageUrl",
+        cacheKey: '${item.resId ?? imageUrl}_$_imageReloadKey',
         fit: BoxFit.contain,
-        // 预览需要更高分辨率
-        memCacheWidth: 1920,
-        memCacheHeight: 1080,
-        placeholder: (context, url) => _buildLoadingWidget(),
+        alignment: Alignment.center,
+        fadeInDuration: const Duration(milliseconds: 200),
+        fadeOutDuration: const Duration(milliseconds: 100),
+        placeholder: (context, url) => const Center(
+          child: CircularProgressIndicator(),
+        ),
         errorWidget: (context, url, error) {
-          debugPrint('预览图片加载失败: $url, error: $error');
-          return _buildErrorWidget();
-        },
-      ),
-    );
-  }
-
-  /// 加载中组件
-  Widget _buildLoadingWidget() {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          const CircularProgressIndicator(),
-          const SizedBox(height: 16),
-          Text(
-            '加载中...',
-            style: TextStyle(
-              color: Colors.grey.shade600,
-              fontSize: 14,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  /// 错误/占位组件
-  Widget _buildErrorWidget() {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          SizedBox(
-            width: 80,
-            height: 65,
-            child: Image.asset(
-              'assets/images/image_placeholder.png',
-              fit: BoxFit.contain,
-              errorBuilder: (context, error, stackTrace) {
-                return Icon(
+          debugPrint('预览图片加载失败: $imageUrl, $error');
+          return Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(
                   Icons.broken_image,
                   size: 64,
                   color: Colors.grey.shade400,
-                );
-              },
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  '图片加载失败',
+                  style: TextStyle(
+                    color: Colors.grey.shade500,
+                    fontSize: 12,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                ElevatedButton.icon(
+                  onPressed: () {
+                    setState(() {
+                      _imageReloadKey++;
+                    });
+                  },
+                  icon: const Icon(Icons.refresh, size: 18),
+                  label: const Text('重新加载'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.orange,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  ),
+                ),
+              ],
             ),
-          ),
-          const SizedBox(height: 16),
-          Text(
-            '图片加载失败',
-            style: TextStyle(
-              color: Colors.grey.shade600,
-              fontSize: 14,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  /// 占位组件
-  Widget _buildPlaceholder() {
-    return Center(
-      child: SizedBox(
-        width: 80,
-        height: 65,
-        child: Image.asset(
-          'assets/images/image_placeholder.png',
-          fit: BoxFit.contain,
-          errorBuilder: (context, error, stackTrace) {
-            return Icon(
-              Icons.image,
-              size: 64,
-              color: Colors.grey.shade400,
-            );
-          },
-        ),
+          );
+        },
       ),
     );
   }
@@ -466,7 +431,6 @@ class _AlbumPreviewPanelState extends State<AlbumPreviewPanel> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // 进度条
           Row(
             children: [
               Text(
@@ -507,11 +471,9 @@ class _AlbumPreviewPanelState extends State<AlbumPreviewPanel> {
               ),
             ],
           ),
-          // 控制按钮
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              // 播放/暂停按钮
               IconButton(
                 icon: Icon(
                   _isPlaying ? Icons.pause : Icons.play_arrow,
@@ -527,7 +489,6 @@ class _AlbumPreviewPanelState extends State<AlbumPreviewPanel> {
                 ),
               ),
               const SizedBox(width: 16),
-              // 音量控制
               Icon(
                 _volume == 0
                     ? Icons.volume_off

@@ -106,6 +106,7 @@ class MyNetworkProvider extends ChangeNotifier {
     var userId = MyInstance().user?.user?.id ?? 0;
     var deviceCode = MyInstance().deviceCode;
     lastGetAllGroupTime = DateTime.now().subtract(Duration(seconds: 3600));
+    await p6Logout();
     await MyInstance().set(null);
     await MyInstance().setGroup(null);
     MyInstance().deviceCode = "";
@@ -399,6 +400,21 @@ class MyNetworkProvider extends ChangeNotifier {
 
     return responseModel;
   }
+
+  Future<ResponseModel<UserModel>> p6Logout() async {
+    String url = "${AppConfig.hostUrl()}/nass/clound/common/p6LoginOut";
+    var user = MyInstance().user;
+    ResponseModel<UserModel> responseModel =
+    await requestAndConvertResponseModel(url,
+        formData: {
+          "token": user?.accessToken ?? "",
+          "loginType": "B",
+          "userId": user?.user?.id ?? 0,
+        },
+        netMethod: NetMethod.post);
+    return responseModel;
+  }
+
   /// 🆕 检查服务器连接状态（用于连接状态弹窗）
   Future<bool> checkServerStatus() async {
     try {
