@@ -1,9 +1,8 @@
-// pages/settings_page.dart (添加升级检查功能)
+// pages/settings_page.dart (完善升级功能 - 包含下载进度和安装)
 import 'dart:async';
 import 'package:ablumwin/network/constant_sign.dart';
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
-import 'package:url_launcher/url_launcher.dart';
 import '../eventbus/event_bus.dart';
 import '../eventbus/upgrade_events.dart';
 import '../manager/upgrade_manager.dart';
@@ -11,11 +10,11 @@ import '../user/my_instance.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
 class SettingsPage extends StatefulWidget {
-  final bool hasUpdate; // 🆕 新增
+  final bool hasUpdate;
 
   const SettingsPage({
     super.key,
-    this.hasUpdate = false, // 🆕 新增
+    this.hasUpdate = false,
   });
 
   @override
@@ -29,7 +28,6 @@ class _SettingsPageState extends State<SettingsPage> {
   String _currentVersion = '';
   bool _isLoadingPath = true;
 
-  // 🆕 升级状态
   bool _hasUpdate = false;
   StreamSubscription? _upgradeSubscription;
 
@@ -45,10 +43,8 @@ class _SettingsPageState extends State<SettingsPage> {
     _loadSettings();
     _loadVersion();
 
-    // 🆕 初始化升级状态
     _hasUpdate = widget.hasUpdate || UpgradeManager().hasUpdate;
 
-    // 🆕 监听升级事件
     _upgradeSubscription = MCEventBus.on<UpgradeCheckEvent>().listen((event) {
       if (mounted) {
         setState(() {
@@ -60,7 +56,7 @@ class _SettingsPageState extends State<SettingsPage> {
 
   @override
   void dispose() {
-    _upgradeSubscription?.cancel(); // 🆕 新增
+    _upgradeSubscription?.cancel();
     super.dispose();
   }
 
@@ -191,7 +187,6 @@ class _SettingsPageState extends State<SettingsPage> {
         itemBuilder: (context, index) {
           final item = _menuItems[index];
           final isSelected = _selectedMenuIndex == index;
-          // 🆕 检查更新菜单项显示红点
           final showBadge = index == 1 && _hasUpdate;
 
           return Container(
@@ -216,7 +211,6 @@ class _SettingsPageState extends State<SettingsPage> {
                       ),
                     ),
                   ),
-                  // 🆕 红点
                   if (showBadge)
                     Container(
                       width: 8,
@@ -246,7 +240,7 @@ class _SettingsPageState extends State<SettingsPage> {
       case 0:
         return _buildGeneralSettings();
       case 1:
-        return _buildUpdateCheck(); // 🆕 使用新的检查更新组件
+        return _buildUpdateCheck();
       case 2:
         return _buildAbout();
       default:
@@ -260,7 +254,6 @@ class _SettingsPageState extends State<SettingsPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // 语言设置
           _buildSettingRow(
             '语言',
             DropdownButton<String>(
@@ -276,7 +269,6 @@ class _SettingsPageState extends State<SettingsPage> {
 
           const SizedBox(height: 32),
 
-          // 下载位置
           const Text(
             '下载位置',
             style: TextStyle(
@@ -331,7 +323,6 @@ class _SettingsPageState extends State<SettingsPage> {
 
           const SizedBox(height: 32),
 
-          // 关闭主面板时
           const Text(
             '关闭主面板时',
             style: TextStyle(
@@ -369,7 +360,6 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
-  // 🆕 重写的检查更新组件
   Widget _buildUpdateCheck() {
     return UpdateCheckContent(
       hasUpdate: _hasUpdate,
@@ -458,7 +448,7 @@ class _MenuItem {
   _MenuItem(this.title, this.icon);
 }
 
-// 🆕 检查更新内容组件
+// 检查更新内容组件 - 包含下载进度和安装（保留原有文案）
 class UpdateCheckContent extends StatefulWidget {
   final bool hasUpdate;
   final Function(bool)? onUpdateChecked;
@@ -481,13 +471,32 @@ class _UpdateCheckContentState extends State<UpdateCheckContent> {
   String _releaseNotes = '';
   String? _downloadUrl;
   String? _errorMessage;
-  bool _hasChecked = false; // 是否已检查过
+  bool _hasChecked = false;
+
+  DownloadProgress _downloadProgress = DownloadProgress(status: DownloadStatus.idle);
+  StreamSubscription? _downloadSubscription;
 
   @override
   void initState() {
     super.initState();
     _hasUpdate = widget.hasUpdate;
     _loadCachedInfo();
+
+    _downloadSubscription = MCEventBus.on<DownloadProgressEvent>().listen((event) {
+      if (mounted) {
+        setState(() {
+          _downloadProgress = event.progress;
+        });
+      }
+    });
+
+    _downloadProgress = UpgradeManager().downloadProgress;
+  }
+
+  @override
+  void dispose() {
+    _downloadSubscription?.cancel();
+    super.dispose();
   }
 
   void _loadCachedInfo() {
@@ -504,9 +513,9 @@ class _UpdateCheckContentState extends State<UpdateCheckContent> {
     }
     if (manager.upgradeInfo != null) {
       _hasChecked = true;
+      _hasUpdate = manager.hasUpdate;
       _targetVersion = manager.upgradeInfo!.targetVersion;
       _releaseNotes = manager.upgradeInfo!.releaseNotes;
-      // _downloadUrl = '${AppConfig.userUrl()}/'+manager.upgradeInfo!.packageUrl;
       _downloadUrl = 'http://joykee-oss.joykee.com/${manager.upgradeInfo!.packageUrl}';
     }
   }
@@ -528,7 +537,7 @@ class _UpdateCheckContentState extends State<UpdateCheckContent> {
           _currentVersion = result.currentVersion;
           _targetVersion = result.targetVersion ?? '';
           _releaseNotes = result.upgradeInfo?.releaseNotes ?? '';
-          _downloadUrl = result.upgradeInfo?.packageUrl;
+          _downloadUrl = 'http://joykee-oss.joykee.com/${result.upgradeInfo!.packageUrl}';
           _errorMessage = result.success ? null : result.errorMessage;
         });
 
@@ -545,22 +554,120 @@ class _UpdateCheckContentState extends State<UpdateCheckContent> {
     }
   }
 
-  Future<void> _downloadUpdate() async {
-    if (_downloadUrl == null || _downloadUrl!.isEmpty) {
-      setState(() => _errorMessage = '下载地址无效');
-      return;
-    }
+  Future<void> _startDownload() async {
+    setState(() {
+      _errorMessage = null;
+    });
 
-    try {
-      final uri = Uri.parse(_downloadUrl!);
-      if (await canLaunchUrl(uri)) {
-        await launchUrl(uri, mode: LaunchMode.externalApplication);
-      } else {
-        setState(() => _errorMessage = '无法打开下载链接');
-      }
-    } catch (e) {
-      setState(() => _errorMessage = '打开下载链接失败: $e');
+    final result = await UpgradeManager().startDownload(
+      onProgress: (progress) {
+        if (mounted) {
+          setState(() {
+            _downloadProgress = progress;
+          });
+        }
+      },
+    );
+
+    if (!result.success && mounted) {
+      setState(() {
+        _errorMessage = result.errorMessage;
+      });
+    } else if (result.success && result.filePath != null) {
+      _startInstall(result.filePath!);
     }
+  }
+
+  void _cancelDownload() {
+    UpgradeManager().cancelDownload();
+    setState(() {
+      _downloadProgress = DownloadProgress(status: DownloadStatus.idle);
+    });
+  }
+
+  Future<void> _startInstall(String filePath) async {
+    final result = await UpgradeManager().installUpdate(filePath);
+
+    if (mounted) {
+      if (result.success) {
+        _showInstallStartedDialog(result.message ?? '安装程序已启动');
+      } else {
+        _showInstallFailedDialog(result.errorMessage ?? '安装失败', filePath);
+      }
+    }
+  }
+
+  void _showInstallStartedDialog(String message) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Row(
+          children: [
+            Icon(Icons.check_circle, color: Colors.green),
+            SizedBox(width: 8),
+            Text('安装已启动'),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(message),
+            const SizedBox(height: 16),
+            const Text(
+              '安装完成后，请重新启动应用以使用新版本。',
+              style: TextStyle(color: Colors.grey, fontSize: 13),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('知道了'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showInstallFailedDialog(String errorMessage, String filePath) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Row(
+          children: [
+            Icon(Icons.warning, color: Colors.orange),
+            SizedBox(width: 8),
+            Text('无法自动安装'),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(errorMessage),
+            const SizedBox(height: 16),
+            const Text(
+              '您可以手动打开下载目录进行安装。',
+              style: TextStyle(color: Colors.grey, fontSize: 13),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('取消'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(context);
+              UpgradeManager().openDownloadDirectory(filePath);
+            },
+            child: const Text('打开目录'),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -578,8 +685,18 @@ class _UpdateCheckContentState extends State<UpdateCheckContent> {
               const CircularProgressIndicator(),
               const SizedBox(height: 24),
               const Text('正在检查更新...'),
+            ] else if (_downloadProgress.status == DownloadStatus.downloading) ...[
+              _buildDownloadingView(),
+            ] else if (_downloadProgress.status == DownloadStatus.completed) ...[
+              _buildDownloadCompletedView(),
+            ] else if (_downloadProgress.status == DownloadStatus.installing) ...[
+              const CircularProgressIndicator(),
+              const SizedBox(height: 24),
+              const Text('正在启动安装程序...'),
+            ] else if (_downloadProgress.status == DownloadStatus.failed) ...[
+              _buildDownloadFailedView(),
             ] else if (_hasUpdate) ...[
-              // 有更新
+              // 有更新 - 保留原有文案
               const Text(
                 '发现新版本',
                 style: TextStyle(
@@ -602,7 +719,6 @@ class _UpdateCheckContentState extends State<UpdateCheckContent> {
                 textAlign: TextAlign.center,
               ),
 
-              // 更新说明
               if (_releaseNotes.isNotEmpty) ...[
                 const SizedBox(height: 24),
                 Container(
@@ -628,9 +744,8 @@ class _UpdateCheckContentState extends State<UpdateCheckContent> {
 
               const SizedBox(height: 32),
 
-              // 下载更新按钮
               OutlinedButton(
-                onPressed: _downloadUpdate,
+                onPressed: _startDownload,
                 style: OutlinedButton.styleFrom(
                   padding: const EdgeInsets.symmetric(
                     horizontal: 48,
@@ -650,7 +765,7 @@ class _UpdateCheckContentState extends State<UpdateCheckContent> {
                 ),
               ),
             ] else ...[
-              // 没有更新
+              // 没有更新 - 保留原有文案
               const Text(
                 '当前没有更新需要安装',
                 style: TextStyle(
@@ -675,7 +790,6 @@ class _UpdateCheckContentState extends State<UpdateCheckContent> {
 
               const SizedBox(height: 32),
 
-              // 检测更新按钮
               OutlinedButton(
                 onPressed: _checkUpdate,
                 style: OutlinedButton.styleFrom(
@@ -698,7 +812,6 @@ class _UpdateCheckContentState extends State<UpdateCheckContent> {
               ),
             ],
 
-            // 错误提示
             if (_errorMessage != null) ...[
               const SizedBox(height: 16),
               Text(
@@ -712,6 +825,222 @@ class _UpdateCheckContentState extends State<UpdateCheckContent> {
           ],
         ),
       ),
+    );
+  }
+
+  Widget _buildDownloadingView() {
+    return Column(
+      children: [
+        const Text(
+          '正在下载更新',
+          style: TextStyle(
+            fontSize: 20,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          '更新版本：$_targetVersion',
+          style: TextStyle(
+            fontSize: 14,
+            color: Colors.grey.shade600,
+          ),
+        ),
+        const SizedBox(height: 32),
+
+        Container(
+          constraints: const BoxConstraints(maxWidth: 400),
+          child: Column(
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(4),
+                child: LinearProgressIndicator(
+                  value: _downloadProgress.progress,
+                  minHeight: 8,
+                  backgroundColor: Colors.grey.shade200,
+                  valueColor: const AlwaysStoppedAnimation<Color>(Colors.blue),
+                ),
+              ),
+              const SizedBox(height: 12),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    _downloadProgress.progressText,
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: Colors.grey.shade600,
+                    ),
+                  ),
+                  Text(
+                    _downloadProgress.percentText,
+                    style: const TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.blue,
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+
+        const SizedBox(height: 32),
+
+        OutlinedButton(
+          onPressed: _cancelDownload,
+          style: OutlinedButton.styleFrom(
+            padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 12),
+            side: BorderSide(color: Colors.grey.shade400),
+          ),
+          child: Text(
+            '取消下载',
+            style: TextStyle(color: Colors.grey.shade700),
+          ),
+        ),
+
+        const SizedBox(height: 16),
+        Text(
+          '下载过程中请勿关闭应用',
+          style: TextStyle(
+            fontSize: 12,
+            color: Colors.grey.shade500,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildDownloadCompletedView() {
+    return Column(
+      children: [
+        const Icon(
+          Icons.check_circle,
+          size: 64,
+          color: Colors.green,
+        ),
+        const SizedBox(height: 24),
+        const Text(
+          '下载完成',
+          style: TextStyle(
+            fontSize: 20,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          '版本 $_targetVersion 已准备就绪',
+          style: TextStyle(
+            fontSize: 14,
+            color: Colors.grey.shade600,
+          ),
+        ),
+        const SizedBox(height: 32),
+
+        OutlinedButton(
+          onPressed: () {
+            if (_downloadProgress.filePath != null) {
+              _startInstall(_downloadProgress.filePath!);
+            }
+          },
+          style: OutlinedButton.styleFrom(
+            padding: const EdgeInsets.symmetric(
+              horizontal: 48,
+              vertical: 16,
+            ),
+            side: const BorderSide(color: Colors.blue),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(8),
+            ),
+          ),
+          child: const Text(
+            '立即安装',
+            style: TextStyle(
+              fontSize: 16,
+              color: Colors.blue,
+            ),
+          ),
+        ),
+
+        const SizedBox(height: 16),
+
+        TextButton(
+          onPressed: () {
+            if (_downloadProgress.filePath != null) {
+              UpgradeManager().openDownloadDirectory(_downloadProgress.filePath!);
+            }
+          },
+          child: Text(
+            '打开下载目录',
+            style: TextStyle(color: Colors.grey.shade600),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildDownloadFailedView() {
+    return Column(
+      children: [
+        Icon(
+          Icons.error_outline,
+          size: 64,
+          color: Colors.red.shade400,
+        ),
+        const SizedBox(height: 24),
+        const Text(
+          '下载失败',
+          style: TextStyle(
+            fontSize: 20,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          _downloadProgress.errorMessage ?? '请检查网络连接后重试',
+          style: TextStyle(
+            fontSize: 14,
+            color: Colors.grey.shade600,
+          ),
+          textAlign: TextAlign.center,
+        ),
+        const SizedBox(height: 32),
+
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            OutlinedButton(
+              onPressed: () {
+                UpgradeManager().resetDownloadStatus();
+                setState(() {
+                  _downloadProgress = DownloadProgress(status: DownloadStatus.idle);
+                });
+              },
+              style: OutlinedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                side: BorderSide(color: Colors.grey.shade400),
+              ),
+              child: Text(
+                '返回',
+                style: TextStyle(color: Colors.grey.shade700),
+              ),
+            ),
+            const SizedBox(width: 16),
+            OutlinedButton(
+              onPressed: _startDownload,
+              style: OutlinedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                side: const BorderSide(color: Colors.blue),
+              ),
+              child: const Text(
+                '重试',
+                style: TextStyle(color: Colors.blue),
+              ),
+            ),
+          ],
+        ),
+      ],
     );
   }
 }
