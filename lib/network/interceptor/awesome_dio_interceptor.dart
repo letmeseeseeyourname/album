@@ -166,6 +166,7 @@ class AwesomeDioInterceptor implements Interceptor {
 
   void _logError(DioException err, {Styles? style}) {
     _log(key: '[Error] ->', value: '', style: style);
+    _log(key: '[Error url] ->', value: '${err.requestOptions.uri}', style: style);
     _log(
       key: 'DioException: ',
       value: '[${err.type.toString()}]: ${err.message}',

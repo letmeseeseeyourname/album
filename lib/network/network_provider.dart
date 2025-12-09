@@ -61,13 +61,14 @@ Future<ResponseModel<T>> requestAndConvertResponseModel<T>(String url,
     {formData,
     NetMethod netMethod = NetMethod.post,
     isUrlEncode = false,
-    receiveTimeout = 15}) async {
+    receiveTimeout = 15,
+    bool useCache = true,}) async {
   final filePath = await _getCacheFilePath(url ,formData);
   final file = File(filePath);
 
   final connectivityResult = await Connectivity().checkConnectivity();
   if (connectivityResult.first == ConnectivityResult.none) {
-    if (await file.exists()) {
+    if (useCache && await file.exists()) {
       final cachedStr = await file.readAsString();
       final cachedData = json.decode(cachedStr);
       // Return a fake Response with the cached data
@@ -94,7 +95,7 @@ Future<ResponseModel<T>> requestAndConvertResponseModel<T>(String url,
     }
   }
 
-  if (await file.exists()) {
+  if (useCache && await file.exists()) {
     final cachedStr = await file.readAsString();
     final cachedData = json.decode(cachedStr);
     // Return a fake Response with the cached data

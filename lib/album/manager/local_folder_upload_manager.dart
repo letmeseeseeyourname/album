@@ -482,7 +482,6 @@ class LocalFolderUploadManager extends ChangeNotifier {
     // 创建同步任务（复用原有逻辑）
     try {
       final response = await provider.createSyncTask(uploadList);
-
       if (!response.isSuccess) {
         LogUtil.log("Failed to create sync task: ${response.message}");
         // 标记所有文件失败

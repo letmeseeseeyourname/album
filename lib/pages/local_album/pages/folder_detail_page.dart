@@ -395,9 +395,11 @@ class _FolderDetailPageState extends State<FolderDetailPage> {
 
   // ============ 辅助方法 ============
 
-  double _getDeviceStorageUsed() {
+  double _getDeviceStorageSurplus() {
     double used = MyInstance().p6deviceInfoModel?.ttlUsed ?? 0;
-    double scaled = used * 100.0;
+    double all = MyInstance().p6deviceInfoModel?.ttlAll ?? 0;
+    double surplus = all - used;
+    double scaled = surplus * 100.0;
     int usedPercent = scaled.round();
     return usedPercent / 100.0;
   }
@@ -506,7 +508,7 @@ class _FolderDetailPageState extends State<FolderDetailPage> {
       selectedTotalSizeMB: _selectionController.getSelectedTotalSize(_fileItems),
       selectedImageCount: _selectionController.getSelectedImageCount(_fileItems),
       selectedVideoCount: _selectionController.getSelectedVideoCount(_fileItems),
-      deviceStorageUsedPercent: _getDeviceStorageUsed(),
+      deviceStorageUsedPercent: _getDeviceStorageSurplus(),
       isUploading: _uploadCoordinator.isUploading,
       uploadProgress: _uploadCoordinator.uploadProgress,
       onSyncPressed: _handleSync,
