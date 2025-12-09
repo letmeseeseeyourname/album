@@ -718,7 +718,7 @@ class LocalFolderUploadManager extends ChangeNotifier {
       result = await minioService.uploadFile(
         bucketName,
         "$uploadPathWithoutBucket/$md5Hash/thumbnail_$imageFileName",
-        file.path,
+        thumbnailFile.path,
       );
 
       await _cleanupFile(thumbnailFile);
@@ -738,7 +738,7 @@ class LocalFolderUploadManager extends ChangeNotifier {
       result = await minioService.uploadFile(
         bucketName,
         "$uploadPathWithoutBucket/$md5Hash/show_$imageFileName",
-        file.path,
+        mediumFile.path,
       );
 
       await _cleanupFile(mediumFile);

@@ -1,4 +1,4 @@
-// pages/album_library_page.dart (修改版 - 采用 Flex 布局模式)
+// pages/album_library_page.dart (添加 hasUpdate 参数)
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -29,6 +29,9 @@ class AlbumLibraryPage extends StatefulWidget {
   final Function(int) onTabChanged;
   final bool isGroupsLoading;
 
+  // 🆕 升级状态参数
+  final bool hasUpdate;
+
   const AlbumLibraryPage({
     super.key,
     required this.selectedNavIndex,
@@ -40,6 +43,7 @@ class AlbumLibraryPage extends StatefulWidget {
     required this.currentTabIndex,
     required this.onTabChanged,
     this.isGroupsLoading = false,
+    this.hasUpdate = false, // 🆕 默认值
   });
 
   @override
@@ -233,6 +237,9 @@ class _AlbumLibraryPageState extends State<AlbumLibraryPage> {
         showTabs: true,
         currentTabIndex: widget.currentTabIndex,
         onTabChanged: widget.onTabChanged,
+
+        // 🆕 传递升级状态
+        hasUpdate: widget.hasUpdate,
 
         child: Row(
           children: [
@@ -444,7 +451,7 @@ class _AlbumLibraryPageState extends State<AlbumLibraryPage> {
               onItemClick: _openPreview,
               scrollController: _scrollController,
               isGridView: true,
-              showPreview: _showPreview, // 🆕 传递预览状态
+              showPreview: _showPreview,
             )
                 : AlbumGridView(
               groupedResources: _dataManager.groupedResources,
@@ -453,7 +460,7 @@ class _AlbumLibraryPageState extends State<AlbumLibraryPage> {
               onItemClick: _openPreview,
               scrollController: _scrollController,
               isGridView: false,
-              showPreview: _showPreview, // 🆕 传递预览状态
+              showPreview: _showPreview,
             ),
 
             if (_dataManager.isLoading && _dataManager.hasData)

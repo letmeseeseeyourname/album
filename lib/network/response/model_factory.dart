@@ -7,6 +7,7 @@ import '../../user/models/my_all_groups_model.dart';
 import '../../user/models/p6device_info_model.dart';
 import '../../user/models/qr_code_model.dart';
 import '../../user/models/resource_list_model.dart';
+import '../../user/models/upgrade_info_model.dart';
 import '../../user/models/user.dart';
 import '../../user/models/user_model.dart';
 
@@ -47,6 +48,8 @@ class ModelFactory {
         return FileUploadResponseModel.fromJson(json) as T;
       case "MyAllGroupsModel":
         return MyAllGroupsModel.fromJson(json) as T;
+      case "UpgradeInfoModel":
+        return UpgradeInfoModel.fromJson(json) as T;
       default:
         if (type != 'dynamic') {
           debugPrint("************ 请注意 ************** 该类型解析失败了 $type");

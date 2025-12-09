@@ -1,4 +1,4 @@
-// pages/main_folder_page.dart
+// pages/main_folder_page.dart (添加 hasUpdate 参数)
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
@@ -95,9 +95,11 @@ class MainFolderPage extends StatefulWidget {
   final Function(int)? onNavigationChanged;
   final List<Group>? groups;
   final Group? selectedGroup;
-  final Future<void> Function(Group)? onGroupSelected; // 🔄 改为异步回调类型
+  final Future<void> Function(Group)? onGroupSelected;
   final int? currentUserId;
   final bool isGroupsLoading;
+  final bool hasUpdate; // 🆕 添加升级状态参数
+
   const MainFolderPage({
     super.key,
     this.selectedNavIndex = 0,
@@ -107,6 +109,7 @@ class MainFolderPage extends StatefulWidget {
     this.onGroupSelected,
     this.currentUserId,
     this.isGroupsLoading = false,
+    this.hasUpdate = false, // 🆕 默认值
   });
 
   @override
@@ -452,169 +455,112 @@ class _MainFolderPageState extends State<MainFolderPage> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: const Text('取消'),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(context, true),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF2C2C2C),
+            child: const Text(
+              '取消',
+              style: TextStyle(color: Colors.grey),
             ),
-            child: const Text('开始上传'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: TextButton.styleFrom(
+              backgroundColor: const Color(0xFF2C2C2C),
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+            ),
+            child: const Text(
+              '确认上传',
+              style: TextStyle(color: Colors.white),
+            ),
           ),
         ],
       ),
     ) ?? false;
   }
 
-  /// 显示消息
-  void _showMessage(String message, {bool isError = false}) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: isError ? Colors.red : Colors.green,
-        duration: const Duration(seconds: 3),
-      ),
-    );
-  }
-
-  // MARK: - 统计信息方法
-
-  /// 获取选中项的总大小（MB）- 返回递归统计的实际文件大小
-  double _getSelectedTotalSize() {
-    return _cachedTotalSizeMB;
-  }
-
-  /// 递归统计文件夹中的图片数量(包含所有子目录)
-  Future<int> _countImagesInFolder(String folderPath) async {
-    int count = 0;
-    try {
-      final directory = Directory(folderPath);
-      await for (var entity in directory.list(recursive: true, followLinks: false)) {
-        if (entity is File) {
-          final ext = entity.path.split('.').last.toLowerCase();
-          if (['bmp', 'gif', 'jpg', 'jpeg', 'png', 'webp', 'wbmp', 'heic'].contains(ext)) {
-            count++;
-          }
-        }
-      }
-    } catch (e) {
-      print('Error counting images in folder $folderPath: $e');
-    }
-    return count;
-  }
-
-  /// 递归统计文件夹中的视频数量(包含所有子目录)
-  Future<int> _countVideosInFolder(String folderPath) async {
-    int count = 0;
-    try {
-      final directory = Directory(folderPath);
-      await for (var entity in directory.list(recursive: true, followLinks: false)) {
-        if (entity is File) {
-          final ext = entity.path.split('.').last.toLowerCase();
-          if (['mp4', 'mov', 'avi', '3gp', 'mkv', '3gp2'].contains(ext)) {
-            count++;
-          }
-        }
-      }
-    } catch (e) {
-      print('Error counting videos in folder $folderPath: $e');
-    }
-    return count;
-  }
-
-  /// 递归统计文件夹中所有文件的总大小(包含所有子目录,返回字节数)
-  Future<int> _calculateFolderSize(String folderPath) async {
-    int totalSize = 0;
-    try {
-      final directory = Directory(folderPath);
-      await for (var entity in directory.list(recursive: true, followLinks: false)) {
-        if (entity is File) {
-          try {
-            final stat = await entity.stat();
-            totalSize += stat.size;
-          } catch (e) {
-            print('Error getting file size for ${entity.path}: $e');
-          }
-        }
-      }
-    } catch (e) {
-      print('Error calculating folder size for $folderPath: $e');
-    }
-    return totalSize;
-  }
-
-  /// 异步更新选中文件夹的文件统计(递归统计所有子目录)
+  /// 异步更新选中文件夹的递归文件统计
   Future<void> _updateSelectedFileCounts() async {
-    if (_isCountingFiles || selectedIndices.isEmpty) {
+    if (selectedIndices.isEmpty) {
+      setState(() {
+        _cachedImageCount = 0;
+        _cachedVideoCount = 0;
+        _cachedTotalSizeMB = 0.0;
+      });
       return;
     }
 
-    // 通过setState设置统计状态,触发UI更新
+    // 显示加载中状态
     setState(() {
       _isCountingFiles = true;
     });
 
-    try {
-      int imageCount = 0;
-      int videoCount = 0;
-      int totalSizeBytes = 0;  // 总大小(字节)
+    // 获取所有选中的文件夹
+    final selectedFolders = selectedIndices
+        .map((index) => folders[index])
+        .toList();
 
-      for (var index in selectedIndices) {
-        if (index < folders.length) {
-          final folderPath = folders[index].path;
-          imageCount += await _countImagesInFolder(folderPath);
-          videoCount += await _countVideosInFolder(folderPath);
-          totalSizeBytes += await _calculateFolderSize(folderPath);
-        }
-      }
+    // 收集所有待统计的文件路径
+    final List<String> allFilePaths = [];
+    for (final folder in selectedFolders) {
+      final filesInFolder = await compute(_getAllMediaFilesRecursive, folder.path);
+      allFilePaths.addAll(filesInFolder);
+    }
 
-      if (mounted) {
-        setState(() {
-          _cachedImageCount = imageCount;
-          _cachedVideoCount = videoCount;
-          _cachedTotalSizeMB = totalSizeBytes / (1024 * 1024);  // 转换为MB
-          _isCountingFiles = false;
-        });
-      }
-    } catch (e) {
-      print('Error updating file counts: $e');
-      // 确保即使发生错误也重置统计状态
-      if (mounted) {
-        setState(() {
-          _isCountingFiles = false;
-        });
-      }
+    // 去重
+    final uniquePaths = allFilePaths.toSet().toList();
+
+    // 统计
+    final analysis = await compute(_analyzeFilesForUpload, uniquePaths);
+
+    // 更新状态
+    if (mounted) {
+      setState(() {
+        _cachedImageCount = analysis.imageCount;
+        _cachedVideoCount = analysis.videoCount;
+        _cachedTotalSizeMB = analysis.totalBytes / (1024 * 1024);
+        _isCountingFiles = false;
+      });
     }
   }
 
-  /// 获取选中项的图片数量(返回递归统计的结果)
+  // 获取选中文件夹的照片数量（使用缓存）
   int _getSelectedImageCount() {
     return _cachedImageCount;
   }
 
-  /// 获取选中项的视频数量(返回递归统计的结果)
+  // 获取选中文件夹的视频数量（使用缓存）
   int _getSelectedVideoCount() {
     return _cachedVideoCount;
   }
 
-  /// 格式化文件大小显示(自动选择MB或GB单位)
-  String _formatFileSize(double sizeMB) {
-    if (sizeMB < 1024) {
-      // 小于1GB时，使用MB
-      return '${sizeMB.toStringAsFixed(2)}MB';
-    } else {
-      // 大于等于1GB时，使用GB
-      double sizeGB = sizeMB / 1024;
-      return '${sizeGB.toStringAsFixed(2)}GB';
-    }
+  // 获取选中文件夹的总大小（使用缓存）
+  double _getSelectedTotalSize() {
+    return _cachedTotalSizeMB;
   }
 
-  /// 获取设备存储使用情况
-  double _getDeviceStorageUsed() {
-    double used = MyInstance().p6deviceInfoModel?.ttlUsed ?? 0;
-    double scaled = used * 100.0;
-    int usedPercent = scaled.round();
-    return usedPercent / 100.0;
+  String _formatFileSize(double sizeMB) {
+    if (sizeMB >= 1024) {
+      return '${(sizeMB / 1024).toStringAsFixed(2)}GB';
+    }
+    return '${sizeMB.toStringAsFixed(2)}MB';
+  }
+
+  String _getDeviceStorageUsed() {
+    final deviceInfo = MyInstance().p6deviceInfoModel;
+    if (deviceInfo != null) {
+      final usedGB = (deviceInfo.ttlAll!.toInt()-deviceInfo.ttlUsed!.toInt());
+      return usedGB.toStringAsFixed(2);
+    }
+    return '0.00';
+  }
+
+  void _showMessage(String message, {bool isError = false}) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: isError ? Colors.red : Colors.green,
+        duration: const Duration(seconds: 2),
+      ),
+    );
   }
 
   void _showWarningDialog(String title, String message) {
@@ -623,7 +569,7 @@ class _MainFolderPageState extends State<MainFolderPage> {
       builder: (context) => AlertDialog(
         title: Row(
           children: [
-            Icon(Icons.warning_amber_rounded, color: Colors.orange.shade700),
+            const Icon(Icons.warning, color: Colors.orange),
             const SizedBox(width: 8),
             Text(title),
           ],
@@ -632,7 +578,7 @@ class _MainFolderPageState extends State<MainFolderPage> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('知道了'),
+            child: const Text('确定'),
           ),
         ],
       ),
@@ -645,7 +591,7 @@ class _MainFolderPageState extends State<MainFolderPage> {
       builder: (context) => AlertDialog(
         title: Row(
           children: [
-            const Icon(Icons.error_outline, color: Colors.red),
+            const Icon(Icons.error, color: Colors.red),
             const SizedBox(width: 8),
             Text(title),
           ],
@@ -687,6 +633,7 @@ class _MainFolderPageState extends State<MainFolderPage> {
         showToolbar: true,
         showTabs: false,
         onAddFolder: _pickFolder,
+        hasUpdate: widget.hasUpdate, // 🆕 传递升级状态给 CustomTitleBar
         child: Row(
           children: [
             SideNavigation(

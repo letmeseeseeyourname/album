@@ -1,12 +1,22 @@
-// pages/settings_page.dart
+// pages/settings_page.dart (添加升级检查功能)
+import 'dart:async';
+import 'package:ablumwin/network/constant_sign.dart';
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:url_launcher/url_launcher.dart';
+import '../eventbus/event_bus.dart';
+import '../eventbus/upgrade_events.dart';
+import '../manager/upgrade_manager.dart';
 import '../user/my_instance.dart';
 import 'package:package_info_plus/package_info_plus.dart';
-// import 'package:url_launcher/url_launcher.dart';
 
 class SettingsPage extends StatefulWidget {
-  const SettingsPage({super.key});
+  final bool hasUpdate; // 🆕 新增
+
+  const SettingsPage({
+    super.key,
+    this.hasUpdate = false, // 🆕 新增
+  });
 
   @override
   State<SettingsPage> createState() => _SettingsPageState();
@@ -17,9 +27,11 @@ class _SettingsPageState extends State<SettingsPage> {
   String _downloadPath = '';
   bool _minimizeOnClose = true;
   String _currentVersion = '';
-  bool _isCheckingUpdate = false;
-  UpdateInfo? _updateInfo;
   bool _isLoadingPath = true;
+
+  // 🆕 升级状态
+  bool _hasUpdate = false;
+  StreamSubscription? _upgradeSubscription;
 
   final List<_MenuItem> _menuItems = [
     _MenuItem('常用设置', Icons.settings),
@@ -32,6 +44,24 @@ class _SettingsPageState extends State<SettingsPage> {
     super.initState();
     _loadSettings();
     _loadVersion();
+
+    // 🆕 初始化升级状态
+    _hasUpdate = widget.hasUpdate || UpgradeManager().hasUpdate;
+
+    // 🆕 监听升级事件
+    _upgradeSubscription = MCEventBus.on<UpgradeCheckEvent>().listen((event) {
+      if (mounted) {
+        setState(() {
+          _hasUpdate = event.hasUpdate;
+        });
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _upgradeSubscription?.cancel(); // 🆕 新增
+    super.dispose();
   }
 
   Future<void> _loadSettings() async {
@@ -40,7 +70,6 @@ class _SettingsPageState extends State<SettingsPage> {
     });
 
     try {
-      // 使用 MyInstance 获取下载路径（会自动返回默认路径如果没有设置）
       final downloadPath = await MyInstance().getDownloadPath();
       final minimizeOnClose = await MyInstance().getMinimizeOnClose();
 
@@ -84,51 +113,6 @@ class _SettingsPageState extends State<SettingsPage> {
     }
   }
 
-  Future<void> _checkForUpdates() async {
-    setState(() {
-      _isCheckingUpdate = true;
-      _updateInfo = null;
-    });
-
-    try {
-      // TODO: 调用实际的更新检查 API
-      // 这里是模拟实现
-      await Future.delayed(const Duration(seconds: 2));
-
-      // 模拟获取更新信息
-      final hasUpdate = false; // 从服务器获取
-
-      setState(() {
-        _updateInfo = UpdateInfo(
-          hasUpdate: hasUpdate,
-          version: hasUpdate ? 'v1.1.2' : _currentVersion,
-          size: '485 MB',
-          description: '本更新引入了8个全新功能和分类，增强了照片功能以便更好地整理和筛选图库，以及包括对相册的其他功能、错误修复和安全更新',
-          downloadUrl: 'https://example.com/download',
-        );
-        _isCheckingUpdate = false;
-      });
-    } catch (e) {
-      setState(() {
-        _isCheckingUpdate = false;
-      });
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('检查更新失败: $e')),
-        );
-      }
-    }
-  }
-
-  Future<void> _downloadUpdate() async {
-    // if (_updateInfo?.downloadUrl != null) {
-    //   final uri = Uri.parse(_updateInfo!.downloadUrl);
-    //   if (await canLaunchUrl(uri)) {
-    //     await launchUrl(uri);
-    //   }
-    // }
-  }
-
   @override
   Widget build(BuildContext context) {
     return Dialog(
@@ -142,15 +126,11 @@ class _SettingsPageState extends State<SettingsPage> {
         ),
         child: Column(
           children: [
-            // 标题栏
             _buildTitleBar(),
-            // 主内容
             Expanded(
               child: Row(
                 children: [
-                  // 左侧菜单
                   _buildLeftMenu(),
-                  // 右侧内容
                   Expanded(
                     child: _buildContent(),
                   ),
@@ -211,6 +191,8 @@ class _SettingsPageState extends State<SettingsPage> {
         itemBuilder: (context, index) {
           final item = _menuItems[index];
           final isSelected = _selectedMenuIndex == index;
+          // 🆕 检查更新菜单项显示红点
+          final showBadge = index == 1 && _hasUpdate;
 
           return Container(
             margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
@@ -223,12 +205,28 @@ class _SettingsPageState extends State<SettingsPage> {
                 item.icon,
                 color: isSelected ? Colors.black : Colors.grey,
               ),
-              title: Text(
-                item.title,
-                style: TextStyle(
-                  color: isSelected ? Colors.black : Colors.grey.shade700,
-                  fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
-                ),
+              title: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      item.title,
+                      style: TextStyle(
+                        color: isSelected ? Colors.black : Colors.grey.shade700,
+                        fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+                      ),
+                    ),
+                  ),
+                  // 🆕 红点
+                  if (showBadge)
+                    Container(
+                      width: 8,
+                      height: 8,
+                      decoration: const BoxDecoration(
+                        color: Colors.red,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                ],
               ),
               selected: isSelected,
               onTap: () {
@@ -248,7 +246,7 @@ class _SettingsPageState extends State<SettingsPage> {
       case 0:
         return _buildGeneralSettings();
       case 1:
-        return _buildUpdateCheck();
+        return _buildUpdateCheck(); // 🆕 使用新的检查更新组件
       case 2:
         return _buildAbout();
       default:
@@ -272,55 +270,57 @@ class _SettingsPageState extends State<SettingsPage> {
                 DropdownMenuItem(value: '中文', child: Text('中文')),
                 DropdownMenuItem(value: 'English', child: Text('English')),
               ],
-              onChanged: (value) {
-                // TODO: 实现语言切换
-              },
+              onChanged: (value) {},
             ),
           ),
 
-          const SizedBox(height: 24),
+          const SizedBox(height: 32),
 
           // 下载位置
-          _buildSettingRow(
+          const Text(
             '下载位置',
-            Row(
-              children: [
-                Expanded(
-                  child: _isLoadingPath
-                      ? const Text(
-                    '加载中...',
-                    style: TextStyle(
-                      color: Colors.grey,
-                      fontSize: 14,
-                    ),
-                  )
-                      : Text(
-                    _downloadPath,
-                    style: TextStyle(
-                      color: Colors.grey.shade700,
-                      fontSize: 14,
-                    ),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-                const SizedBox(width: 16),
-                OutlinedButton(
-                  onPressed: _selectDownloadPath,
-                  style: OutlinedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 24,
-                      vertical: 12,
-                    ),
-                  ),
-                  child: const Text('浏览'),
-                ),
-              ],
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w500,
             ),
+          ),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              Expanded(
+                child: _isLoadingPath
+                    ? const Text(
+                  '加载中...',
+                  style: TextStyle(
+                    color: Colors.grey,
+                    fontSize: 14,
+                  ),
+                )
+                    : Text(
+                  _downloadPath,
+                  style: TextStyle(
+                    color: Colors.grey.shade700,
+                    fontSize: 14,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              const SizedBox(width: 16),
+              OutlinedButton(
+                onPressed: _selectDownloadPath,
+                style: OutlinedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 24,
+                    vertical: 12,
+                  ),
+                ),
+                child: const Text('浏览'),
+              ),
+            ],
           ),
 
           const SizedBox(height: 8),
 
-          // 提示信息
           Text(
             '如果没有设置，将默认保存到系统下载文件夹中的"亲选相册"目录',
             style: TextStyle(
@@ -369,107 +369,15 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
+  // 🆕 重写的检查更新组件
   Widget _buildUpdateCheck() {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(32),
-      child: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            if (_isCheckingUpdate) ...[
-              const CircularProgressIndicator(),
-              const SizedBox(height: 24),
-              const Text('正在检查更新...'),
-            ] else if (_updateInfo == null) ...[
-              ElevatedButton(
-                onPressed: _checkForUpdates,
-                style: ElevatedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 48,
-                    vertical: 16,
-                  ),
-                ),
-                child: const Text('检查更新'),
-              ),
-            ] else if (_updateInfo!.hasUpdate) ...[
-              const Text(
-                '检测到可更新版本',
-                style: TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              const SizedBox(height: 32),
-              Text(
-                _updateInfo!.version,
-                style: const TextStyle(
-                  fontSize: 32,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                _updateInfo!.size,
-                style: TextStyle(
-                  fontSize: 16,
-                  color: Colors.grey.shade600,
-                ),
-              ),
-              const SizedBox(height: 32),
-              Container(
-                constraints: const BoxConstraints(maxWidth: 500),
-                child: Text(
-                  _updateInfo!.description,
-                  style: TextStyle(
-                    fontSize: 14,
-                    color: Colors.grey.shade700,
-                    height: 1.5,
-                  ),
-                  textAlign: TextAlign.center,
-                ),
-              ),
-              const SizedBox(height: 48),
-              ElevatedButton(
-                onPressed: _downloadUpdate,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.black,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 64,
-                    vertical: 16,
-                  ),
-                ),
-                child: const Text('立即更新'),
-              ),
-            ] else ...[
-              const Text(
-                '当前没有更新需要安装',
-                style: TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              const SizedBox(height: 24),
-              Text(
-                '当前版本：$_currentVersion',
-                style: TextStyle(
-                  fontSize: 16,
-                  color: Colors.grey.shade600,
-                ),
-              ),
-              const SizedBox(height: 32),
-              const Text(
-                '你使用的是最新版本的亲选相册，当前没有更新需要安装\n感谢你的使用！',
-                style: TextStyle(
-                  fontSize: 14,
-                  height: 1.5,
-                ),
-                textAlign: TextAlign.center,
-              ),
-            ],
-          ],
-        ),
-      ),
+    return UpdateCheckContent(
+      hasUpdate: _hasUpdate,
+      onUpdateChecked: (hasUpdate) {
+        setState(() {
+          _hasUpdate = hasUpdate;
+        });
+      },
     );
   }
 
@@ -478,7 +386,6 @@ class _SettingsPageState extends State<SettingsPage> {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          // Logo
           Container(
             width: 120,
             height: 120,
@@ -551,18 +458,260 @@ class _MenuItem {
   _MenuItem(this.title, this.icon);
 }
 
-class UpdateInfo {
+// 🆕 检查更新内容组件
+class UpdateCheckContent extends StatefulWidget {
   final bool hasUpdate;
-  final String version;
-  final String size;
-  final String description;
-  final String downloadUrl;
+  final Function(bool)? onUpdateChecked;
 
-  UpdateInfo({
-    required this.hasUpdate,
-    required this.version,
-    required this.size,
-    required this.description,
-    required this.downloadUrl,
+  const UpdateCheckContent({
+    super.key,
+    this.hasUpdate = false,
+    this.onUpdateChecked,
   });
+
+  @override
+  State<UpdateCheckContent> createState() => _UpdateCheckContentState();
+}
+
+class _UpdateCheckContentState extends State<UpdateCheckContent> {
+  bool _isChecking = false;
+  bool _hasUpdate = false;
+  String _currentVersion = '';
+  String _targetVersion = '';
+  String _releaseNotes = '';
+  String? _downloadUrl;
+  String? _errorMessage;
+  bool _hasChecked = false; // 是否已检查过
+
+  @override
+  void initState() {
+    super.initState();
+    _hasUpdate = widget.hasUpdate;
+    _loadCachedInfo();
+  }
+
+  void _loadCachedInfo() {
+    final manager = UpgradeManager();
+    _currentVersion = manager.currentVersion;
+    if (_currentVersion.isEmpty) {
+      PackageInfo.fromPlatform().then((info) {
+        if (mounted) {
+          setState(() {
+            _currentVersion = info.version;
+          });
+        }
+      });
+    }
+    if (manager.upgradeInfo != null) {
+      _hasChecked = true;
+      _targetVersion = manager.upgradeInfo!.targetVersion;
+      _releaseNotes = manager.upgradeInfo!.releaseNotes;
+      // _downloadUrl = '${AppConfig.userUrl()}/'+manager.upgradeInfo!.packageUrl;
+      _downloadUrl = 'http://joykee-oss.joykee.com/${manager.upgradeInfo!.packageUrl}';
+    }
+  }
+
+  Future<void> _checkUpdate() async {
+    setState(() {
+      _isChecking = true;
+      _errorMessage = null;
+    });
+
+    try {
+      final result = await UpgradeManager().checkUpgradeManually();
+
+      if (mounted) {
+        setState(() {
+          _isChecking = false;
+          _hasChecked = true;
+          _hasUpdate = result.hasUpdate;
+          _currentVersion = result.currentVersion;
+          _targetVersion = result.targetVersion ?? '';
+          _releaseNotes = result.upgradeInfo?.releaseNotes ?? '';
+          _downloadUrl = result.upgradeInfo?.packageUrl;
+          _errorMessage = result.success ? null : result.errorMessage;
+        });
+
+        widget.onUpdateChecked?.call(result.hasUpdate);
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _isChecking = false;
+          _hasChecked = true;
+          _errorMessage = '检查更新失败，请稍后重试';
+        });
+      }
+    }
+  }
+
+  Future<void> _downloadUpdate() async {
+    if (_downloadUrl == null || _downloadUrl!.isEmpty) {
+      setState(() => _errorMessage = '下载地址无效');
+      return;
+    }
+
+    try {
+      final uri = Uri.parse(_downloadUrl!);
+      if (await canLaunchUrl(uri)) {
+        await launchUrl(uri, mode: LaunchMode.externalApplication);
+      } else {
+        setState(() => _errorMessage = '无法打开下载链接');
+      }
+    } catch (e) {
+      setState(() => _errorMessage = '打开下载链接失败: $e');
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(32),
+      child: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const SizedBox(height: 60),
+
+            // 根据状态显示不同内容
+            if (_isChecking) ...[
+              const CircularProgressIndicator(),
+              const SizedBox(height: 24),
+              const Text('正在检查更新...'),
+            ] else if (_hasUpdate) ...[
+              // 有更新
+              const Text(
+                '发现新版本',
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 24),
+              Text(
+                '更新版本：$_targetVersion',
+                style: TextStyle(
+                  fontSize: 16,
+                  color: Colors.grey.shade600,
+                ),
+              ),
+              const SizedBox(height: 16),
+              const Text(
+                '发现新版本，建议立即更新以获得更好的体验',
+                style: TextStyle(fontSize: 14),
+                textAlign: TextAlign.center,
+              ),
+
+              // 更新说明
+              if (_releaseNotes.isNotEmpty) ...[
+                const SizedBox(height: 24),
+                Container(
+                  constraints: const BoxConstraints(maxWidth: 500, maxHeight: 120),
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade50,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.grey.shade200),
+                  ),
+                  child: SingleChildScrollView(
+                    child: Text(
+                      '更新内容：\n$_releaseNotes',
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: Colors.grey.shade700,
+                        height: 1.5,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+
+              const SizedBox(height: 32),
+
+              // 下载更新按钮
+              OutlinedButton(
+                onPressed: _downloadUpdate,
+                style: OutlinedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 48,
+                    vertical: 16,
+                  ),
+                  side: const BorderSide(color: Colors.blue),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+                child: const Text(
+                  '下载更新',
+                  style: TextStyle(
+                    fontSize: 16,
+                    color: Colors.blue,
+                  ),
+                ),
+              ),
+            ] else ...[
+              // 没有更新
+              const Text(
+                '当前没有更新需要安装',
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 24),
+              Text(
+                '当前版本：$_currentVersion',
+                style: TextStyle(
+                  fontSize: 16,
+                  color: Colors.grey.shade600,
+                ),
+              ),
+              const SizedBox(height: 16),
+              const Text(
+                '你使用的是最新版本的亲选相册，当前没有更新需要安装\n感谢你的使用！',
+                style: TextStyle(fontSize: 14, height: 1.5),
+                textAlign: TextAlign.center,
+              ),
+
+              const SizedBox(height: 32),
+
+              // 检测更新按钮
+              OutlinedButton(
+                onPressed: _checkUpdate,
+                style: OutlinedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 48,
+                    vertical: 16,
+                  ),
+                  side: BorderSide(color: Colors.grey.shade400),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+                child: Text(
+                  '检测更新',
+                  style: TextStyle(
+                    fontSize: 16,
+                    color: Colors.grey.shade700,
+                  ),
+                ),
+              ),
+            ],
+
+            // 错误提示
+            if (_errorMessage != null) ...[
+              const SizedBox(height: 16),
+              Text(
+                _errorMessage!,
+                style: const TextStyle(
+                  fontSize: 13,
+                  color: Colors.red,
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
 }

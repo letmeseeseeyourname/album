@@ -18,6 +18,7 @@ import '../models/device_model.dart';
 import '../models/login_response_model.dart';
 import '../models/my_all_groups_model.dart';
 import '../models/p6device_info_model.dart';
+import '../models/upgrade_info_model.dart';
 import '../models/user.dart';
 import '../models/user_model.dart';
 import '../my_instance.dart';
@@ -352,6 +353,20 @@ class MyNetworkProvider extends ChangeNotifier {
     }
 
     notifyListeners();
+    return responseModel;
+  }
+
+  Future<ResponseModel<UpgradeInfoModel>> getUpGradeInfo() async {
+    String url = "${AppConfig.userUrl()}/api/admin/upgrade/getUPgrade";
+    ResponseModel<UpgradeInfoModel> responseModel =
+    await requestAndConvertResponseModel(url,
+        formData: {
+          "status": 0,
+          "packetType": 5,
+          "versionCode": 2
+        },
+        netMethod: NetMethod.post);
+
     return responseModel;
   }
 

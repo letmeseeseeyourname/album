@@ -1,4 +1,4 @@
-// widgets/custom_title_bar.dart (修复版 - 初始化时获取当前P2P状态)
+// widgets/custom_title_bar.dart (添加升级红点功能)
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/svg.dart';
@@ -6,6 +6,8 @@ import 'package:window_manager/window_manager.dart';
 import 'package:ablumwin/user/my_instance.dart';
 import '../eventbus/event_bus.dart';
 import '../eventbus/p2p_events.dart';
+import '../eventbus/upgrade_events.dart'; // 🆕 新增
+import '../manager/upgrade_manager.dart'; // 🆕 新增
 import '../network/constant_sign.dart';
 import '../pages/settings_page.dart';
 import '../pages/upload_records_page.dart';
@@ -26,6 +28,9 @@ class CustomTitleBar extends StatefulWidget {
   final int? currentTabIndex;
   final Function(int)? onTabChanged;
 
+  // 🆕 升级状态参数
+  final bool hasUpdate;
+
   const CustomTitleBar({
     super.key,
     this.child,
@@ -36,6 +41,7 @@ class CustomTitleBar extends StatefulWidget {
     this.showTabs = false,
     this.currentTabIndex = 0,
     this.onTabChanged,
+    this.hasUpdate = false, // 🆕 新增
   });
 
   @override
@@ -49,16 +55,19 @@ class _CustomTitleBarState extends State<CustomTitleBar> {
   P2pConnectionStatus _p2pStatus = P2pConnectionStatus.disconnected;
   StreamSubscription? _p2pSubscription;
 
+  // 🆕 升级状态
+  bool _hasUpdate = false;
+  StreamSubscription? _upgradeSubscription;
+
   @override
   void initState() {
     super.initState();
     _checkMaximized();
 
-    // 🆕 首先获取当前 P2P 连接状态（解决初始状态问题）
+    // P2P 状态
     _p2pStatus = MyNetworkProvider().getCurrentP2pStatus();
     debugPrint('CustomTitleBar 初始化 P2P 状态: $_p2pStatus');
 
-    // 监听 P2P 连接事件
     _p2pSubscription = MCEventBus.on<P2pConnectionEvent>().listen((event) {
       if (mounted) {
         debugPrint('CustomTitleBar 收到 P2P 事件: ${event.status}');
@@ -67,11 +76,35 @@ class _CustomTitleBarState extends State<CustomTitleBar> {
         });
       }
     });
+
+    // 🆕 升级状态初始化
+    _hasUpdate = widget.hasUpdate || UpgradeManager().hasUpdate;
+
+    // 🆕 监听升级事件
+    _upgradeSubscription = MCEventBus.on<UpgradeCheckEvent>().listen((event) {
+      if (mounted) {
+        setState(() {
+          _hasUpdate = event.hasUpdate;
+        });
+      }
+    });
+  }
+
+  @override
+  void didUpdateWidget(CustomTitleBar oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // 🆕 响应外部传入的升级状态变化
+    if (widget.hasUpdate != oldWidget.hasUpdate) {
+      setState(() {
+        _hasUpdate = widget.hasUpdate;
+      });
+    }
   }
 
   @override
   void dispose() {
     _p2pSubscription?.cancel();
+    _upgradeSubscription?.cancel(); // 🆕 新增
     super.dispose();
   }
 
@@ -135,7 +168,7 @@ class _CustomTitleBarState extends State<CustomTitleBar> {
       context: context,
       barrierDismissible: true,
       barrierColor: Colors.black54,
-      builder: (context) => const SettingsPage(),
+      builder: (context) => SettingsPage(hasUpdate: _hasUpdate), // 🆕 传递升级状态
     );
   }
 
@@ -157,25 +190,20 @@ class _CustomTitleBarState extends State<CustomTitleBar> {
     );
   }
 
-// 处理 P2P 图标点击
   void _onP2pIconTap() {
     switch (_p2pStatus) {
       case P2pConnectionStatus.connected:
-      // 已连接状态，点击显示连接状态详情弹窗
         showConnectionStatusDialog(context);
         break;
       case P2pConnectionStatus.disconnected:
       case P2pConnectionStatus.failed:
-      // 断开或失败状态，点击重连
         MyNetworkProvider().reconnectP2p();
         break;
       case P2pConnectionStatus.connecting:
-      // 连接中状态，不做任何操作
         break;
     }
   }
 
-  // 获取 P2P 状态图标路径
   String _getP2pIconPath() {
     switch (_p2pStatus) {
       case P2pConnectionStatus.connected:
@@ -188,7 +216,6 @@ class _CustomTitleBarState extends State<CustomTitleBar> {
     }
   }
 
-  // 获取 P2P 状态提示文字
   String _getP2pTooltip() {
     switch (_p2pStatus) {
       case P2pConnectionStatus.connected:
@@ -202,7 +229,6 @@ class _CustomTitleBarState extends State<CustomTitleBar> {
     }
   }
 
-  // 构建 P2P 状态图标
   Widget _buildP2pStatusIcon() {
     final isClickable = _p2pStatus != P2pConnectionStatus.connecting;
 
@@ -221,7 +247,6 @@ class _CustomTitleBarState extends State<CustomTitleBar> {
                 width: 20,
                 height: 20,
               ),
-              // 连接中时显示加载动画
               if (_p2pStatus == P2pConnectionStatus.connecting)
                 const SizedBox(
                   width: 24,
@@ -235,6 +260,39 @@ class _CustomTitleBarState extends State<CustomTitleBar> {
           ),
         ),
       ),
+    );
+  }
+
+  // 🆕 构建带红点的设置图标
+  Widget _buildSettingsIconWithBadge() {
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        IconButton(
+          icon: SvgPicture.asset(
+            'assets/icons/setting_icon.svg',
+            width: 20,
+            height: 20,
+          ),
+          onPressed: _openSettings,
+          iconSize: 24,
+          tooltip: '设置',
+        ),
+        // 🆕 红点指示器
+        if (_hasUpdate)
+          Positioned(
+            right: 8,
+            top: 8,
+            child: Container(
+              width: 8,
+              height: 8,
+              decoration: const BoxDecoration(
+                color: Colors.red,
+                shape: BoxShape.circle,
+              ),
+            ),
+          ),
+      ],
     );
   }
 
@@ -266,7 +324,6 @@ class _CustomTitleBarState extends State<CustomTitleBar> {
     );
   }
 
-  // 构建单个Tab按钮
   Widget _buildTabButton({
     required String label,
     required bool isSelected,
@@ -405,7 +462,6 @@ class _CustomTitleBarState extends State<CustomTitleBar> {
                             ),
                             child: Row(
                               children: [
-                                // 根据showTabs显示Tab栏或添加文件夹按钮
                                 if (widget.showTabs)
                                   _buildTabBar()
                                 else
@@ -442,21 +498,14 @@ class _CustomTitleBarState extends State<CustomTitleBar> {
 
                                 const SizedBox(width: 16),
 
-                                // P2P 连接状态图标（放在设置图标左侧）
+                                // P2P 连接状态图标
                                 _buildP2pStatusIcon(),
 
                                 const SizedBox(width: 8),
 
-                                IconButton(
-                                  icon: SvgPicture.asset(
-                                    'assets/icons/setting_icon.svg',
-                                    width: 20,
-                                    height: 20,
-                                  ),
-                                  onPressed: _openSettings,
-                                  iconSize: 24,
-                                  tooltip: '设置',
-                                ),
+                                // 🆕 使用带红点的设置图标
+                                _buildSettingsIconWithBadge(),
+
                                 const SizedBox(width: 8),
                                 IconButton(
                                   icon: SvgPicture.asset(

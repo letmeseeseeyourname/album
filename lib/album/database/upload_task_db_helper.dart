@@ -20,14 +20,14 @@ extension UploadTaskStatusX on UploadTaskStatus {
 
 /// 上传任务记录模型（增强版：包含文件统计）
 class UploadTaskRecord {
-  final int taskId; // unique id for this upload task
+  final int taskId;
   final int userId;
   final int groupId;
   final UploadTaskStatus status;
-  final int createdAt; // epoch millis
-  final int updatedAt; // epoch millis
-  final int fileCount; // ✅ 新增：文件数量
-  final int totalSize; // ✅ 新增：总大小（字节）
+  final int createdAt;
+  final int updatedAt;
+  final int fileCount;
+  final int totalSize;
 
   UploadTaskRecord({
     required this.taskId,
@@ -36,8 +36,8 @@ class UploadTaskRecord {
     required this.status,
     required this.createdAt,
     required this.updatedAt,
-    this.fileCount = 0, // ✅ 默认值
-    this.totalSize = 0, // ✅ 默认值
+    this.fileCount = 0,
+    this.totalSize = 0,
   });
 
   UploadTaskRecord copyWith({
@@ -64,8 +64,8 @@ class UploadTaskRecord {
     'status': status.code,
     'created_at': createdAt,
     'updated_at': updatedAt,
-    'file_count': fileCount, // ✅ 新增
-    'total_size': totalSize, // ✅ 新增
+    'file_count': fileCount,
+    'total_size': totalSize,
   };
 
   static UploadTaskRecord fromMap(Map<String, Object?> map) => UploadTaskRecord(
@@ -75,11 +75,10 @@ class UploadTaskRecord {
     status: UploadTaskStatusX.fromCode(map['status'] as int),
     createdAt: map['created_at'] as int,
     updatedAt: map['updated_at'] as int,
-    fileCount: (map['file_count'] as int?) ?? 0, // ✅ 新增（兼容旧数据）
-    totalSize: (map['total_size'] as int?) ?? 0, // ✅ 新增（兼容旧数据）
+    fileCount: (map['file_count'] as int?) ?? 0,
+    totalSize: (map['total_size'] as int?) ?? 0,
   );
 
-  /// ✅ 格式化文件大小显示
   String get formattedSize {
     if (totalSize < 1024) {
       return '${totalSize}B';
@@ -93,19 +92,19 @@ class UploadTaskRecord {
   }
 }
 
-/// 上传任务数据库管理器（增强版）
+/// 上传任务数据库管理器
 class UploadFileTaskManager {
   static final UploadFileTaskManager instance = UploadFileTaskManager._init();
   UploadFileTaskManager._init();
 
   static const _dbName = 'upload_tasks.db';
-  static const _dbVersion = 6; // ✅ 版本升级到6，修复列缺失问题
+  static const _dbVersion = 7;
   static const _table = 'upload_tasks';
 
   Database? _db;
   Future<Database>? _openFuture;
+  bool _schemaFixed = false; // ✅ 标记是否已修复过
 
-  /// 保证数据库已打开（单例模式）
   Future<Database> _database() async {
     if (_db != null) return _db!;
     _openFuture ??= _openDb();
@@ -113,9 +112,7 @@ class UploadFileTaskManager {
     return _db!;
   }
 
-  /// 打开数据库（FFI 版）
   Future<Database> _openDb() async {
-    // ✅ 初始化 FFI 支持
     sqfliteFfiInit();
     databaseFactory = databaseFactoryFfi;
 
@@ -123,104 +120,113 @@ class UploadFileTaskManager {
     final path = p.join(dbPath, _dbName);
     debugPrint("upload_tasks DB path: $path");
 
-    return databaseFactory.openDatabase(
+    final db = await databaseFactory.openDatabase(
       path,
       options: OpenDatabaseOptions(
         version: _dbVersion,
         onCreate: (db, version) async {
-          await db.execute('''
-            CREATE TABLE IF NOT EXISTS $_table (
-              task_id INTEGER NOT NULL,
-              user_id INTEGER NOT NULL,
-              group_id INTEGER NOT NULL,
-              status INTEGER NOT NULL,
-              created_at INTEGER NOT NULL,
-              updated_at INTEGER NOT NULL,
-              file_count INTEGER NOT NULL DEFAULT 0,
-              total_size INTEGER NOT NULL DEFAULT 0,
-              PRIMARY KEY (task_id, user_id, group_id)
-            );
-          ''');
-          await db.execute('CREATE INDEX IF NOT EXISTS idx_${_table}_user ON $_table(user_id);');
-          await db.execute('CREATE INDEX IF NOT EXISTS idx_${_table}_group ON $_table(group_id);');
-          await db.execute('CREATE INDEX IF NOT EXISTS idx_${_table}_status ON $_table(status);');
+          debugPrint('Creating new database with version $version');
+          await _createTable(db);
         },
         onUpgrade: (db, oldVersion, newVersion) async {
-          debugPrint('Upgrading database from version $oldVersion to $newVersion');
-
-          // ✅ 确保 file_count 和 total_size 列存在（无论从哪个版本升级）
-          // 这样可以修复之前可能升级失败导致的列缺失问题
-          try {
-            await db.execute('ALTER TABLE $_table ADD COLUMN file_count INTEGER NOT NULL DEFAULT 0;');
-            debugPrint('Added file_count column successfully');
-          } catch (e) {
-            debugPrint('file_count column may already exist: $e');
-          }
-
-          try {
-            await db.execute('ALTER TABLE $_table ADD COLUMN total_size INTEGER NOT NULL DEFAULT 0;');
-            debugPrint('Added total_size column successfully');
-          } catch (e) {
-            debugPrint('total_size column may already exist: $e');
-          }
-
-          // 向下兼容：处理版本2升级
-          if (oldVersion < 2) {
-            await db.execute('''
-              CREATE TABLE IF NOT EXISTS ${_table}_new (
-                task_id INTEGER NOT NULL,
-                user_id INTEGER NOT NULL,
-                group_id INTEGER NOT NULL,
-                status INTEGER NOT NULL,
-                created_at INTEGER NOT NULL,
-                updated_at INTEGER NOT NULL,
-                file_count INTEGER NOT NULL DEFAULT 0,
-                total_size INTEGER NOT NULL DEFAULT 0,
-                PRIMARY KEY (task_id, user_id, group_id)
-              );
-            ''');
-            await db.execute('''
-              INSERT OR REPLACE INTO ${_table}_new(task_id,user_id,group_id,status,created_at,updated_at,file_count,total_size)
-              SELECT CAST(task_id AS INTEGER), user_id, group_id, status, created_at, updated_at, 0, 0 FROM $_table;
-            ''');
-            await db.execute('DROP TABLE IF EXISTS $_table;');
-            await db.execute('ALTER TABLE ${_table}_new RENAME TO $_table;');
-            await db.execute('CREATE INDEX IF NOT EXISTS idx_${_table}_user ON $_table(user_id);');
-            await db.execute('CREATE INDEX IF NOT EXISTS idx_${_table}_group ON $_table(group_id);');
-            await db.execute('CREATE INDEX IF NOT EXISTS idx_${_table}_status ON $_table(status);');
-          }
-
-          // 向下兼容：处理版本3升级
-          if (oldVersion < 3) {
-            await db.execute('''
-              CREATE TABLE IF NOT EXISTS ${_table}_v3 (
-                task_id INTEGER NOT NULL,
-                user_id INTEGER NOT NULL,
-                group_id INTEGER NOT NULL,
-                status INTEGER NOT NULL,
-                created_at INTEGER NOT NULL,
-                updated_at INTEGER NOT NULL,
-                file_count INTEGER NOT NULL DEFAULT 0,
-                total_size INTEGER NOT NULL DEFAULT 0,
-                PRIMARY KEY (task_id, user_id, group_id)
-              );
-            ''');
-            await db.execute('''
-              INSERT OR REPLACE INTO ${_table}_v3(task_id,user_id,group_id,status,created_at,updated_at,file_count,total_size)
-              SELECT task_id, user_id, group_id, status, created_at, updated_at, 0, 0 FROM $_table;
-            ''');
-            await db.execute('DROP TABLE IF EXISTS $_table;');
-            await db.execute('ALTER TABLE ${_table}_v3 RENAME TO $_table;');
-            await db.execute('CREATE INDEX IF NOT EXISTS idx_${_table}_user ON $_table(user_id);');
-            await db.execute('CREATE INDEX IF NOT EXISTS idx_${_table}_group ON $_table(group_id);');
-            await db.execute('CREATE INDEX IF NOT EXISTS idx_${_table}_status ON $_table(status);');
-          }
+          debugPrint('Upgrading database from $oldVersion to $newVersion');
         },
       ),
     );
+
+    // ✅ 打开后立即检查并修复表结构
+    await _ensureTableStructure(db);
+
+    return db;
   }
 
-  /// 插入新任务（支持文件统计）
+  /// ✅ 检查并修复表结构
+  Future<void> _ensureTableStructure(Database db) async {
+    if (_schemaFixed) return; // 已修复过就跳过
+
+    try {
+      final columns = await db.rawQuery("PRAGMA table_info($_table)");
+      final columnNames = columns.map((c) => c['name'] as String).toSet();
+
+      debugPrint('Current columns: $columnNames');
+
+      if (!columnNames.contains('file_count') || !columnNames.contains('total_size')) {
+        debugPrint('Missing columns detected, rebuilding table...');
+        await _rebuildTable(db, columnNames);
+      }
+
+      _schemaFixed = true;
+    } catch (e) {
+      debugPrint('Error checking table structure: $e');
+      // 表可能不存在，创建它
+      await _createTable(db);
+      _schemaFixed = true;
+    }
+  }
+
+  Future<void> _createTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS $_table (
+        task_id INTEGER NOT NULL,
+        user_id INTEGER NOT NULL,
+        group_id INTEGER NOT NULL,
+        status INTEGER NOT NULL,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        file_count INTEGER NOT NULL DEFAULT 0,
+        total_size INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (task_id, user_id, group_id)
+      );
+    ''');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_${_table}_user ON $_table(user_id);');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_${_table}_group ON $_table(group_id);');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_${_table}_status ON $_table(status);');
+  }
+
+  Future<void> _rebuildTable(Database db, Set<String> existingColumns) async {
+    debugPrint('Rebuilding table...');
+
+    // 1. 创建新表
+    await db.execute('DROP TABLE IF EXISTS ${_table}_new;');
+    await db.execute('''
+      CREATE TABLE ${_table}_new (
+        task_id INTEGER NOT NULL,
+        user_id INTEGER NOT NULL,
+        group_id INTEGER NOT NULL,
+        status INTEGER NOT NULL,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        file_count INTEGER NOT NULL DEFAULT 0,
+        total_size INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (task_id, user_id, group_id)
+      );
+    ''');
+
+    // 2. 迁移数据
+    final baseColumns = ['task_id', 'user_id', 'group_id', 'status', 'created_at', 'updated_at'];
+    final existingBaseColumns = baseColumns.where((c) => existingColumns.contains(c)).toList();
+
+    if (existingBaseColumns.isNotEmpty) {
+      final columnList = existingBaseColumns.join(', ');
+      await db.execute('''
+        INSERT INTO ${_table}_new ($columnList, file_count, total_size)
+        SELECT $columnList, 0, 0 FROM $_table;
+      ''');
+    }
+
+    // 3. 替换旧表
+    await db.execute('DROP TABLE IF EXISTS $_table;');
+    await db.execute('ALTER TABLE ${_table}_new RENAME TO $_table;');
+
+    // 4. 重建索引
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_${_table}_user ON $_table(user_id);');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_${_table}_group ON $_table(group_id);');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_${_table}_status ON $_table(status);');
+
+    debugPrint('Table rebuild completed');
+  }
+
+  /// ✅ 插入任务（带自动修复）
   Future<void> insertTask({
     required int taskId,
     required int userId,
@@ -231,23 +237,51 @@ class UploadFileTaskManager {
   }) async {
     final db = await _database();
     final now = DateTime.now().millisecondsSinceEpoch;
-    await db.insert(
-      _table,
-      UploadTaskRecord(
-        taskId: taskId,
-        userId: userId,
-        groupId: groupId,
-        status: status,
-        createdAt: now,
-        updatedAt: now,
-        fileCount: fileCount,
-        totalSize: totalSize,
-      ).toMap(),
-      conflictAlgorithm: ConflictAlgorithm.replace,
-    );
+
+    try {
+      await db.insert(
+        _table,
+        UploadTaskRecord(
+          taskId: taskId,
+          userId: userId,
+          groupId: groupId,
+          status: status,
+          createdAt: now,
+          updatedAt: now,
+          fileCount: fileCount,
+          totalSize: totalSize,
+        ).toMap(),
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
+    } catch (e) {
+      // ✅ 捕获列缺失错误，自动修复后重试
+      if (e.toString().contains('has no column named')) {
+        debugPrint('Column missing error, attempting auto-fix...');
+        _schemaFixed = false; // 重置标记
+        await _ensureTableStructure(db);
+
+        // 重试插入
+        await db.insert(
+          _table,
+          UploadTaskRecord(
+            taskId: taskId,
+            userId: userId,
+            groupId: groupId,
+            status: status,
+            createdAt: now,
+            updatedAt: now,
+            fileCount: fileCount,
+            totalSize: totalSize,
+          ).toMap(),
+          conflictAlgorithm: ConflictAlgorithm.replace,
+        );
+        debugPrint('Auto-fix successful, insert completed');
+      } else {
+        rethrow;
+      }
+    }
   }
 
-  /// Upsert（插入或替换）任务
   Future<void> upsertTask({
     required int taskId,
     required int userId,
@@ -266,7 +300,6 @@ class UploadFileTaskManager {
     );
   }
 
-  /// 根据 taskId 更新状态（可能匹配多个用户）
   Future<int> updateStatus(int taskId, UploadTaskStatus status) async {
     final db = await _database();
     final now = DateTime.now().millisecondsSinceEpoch;
@@ -278,7 +311,6 @@ class UploadFileTaskManager {
     );
   }
 
-  /// 更新复合主键对应的任务状态
   Future<int> updateStatusForKey({
     required int taskId,
     required int userId,
@@ -295,7 +327,6 @@ class UploadFileTaskManager {
     );
   }
 
-  /// ✅ 更新任务的文件统计信息
   Future<int> updateTaskStats({
     required int taskId,
     required int userId,
@@ -317,13 +348,11 @@ class UploadFileTaskManager {
     );
   }
 
-  /// 删除指定 taskId（可能删除多行）
   Future<int> deleteTask(int taskId) async {
     final db = await _database();
     return db.delete(_table, where: 'task_id = ?', whereArgs: [taskId]);
   }
 
-  /// 删除单条（复合主键）
   Future<int> deleteTaskForKey({
     required int taskId,
     required int userId,
@@ -337,13 +366,11 @@ class UploadFileTaskManager {
     );
   }
 
-  /// 删除指定用户+群组的所有任务
   Future<int> deleteByUserGroup(int userId, int groupId) async {
     final db = await _database();
     return db.delete(_table, where: 'user_id = ? AND group_id = ?', whereArgs: [userId, groupId]);
   }
 
-  /// 获取单个任务（按 taskId）
   Future<UploadTaskRecord?> getTask(int taskId) async {
     final db = await _database();
     final rows = await db.query(_table, where: 'task_id = ?', whereArgs: [taskId], limit: 1);
@@ -351,7 +378,6 @@ class UploadFileTaskManager {
     return UploadTaskRecord.fromMap(rows.first);
   }
 
-  /// 获取单个任务（复合主键）
   Future<UploadTaskRecord?> getTaskForKey({
     required int taskId,
     required int userId,
@@ -368,7 +394,6 @@ class UploadFileTaskManager {
     return UploadTaskRecord.fromMap(rows.first);
   }
 
-  /// 查询用户/群组下的任务列表（可按状态过滤）
   Future<List<UploadTaskRecord>> listTasks({
     required int userId,
     required int groupId,
@@ -392,10 +417,10 @@ class UploadFileTaskManager {
     return rows.map(UploadTaskRecord.fromMap).toList();
   }
 
-  /// 关闭数据库
   Future<void> close() async {
     await _db?.close();
     _db = null;
     _openFuture = null;
+    _schemaFixed = false;
   }
 }

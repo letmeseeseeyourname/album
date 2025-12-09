@@ -1,8 +1,10 @@
-// pages/home_page.dart (优化版 - Groups 快速显示)
+// pages/home_page.dart (添加升级检查功能)
 import 'dart:async';
 
 import 'package:flutter/material.dart';
 import '../eventbus/event_bus.dart';
+import '../eventbus/upgrade_events.dart'; // 🆕 新增
+import '../manager/upgrade_manager.dart'; // 🆕 新增
 import '../minio/minio_service.dart';
 import '../user/models/p6device_info_model.dart';
 import '../user/models/group.dart';
@@ -33,20 +35,22 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> {
-  int _selectedIndex = 0; // 0: 本地图库, 1: 相册图库
-  int _albumTabIndex = 0; // 相册图库的Tab索引 (0: 个人, 1: 家庭)
+  int _selectedIndex = 0;
+  int _albumTabIndex = 0;
 
   final minioService = MinioService.instance;
   List<Group> _groups = [];
   Group? _selectedGroup;
   int? _currentUserId;
 
-  // Groups 加载状态
   bool _isGroupsLoading = true;
 
-  // EventBus 订阅引用
+  // 🆕 升级状态
+  bool _hasUpdate = false;
+
   StreamSubscription? _p6loginSubscription;
   StreamSubscription? _groupChangedSubscription;
+  StreamSubscription? _upgradeCheckSubscription; // 🆕 新增
 
   @override
   void initState() {
@@ -60,14 +64,24 @@ class _HomePageState extends State<HomePage> {
 
     _groupChangedSubscription = MCEventBus.on<GroupChangedEvent>().listen((event) {
       if (mounted) {
-        // 🆕 GroupChangedEvent 表示 P2P 连接完成，刷新存储信息
         _onGroupConnectionComplete();
+      }
+    });
+
+    // 🆕 监听升级检查事件
+    _upgradeCheckSubscription = MCEventBus.on<UpgradeCheckEvent>().listen((event) {
+      if (mounted) {
+        setState(() {
+          _hasUpdate = event.hasUpdate;
+        });
       }
     });
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (mounted) {
         await _initializeConnection();
+        // 🆕 启动时静默检查更新
+        _checkUpgrade();
       }
     });
   }
@@ -76,7 +90,22 @@ class _HomePageState extends State<HomePage> {
   void dispose() {
     _p6loginSubscription?.cancel();
     _groupChangedSubscription?.cancel();
+    _upgradeCheckSubscription?.cancel(); // 🆕 新增
     super.dispose();
+  }
+
+  // 🆕 静默检查更新
+  Future<void> _checkUpgrade() async {
+    try {
+      final hasUpdate = await UpgradeManager().checkUpgradeSilently();
+      if (mounted) {
+        setState(() {
+          _hasUpdate = hasUpdate;
+        });
+      }
+    } catch (e) {
+      debugPrint('检查更新失败: $e');
+    }
   }
 
   Future<void> _initializeConnection() async {
@@ -87,12 +116,9 @@ class _HomePageState extends State<HomePage> {
     debugPrint('开始初始化...');
     await _reloadData();
 
-    // 🆕 不再在这里等待 P2P 连接，P2P 连接会异步进行
-    // 连接完成后会通过 GroupChangedEvent 通知
     debugPrint('Groups 列表加载完成，P2P 连接正在后台进行...');
   }
 
-  /// 🆕 当 Group 连接完成时调用（P2P + P6Login 都完成）
   void _onGroupConnectionComplete() {
     if (!mounted) return;
 
@@ -143,17 +169,14 @@ class _HomePageState extends State<HomePage> {
 
     debugPrint('开始加载设备组数据...');
 
-    // 开始加载，设置 loading 状态
     setState(() {
       _isGroupsLoading = true;
     });
 
-    // 🆕 优化后的 getAllGroups() 会快速返回（P2P 连接异步进行）
     var response = await widget.mineProvider.getAllGroups();
 
     if (!mounted) return;
 
-    // 加载完成，取消 loading 状态
     setState(() {
       _isGroupsLoading = false;
     });
@@ -183,17 +206,14 @@ class _HomePageState extends State<HomePage> {
       _selectedGroup = group;
     });
 
-    // 更新本地保存的group
     await MyInstance().setGroup(group);
 
     debugPrint('开始切换设备组并建立 P2P 连接...');
 
-    // 🆕 changeGroup 会异步建立连接，完成后发送 GroupChangedEvent
     await widget.mineProvider.changeGroup(group.deviceCode ?? "");
 
     if (!mounted) return;
 
-    // 刷新groups列表以更新UI
     _loadGroups();
   }
 
@@ -222,6 +242,7 @@ class _HomePageState extends State<HomePage> {
           onGroupSelected: _onGroupSelected,
           currentUserId: _currentUserId,
           isGroupsLoading: _isGroupsLoading,
+          hasUpdate: _hasUpdate, // 🆕 传递升级状态
         );
       case 1:
         return AlbumLibraryPage(
@@ -234,6 +255,7 @@ class _HomePageState extends State<HomePage> {
           currentTabIndex: _albumTabIndex,
           onTabChanged: _onAlbumTabChanged,
           isGroupsLoading: _isGroupsLoading,
+          hasUpdate: _hasUpdate, // 🆕 传递升级状态
         );
       default:
         return MainFolderPage(
@@ -244,6 +266,7 @@ class _HomePageState extends State<HomePage> {
           onGroupSelected: _onGroupSelected,
           currentUserId: _currentUserId,
           isGroupsLoading: _isGroupsLoading,
+          hasUpdate: _hasUpdate, // 🆕 传递升级状态
         );
     }
   }
