@@ -3,7 +3,10 @@ import 'package:flutter/material.dart';
 import '../../../album/manager/local_folder_upload_manager.dart';
 
 /// 文件夹详情页底部工具栏
-/// ✅ 已修复: 同步按钮在上传时仍可点击,支持多任务并发
+/// ✅ 已修复:
+/// 1. 同步按钮在上传时仍可点击,支持多任务并发
+/// 2. 支持显示文件夹递归统计结果
+/// 3. 支持显示统计中状态
 class FolderDetailBottomBar extends StatelessWidget {
   final int selectedCount;
   final double selectedTotalSizeMB;
@@ -13,6 +16,7 @@ class FolderDetailBottomBar extends StatelessWidget {
   final bool isUploading;
   final LocalUploadProgress? uploadProgress;
   final VoidCallback onSyncPressed;
+  final bool isCountingFiles; // 新增：是否正在统计文件
 
   const FolderDetailBottomBar({
     super.key,
@@ -24,6 +28,7 @@ class FolderDetailBottomBar extends StatelessWidget {
     required this.isUploading,
     required this.uploadProgress,
     required this.onSyncPressed,
+    this.isCountingFiles = false, // 默认不在统计中
   });
 
   @override
@@ -44,8 +49,31 @@ class FolderDetailBottomBar extends StatelessWidget {
         children: [
           // 左侧信息
           if (selectedCount > 0) ...[
-            Text(
-              '已选：${selectedTotalSizeMB.toStringAsFixed(2)}MB · $selectedImageCount张照片/$selectedVideoCount条视频',
+            // 显示统计中状态或统计结果
+            isCountingFiles
+                ? Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    valueColor: AlwaysStoppedAnimation<Color>(Colors.grey.shade600),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  '正在统计文件...',
+                  style: TextStyle(
+                    fontSize: 14,
+                    color: Colors.grey.shade600,
+                  ),
+                ),
+              ],
+            )
+                : Text(
+              '已选：${_formatFileSize(selectedTotalSizeMB)} · ${selectedImageCount}张照片/${selectedVideoCount}条视频',
               style: TextStyle(
                 fontSize: 14,
                 color: Colors.grey.shade600,
@@ -98,6 +126,14 @@ class FolderDetailBottomBar extends StatelessWidget {
         ],
       ),
     );
+  }
+
+  /// 格式化文件大小
+  String _formatFileSize(double sizeMB) {
+    if (sizeMB >= 1024) {
+      return '${(sizeMB / 1024).toStringAsFixed(2)}GB';
+    }
+    return '${sizeMB.toStringAsFixed(2)}MB';
   }
 
   Widget _buildUploadProgress(LocalUploadProgress progress) {

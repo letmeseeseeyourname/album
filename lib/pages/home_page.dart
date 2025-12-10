@@ -6,11 +6,11 @@ import '../eventbus/event_bus.dart';
 import '../eventbus/upgrade_events.dart'; // 🆕 新增
 import '../manager/upgrade_manager.dart'; // 🆕 新增
 import '../minio/minio_service.dart';
-import '../user/models/p6device_info_model.dart';
+import '../pages/remote_album/pages/album_library_page.dart';
 import '../user/models/group.dart';
+import '../user/models/p6device_info_model.dart';
 import '../user/my_instance.dart';
 import '../user/provider/mine_provider.dart';
-import '../pages/remote_album/pages/album_library_page.dart';
 import 'main_folder_page.dart';
 
 class P6loginEvent {
@@ -56,7 +56,7 @@ class _HomePageState extends State<HomePage> {
   void initState() {
     super.initState();
 
-    _p6loginSubscription = MCEventBus.on<P6loginEvent>().listen((event) {
+    _p6loginSubscription = MCEventBus.on<P6loginEvent>().listen((event) {//
       if (mounted) {
         _p6loginAction();
       }

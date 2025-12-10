@@ -1,4 +1,5 @@
 // main.dart
+import 'package:ablumwin/utils/win_helper.dart';
 import 'package:flutter/material.dart';
 import 'package:window_manager/window_manager.dart';
 import 'pages/login_page.dart';
@@ -26,7 +27,8 @@ void main() async {
     await windowManager.show();
     await windowManager.focus();
   });
-
+  String ip =await WinHelper.getLocalIpAddress();
+  debugPrint("LocalIpAddress: $ip");
   runApp(const MyApp());
 }
 

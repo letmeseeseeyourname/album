@@ -25,7 +25,6 @@ import '../my_instance.dart';
 import '../models/qr_code_model.dart';
 import '../../p2p/pg_tunnel_service.dart';
 
-
 extension StringMD5 on String {
   String toMd5() {
     return md5.convert(utf8.encode(this)).toString();
@@ -71,7 +70,6 @@ extension Unique<E, Id> on List<E> {
 }
 
 class MyNetworkProvider extends ChangeNotifier {
-
   PackageInfo? appInfo;
   final sm = LocalSemaphore(1);
   ResponseModel<MyAllGroupsModel>? groupResp;
@@ -121,11 +119,14 @@ class MyNetworkProvider extends ChangeNotifier {
   }
 
   /// 🆕 优化版：获取所有 Groups（快速返回，不等待 P2P 连接）
-  Future<ResponseModel<MyAllGroupsModel>> getAllGroups({bool force = false}) async {
+  Future<ResponseModel<MyAllGroupsModel>> getAllGroups({
+    bool force = false,
+  }) async {
     await sm.acquire();
 
     // 缓存检查
-    if (!force && DateTime.now().difference(lastGetAllGroupTime).inSeconds < 5 &&
+    if (!force &&
+        DateTime.now().difference(lastGetAllGroupTime).inSeconds < 5 &&
         groupResp != null &&
         groupResp!.isSuccess) {
       sm.release();
@@ -135,10 +136,7 @@ class MyNetworkProvider extends ChangeNotifier {
     String url = "${AppConfig.userUrl()}/api/admin/group/get-all-groups";
 
     ResponseModel<MyAllGroupsModel> responseModel =
-    await requestAndConvertResponseModel(
-      url,
-      netMethod: NetMethod.get,
-    );
+        await requestAndConvertResponseModel(url, netMethod: NetMethod.get);
 
     if (responseModel.isSuccess) {
       MyInstance().groups = responseModel.model?.groups ?? [];
@@ -195,25 +193,30 @@ class MyNetworkProvider extends ChangeNotifier {
     }
   }
 
-
   Future<ResponseModel<UserModel>> changeGroup(String deviceCode) async {
     if (MyInstance().deviceCode == deviceCode) {
       return ResponseModel<UserModel>(
-          message: "已在当前设备", code: 200, model: null);
+        message: "已在当前设备",
+        code: 200,
+        model: null,
+      );
     }
 
     var resp = await getDevice(deviceCode);
     if (resp.isNotSuccess) {
       debugPrint("getDevice error ${resp.message}");
       return ResponseModel<UserModel>(
-          message: "获取设备信息失败", code: -1, model: null);
+        message: "获取设备信息失败",
+        code: -1,
+        model: null,
+      );
     }
     MyInstance().deviceCode = deviceCode;
     MyInstance().deviceModel = resp.model!;
     await _loginP2p(resp.model?.p2pName ?? "");
-    var p6loginResp = await p6Login(deviceCode);
-
     var deviceRsp = await getStorageInfo();
+    await Future.delayed(const Duration(seconds: 2));
+    var p6loginResp = await p6Login(deviceCode);
     if (deviceRsp.isSuccess) {
       P6DeviceInfoModel? storageInfo = deviceRsp.model;
       debugPrint("storageInfo $storageInfo");
@@ -230,19 +233,21 @@ class MyNetworkProvider extends ChangeNotifier {
 
     // 根据现有代码习惯，使用 requestAndConvertResponseModel 统一处理
     // 参照 getDevice 接口，这里使用 POST 方式传递 deviceCode
-    ResponseModel<QrCodeModel> responseModel = await requestAndConvertResponseModel(
-      url,
-      formData: {
-        "deviceCode": deviceCode,
-      },
-      netMethod: NetMethod.post, // 如果后端强制要求 GET，请改为 NetMethod.get 并将参数拼接到 url 或调整 formData
-      isUrlEncode: true,
-    );
+    ResponseModel<QrCodeModel> responseModel =
+        await requestAndConvertResponseModel(
+          url,
+          formData: {"deviceCode": deviceCode},
+          netMethod: NetMethod.post,
+          // 如果后端强制要求 GET，请改为 NetMethod.get 并将参数拼接到 url 或调整 formData
+          isUrlEncode: true,
+        );
 
     return responseModel;
   }
 
-  Future<ResponseModel<LoginResponseModel>> p6useQRLogin(String deviceCode) async {
+  Future<ResponseModel<LoginResponseModel>> p6useQRLogin(
+    String deviceCode,
+  ) async {
     var appInfo = await PackageInfo.fromPlatform();
 
     String url = "${AppConfig.userUrl()}/api/admin/auth/p6useQRLogin";
@@ -255,11 +260,11 @@ class MyNetworkProvider extends ChangeNotifier {
     };
 
     ResponseModel<LoginResponseModel> responseModel =
-    await requestAndConvertResponseModel(
-      url,
-      formData: formData,
-      netMethod: NetMethod.post,
-    );
+        await requestAndConvertResponseModel(
+          url,
+          formData: formData,
+          netMethod: NetMethod.post,
+        );
 
     // 登录成功后的处理（与 login 方法保持一致）
     if (responseModel.isSuccess) {
@@ -269,17 +274,15 @@ class MyNetworkProvider extends ChangeNotifier {
     return responseModel;
   }
 
-
-//邮件类型：1-注册用户、2-找回/重置密码、3-验证邮箱、4-更换邮箱
-  Future<ResponseModel<String>> getCode(
-      String phone,
-      ) async {
+  //邮件类型：1-注册用户、2-找回/重置密码、3-验证邮箱、4-更换邮箱
+  Future<ResponseModel<String>> getCode(String phone) async {
     String url =
         "${AppConfig.userUrl()}/api/admin/auth/send-phone-code?phoneNumber=$phone";
     ResponseModel<String> responseModel = await requestAndConvertResponseModel(
-        url,
-        formData: {},
-        netMethod: NetMethod.post);
+      url,
+      formData: {},
+      netMethod: NetMethod.post,
+    );
     return responseModel;
   }
 
@@ -289,7 +292,10 @@ class MyNetworkProvider extends ChangeNotifier {
   /// @param logType : 'A':账号密码登录  'V':验证码登录   'S':'扫码登录'
   /// @return
   Future<ResponseModel<LoginResponseModel>> login(
-      String account, String password, Logintype logType) async {
+    String account,
+    String password,
+    Logintype logType,
+  ) async {
     var appInfo = await PackageInfo.fromPlatform();
     var uuid = await WinHelper.uuid();
     String url = "${AppConfig.userUrl()}/api/admin/auth/login-by-password";
@@ -305,18 +311,17 @@ class MyNetworkProvider extends ChangeNotifier {
       formData.addAll({"vcode": password, "password": ""});
     } else if (logType == Logintype.password) {
       url = "${AppConfig.userUrl()}/api/admin/auth/login-by-password";
-      formData.addAll({
-        "password": password.toMd5(),
-      });
+      formData.addAll({"password": password.toMd5()});
     } else if (logType == Logintype.code) {
       url = "${AppConfig.userUrl()}/api/admin/auth/login-by-phoneCode";
-      formData.addAll({
-        "code": password,
-      });
+      formData.addAll({"code": password});
     }
     ResponseModel<LoginResponseModel> responseModel =
-    await requestAndConvertResponseModel(url,
-        formData: formData, netMethod: NetMethod.post);
+        await requestAndConvertResponseModel(
+          url,
+          formData: formData,
+          netMethod: NetMethod.post,
+        );
 
     if (responseModel.isSuccess) {
       await MyInstance().set(responseModel.model);
@@ -328,7 +333,9 @@ class MyNetworkProvider extends ChangeNotifier {
 
   //api/admin/auth/getcode-by-phone
   Future<ResponseModel<String>> verifyCodeByPhone(
-      String phone, String code) async {
+    String phone,
+    String code,
+  ) async {
     String url = "${AppConfig.userUrl()}/api/admin/auth/verify-code-by-phone";
     ResponseModel<String> responseModel = await requestAndConvertResponseModel(
       url,
@@ -341,8 +348,10 @@ class MyNetworkProvider extends ChangeNotifier {
 
   Future<ResponseModel<User>> getUserInfo() async {
     String url = "${AppConfig.userUrl()}/api/admin/users/getUser";
-    ResponseModel<User> responseModel =
-    await requestAndConvertResponseModel(url, netMethod: NetMethod.get);
+    ResponseModel<User> responseModel = await requestAndConvertResponseModel(
+      url,
+      netMethod: NetMethod.get,
+    );
 
     if (responseModel.isSuccess) {
       var user = MyInstance().user;
@@ -359,13 +368,11 @@ class MyNetworkProvider extends ChangeNotifier {
   Future<ResponseModel<UpgradeInfoModel>> getUpGradeInfo() async {
     String url = "${AppConfig.userUrl()}/api/admin/upgrade/getUPgrade";
     ResponseModel<UpgradeInfoModel> responseModel =
-    await requestAndConvertResponseModel(url,
-        formData: {
-          "status": 0,
-          "packetType": 5,
-          "versionCode": 2
-        },
-        netMethod: NetMethod.post);
+        await requestAndConvertResponseModel(
+          url,
+          formData: {"status": 0, "packetType": 5, "versionCode": 2},
+          netMethod: NetMethod.post,
+        );
 
     return responseModel;
   }
@@ -374,11 +381,11 @@ class MyNetworkProvider extends ChangeNotifier {
     String url = "${AppConfig.userUrl()}/api/admin/auth/logout";
     var uuid = await WinHelper.uuid();
     ResponseModel<UserModel> responseModel =
-    await requestAndConvertResponseModel(
-      url,
-      formData: {"type": "主动", "clientType": "Windows", "deviceCode": uuid},
-      netMethod: NetMethod.post,
-    );
+        await requestAndConvertResponseModel(
+          url,
+          formData: {"type": "主动", "clientType": "Windows", "deviceCode": uuid},
+          netMethod: NetMethod.post,
+        );
     return responseModel;
   }
 
@@ -404,14 +411,17 @@ class MyNetworkProvider extends ChangeNotifier {
     String url = "${AppConfig.hostUrl()}/nass/clound/common/p6Login";
     var user = MyInstance().user;
     ResponseModel<UserModel> responseModel =
-    await requestAndConvertResponseModel(url,
-        formData: {
-          "deviceCode": deviceCode,
-          "token": user?.accessToken ?? "",
-          "loginType": "A",
-          "userId": user?.user?.id ?? 0,
-        },
-        netMethod: NetMethod.post);
+        await requestAndConvertResponseModel(
+          url,
+          formData: {
+            "deviceCode": deviceCode,
+            "token": user?.accessToken ?? "",
+            "loginType": "A",
+            "userId": user?.user?.id ?? 0,
+          },
+          netMethod: NetMethod.post,
+          useCache: false,
+        );
 
     return responseModel;
   }
@@ -420,13 +430,15 @@ class MyNetworkProvider extends ChangeNotifier {
     String url = "${AppConfig.hostUrl()}/nass/clound/common/p6LoginOut";
     var user = MyInstance().user;
     ResponseModel<UserModel> responseModel =
-    await requestAndConvertResponseModel(url,
-        formData: {
-          "token": user?.accessToken ?? "",
-          "loginType": "B",
-          "userId": user?.user?.id ?? 0,
-        },
-        netMethod: NetMethod.post);
+        await requestAndConvertResponseModel(
+          url,
+          formData: {
+            "token": user?.accessToken ?? "",
+            "loginType": "B",
+            "userId": user?.user?.id ?? 0,
+          },
+          netMethod: NetMethod.post,
+        );
     return responseModel;
   }
 
@@ -434,8 +446,10 @@ class MyNetworkProvider extends ChangeNotifier {
   Future<bool> checkServerStatus() async {
     try {
       String url = "${AppConfig.userUrl()}/api/admin/users/getUser";
-      ResponseModel<User> responseModel =
-      await requestAndConvertResponseModel(url, netMethod: NetMethod.get);
+      ResponseModel<User> responseModel = await requestAndConvertResponseModel(
+        url,
+        netMethod: NetMethod.get,
+      );
       return responseModel.isSuccess;
     } catch (e) {
       debugPrint('检查服务器状态异常: $e');
@@ -447,11 +461,10 @@ class MyNetworkProvider extends ChangeNotifier {
     try {
       String url = "${AppConfig.hostUrl()}/nass/ps/storage/getUploadPath";
       ResponseModel responseModel = await requestAndConvertResponseModel(
-          url,
-          formData: {
-            "type": "H"
-          },
-          netMethod: NetMethod.post);
+        url,
+        formData: {"type": "H"},
+        netMethod: NetMethod.post,
+      );
       return responseModel.isSuccess;
     } catch (e) {
       debugPrint('getUploadPath 异常: $e');
@@ -463,8 +476,11 @@ class MyNetworkProvider extends ChangeNotifier {
   Future<ResponseModel<P6DeviceInfoModel>> getStorageInfo() async {
     String url = "${AppConfig.hostUrl()}/nass/ps/storage/getStorageInfo";
     ResponseModel<P6DeviceInfoModel> responseModel =
-    await requestAndConvertResponseModel(url,
-        formData: {}, netMethod: NetMethod.post);
+        await requestAndConvertResponseModel(
+          url,
+          formData: {},
+          netMethod: NetMethod.post,
+        );
     return responseModel;
   }
 
@@ -473,15 +489,14 @@ class MyNetworkProvider extends ChangeNotifier {
         "${AppConfig.userUrl()}/api/admin/device/getDeviceBydeviceCode";
     // var user = MyInstance().user;
     ResponseModel<DeviceModel> responseModel =
-    await requestAndConvertResponseModel(url,
-        formData: {
-          "deviceCode": deviceCode,
-        },
-        netMethod: NetMethod.post,
-        isUrlEncode: true);
+        await requestAndConvertResponseModel(
+          url,
+          formData: {"deviceCode": deviceCode},
+          netMethod: NetMethod.post,
+          isUrlEncode: true,
+        );
     return responseModel;
   }
-
 
   /// 修改后的 _loginP2p 方法
   Future<bool> _loginP2p(String p2pName) async {
@@ -492,19 +507,23 @@ class MyNetworkProvider extends ChangeNotifier {
       if (currentP2pAccount == p2pName) {
         debugPrint("P2P已连接到账号: $p2pName");
         _currentP2pStatus = P2pConnectionStatus.connected; // 🆕 更新状态
-        MCEventBus.fire(P2pConnectionEvent(
-          status: P2pConnectionStatus.connected,
-          p2pName: p2pName,
-        ));
+        MCEventBus.fire(
+          P2pConnectionEvent(
+            status: P2pConnectionStatus.connected,
+            p2pName: p2pName,
+          ),
+        );
         return true;
       }
 
       // 🆕 发送连接中事件，并更新状态
       _currentP2pStatus = P2pConnectionStatus.connecting;
-      MCEventBus.fire(P2pConnectionEvent(
-        status: P2pConnectionStatus.connecting,
-        p2pName: p2pName,
-      ));
+      MCEventBus.fire(
+        P2pConnectionEvent(
+          status: P2pConnectionStatus.connecting,
+          p2pName: p2pName,
+        ),
+      );
 
       // 如果有旧账号，先清理旧连接
       if (currentP2pAccount.isNotEmpty) {
@@ -553,10 +572,12 @@ class MyNetworkProvider extends ChangeNotifier {
 
         // 🆕 发送连接成功事件，并更新状态
         _currentP2pStatus = P2pConnectionStatus.connected;
-        MCEventBus.fire(P2pConnectionEvent(
-          status: P2pConnectionStatus.connected,
-          p2pName: p2pName,
-        ));
+        MCEventBus.fire(
+          P2pConnectionEvent(
+            status: P2pConnectionStatus.connected,
+            p2pName: p2pName,
+          ),
+        );
 
         return true;
       } catch (e) {
@@ -579,11 +600,13 @@ class MyNetworkProvider extends ChangeNotifier {
 
         // 🆕 发送连接失败事件，并更新状态
         _currentP2pStatus = P2pConnectionStatus.failed;
-        MCEventBus.fire(P2pConnectionEvent(
-          status: P2pConnectionStatus.failed,
-          p2pName: p2pName,
-          errorMessage: e.toString(),
-        ));
+        MCEventBus.fire(
+          P2pConnectionEvent(
+            status: P2pConnectionStatus.failed,
+            p2pName: p2pName,
+            errorMessage: e.toString(),
+          ),
+        );
 
         rethrow;
       }
@@ -593,11 +616,13 @@ class MyNetworkProvider extends ChangeNotifier {
 
       // 🆕 发送连接失败事件，并更新状态
       _currentP2pStatus = P2pConnectionStatus.failed;
-      MCEventBus.fire(P2pConnectionEvent(
-        status: P2pConnectionStatus.failed,
-        p2pName: p2pName,
-        errorMessage: e.toString(),
-      ));
+      MCEventBus.fire(
+        P2pConnectionEvent(
+          status: P2pConnectionStatus.failed,
+          p2pName: p2pName,
+          errorMessage: e.toString(),
+        ),
+      );
 
       return false;
     }
@@ -648,10 +673,12 @@ class MyNetworkProvider extends ChangeNotifier {
 
       // 🆕 发送断开连接事件，并更新状态
       _currentP2pStatus = P2pConnectionStatus.disconnected;
-      MCEventBus.fire(P2pConnectionEvent(
-        status: P2pConnectionStatus.disconnected,
-        p2pName: oldAccount,
-      ));
+      MCEventBus.fire(
+        P2pConnectionEvent(
+          status: P2pConnectionStatus.disconnected,
+          p2pName: oldAccount,
+        ),
+      );
 
       return true;
     } catch (e) {
@@ -669,10 +696,12 @@ class MyNetworkProvider extends ChangeNotifier {
       if (p2pName.isEmpty) {
         debugPrint("❌ 无法重连：缺少 P2P 名称");
         _currentP2pStatus = P2pConnectionStatus.failed; // 🆕 更新状态
-        MCEventBus.fire(P2pConnectionEvent(
-          status: P2pConnectionStatus.failed,
-          errorMessage: "缺少 P2P 名称",
-        ));
+        MCEventBus.fire(
+          P2pConnectionEvent(
+            status: P2pConnectionStatus.failed,
+            errorMessage: "缺少 P2P 名称",
+          ),
+        );
         return false;
       }
 
@@ -686,10 +715,12 @@ class MyNetworkProvider extends ChangeNotifier {
     } catch (e) {
       debugPrint("❌ P2P 重连失败: $e");
       _currentP2pStatus = P2pConnectionStatus.failed; // 🆕 更新状态
-      MCEventBus.fire(P2pConnectionEvent(
-        status: P2pConnectionStatus.failed,
-        errorMessage: e.toString(),
-      ));
+      MCEventBus.fire(
+        P2pConnectionEvent(
+          status: P2pConnectionStatus.failed,
+          errorMessage: e.toString(),
+        ),
+      );
       return false;
     }
   }

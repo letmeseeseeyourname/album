@@ -79,4 +79,41 @@ class WinHelper {
     return 'Windows PC';
   }
 
+
+ static Future<String> getLocalIpAddress() async {
+    try {
+      // 1. 获取所有网络接口列表
+      // includeLoopback: 是否包含回环地址 (127.0.0.1)
+      // type: 限制只获取 IPv4 地址 (InternetAddress.IPv4)
+      final interfaces = await NetworkInterface.list(
+        type: InternetAddressType.IPv4,
+        includeLoopback: false,
+      );
+
+      // 2. 遍历所有接口和地址
+      for (var interface in interfaces) {
+        // 排除虚拟接口或非活动接口 (可选，提高准确性)
+        // 在一些平台上，接口名称可能包含 'wlan', 'eth', 'en' 等
+        // if (interface.name.startsWith('Wi-Fi') || interface.name.startsWith('Ethernet')) {
+
+        for (var address in interface.addresses) {
+          // 3. 检查地址是否为局域网地址 (非私有/回环地址)
+          // 通常局域网 IP 是 192.168.x.x, 10.x.x.x, 172.16.x.x 等
+
+          // 简单地返回找到的第一个非回环的 IPv4 地址
+          if (address.type == InternetAddressType.IPv4) {
+            return address.address;
+          }
+        }
+      }
+
+      // 如果没有找到有效的 IP 地址
+      return '未找到有效 IP 地址';
+
+    } catch (e) {
+      debugPrint('获取 IP 地址失败: $e');
+      return '获取 IP 地址出错';
+    }
+  }
+
 }

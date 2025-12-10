@@ -1,4 +1,4 @@
-// pages/folder_detail_page.dart (修改版 - 适配新的 PreviewPanel)
+// pages/folder_detail_page.dart (修改版 - 支持文件夹递归统计)
 import 'package:flutter/material.dart';
 import 'package:ablumwin/user/my_instance.dart';
 
@@ -30,6 +30,7 @@ import '../../../widgets/side_navigation.dart';
 /// - 使用 MediaCacheService 统一管理缓存
 /// - 组件化和模块化设计
 /// - PreviewPanel 内部管理视频播放器
+/// - ✅ 支持文件夹递归统计
 class FolderDetailPage extends StatefulWidget {
   final FolderInfo folder;
   final int selectedNavIndex;
@@ -198,10 +199,14 @@ class _FolderDetailPageState extends State<FolderDetailPage> {
 
   void _toggleSelection(int index) {
     setState(() => _selectionController.toggleSelection(index));
+    // ✅ 选择改变时，触发异步统计
+    _updateSelectedStats();
   }
 
   void _toggleSelectAll() {
     setState(() => _selectionController.toggleSelectAll(_fileItems.length));
+    // ✅ 选择改变时，触发异步统计
+    _updateSelectedStats();
   }
 
   void _cancelSelection() {
@@ -217,6 +222,31 @@ class _FolderDetailPageState extends State<FolderDetailPage> {
       _viewMode = mode;
       _selectionController.cancelSelection();
     });
+  }
+
+  /// ✅ 新增：异步更新选中项统计
+  Future<void> _updateSelectedStats() async {
+    if (_selectionController.selectedIndices.isEmpty) {
+      return;
+    }
+
+    // 获取筛选后的文件列表
+    final filteredFiles = _selectionController.getFilteredFiles(_fileItems);
+
+    // 检查是否有选中文件夹，如果有则需要递归统计
+    final hasFolder = _selectionController.hasSelectedFolders(filteredFiles);
+
+    if (hasFolder) {
+      // 有文件夹，需要异步递归统计
+      await _selectionController.updateSelectedStats(
+        filteredFiles,
+        onUpdate: () {
+          if (mounted) {
+            setState(() {});
+          }
+        },
+      );
+    }
   }
 
   // ============ 预览相关（简化版）============
@@ -503,15 +533,39 @@ class _FolderDetailPageState extends State<FolderDetailPage> {
   }
 
   Widget _buildBottomBar() {
+    // 获取筛选后的文件列表
+    final filteredFiles = _selectionController.getFilteredFiles(_fileItems);
+
+    // ✅ 检查是否有选中文件夹，决定使用哪种统计方式
+    final hasFolder = _selectionController.hasSelectedFolders(filteredFiles);
+
+    // 如果有文件夹且正在统计或已有缓存数据，使用缓存的统计结果
+    final int imageCount;
+    final int videoCount;
+    final double totalSizeMB;
+
+    if (hasFolder) {
+      // 使用缓存的递归统计结果
+      imageCount = _selectionController.cachedImageCount;
+      videoCount = _selectionController.cachedVideoCount;
+      totalSizeMB = _selectionController.cachedTotalSizeMB;
+    } else {
+      // 没有文件夹，使用原来的直接统计方式
+      imageCount = _selectionController.getSelectedImageCount(filteredFiles);
+      videoCount = _selectionController.getSelectedVideoCount(filteredFiles);
+      totalSizeMB = _selectionController.getSelectedTotalSize(filteredFiles);
+    }
+
     return FolderDetailBottomBar(
       selectedCount: _selectionController.selectedCount,
-      selectedTotalSizeMB: _selectionController.getSelectedTotalSize(_fileItems),
-      selectedImageCount: _selectionController.getSelectedImageCount(_fileItems),
-      selectedVideoCount: _selectionController.getSelectedVideoCount(_fileItems),
+      selectedTotalSizeMB: totalSizeMB,
+      selectedImageCount: imageCount,
+      selectedVideoCount: videoCount,
       deviceStorageUsedPercent: _getDeviceStorageSurplus(),
       isUploading: _uploadCoordinator.isUploading,
       uploadProgress: _uploadCoordinator.uploadProgress,
       onSyncPressed: _handleSync,
+      isCountingFiles: _selectionController.isCountingFiles, // ✅ 传递统计状态
     );
   }
 

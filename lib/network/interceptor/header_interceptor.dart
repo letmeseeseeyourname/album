@@ -12,11 +12,11 @@ class HeaderInterceptor extends Interceptor {
     var cookie = await  MyInstance().getCookie() ?? "";
     var deviceCode = await WinHelper.uuid();
     Map<String, dynamic> headers = {
-      "content-type": "application/json",
+      "content-type": "application/json;charset=UTF-8",
       "Accept-Language": "zh_CN",
       "version": info.version,
       "versionCode": info.buildNumber,
-      "deviceCode": deviceCode,
+      "deviceCode": "",
       "Cookie": cookie
     };
     if (json.isNotEmpty) {
