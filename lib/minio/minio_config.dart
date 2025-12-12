@@ -4,7 +4,6 @@
 class MinioConfig {
   // Minio 服务器地址（不包含协议）
   static const String host = "127.0.0.1";
-  // static const String host = "192.168.3.222";
 
   // Minio 服务器端口
   static const int port = 9000;

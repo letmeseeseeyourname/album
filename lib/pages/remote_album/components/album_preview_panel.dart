@@ -1,10 +1,23 @@
-// album/components/album_preview_panel.dart (修复版 - 解决图片被压缩问题)
+// album/components/album_preview_panel.dart (增强版 - 添加重试机制)
+import 'dart:async';
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import '../../../network/constant_sign.dart';
+import '../../../network/utils/dev_environment_helper.dart';
 import '../../../user/models/resource_list_model.dart';
+import '../../../user/my_instance.dart';
+import '../../../user/provider/mine_provider.dart';
+
+/// 预览重试配置
+class PreviewRetryConfig {
+  static const int maxImageRetries = 3; // 图片最大重试次数
+  static const int maxVideoRetries = 3; // 视频最大重试次数
+  static const int retryDelaySeconds = 2; // 重试延迟（秒）
+  static const int warmUpTimeoutSeconds = 5; // 预热超时（秒）
+}
 
 /// 相册预览面板
 /// 修复：图片预览被压缩的问题
@@ -44,29 +57,131 @@ class _AlbumPreviewPanelState extends State<AlbumPreviewPanel> {
   // 用于触发图片重新加载的 key
   int _imageReloadKey = 0;
 
+  // 🆕 重试相关状态
+  int _imageRetryCount = 0;
+  int _videoRetryCount = 0;
+  bool _isImageLoading = false;
+  bool _isVideoLoading = false;
+  bool _imageLoadFailed = false;
+  bool _videoLoadFailed = false;
+  String? _lastImageError;
+  String? _lastVideoError;
+  Timer? _retryTimer;
+
+  // 🆕 连接预热
+  final Dio _dio = Dio();
+  bool _isConnectionWarmedUp = false;
+  DateTime? _lastWarmUpTime;
+  static const Duration _warmUpValidDuration = Duration(minutes: 5);
+
   @override
   void initState() {
     super.initState();
-    _loadMedia();
+    // 🆕 先预热连接，再加载媒体
+    _warmUpAndLoadMedia();
   }
 
   @override
   void didUpdateWidget(AlbumPreviewPanel oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.previewIndex != widget.previewIndex) {
-      _imageReloadKey = 0;  // 切换图片时重置
+      // 🆕 切换媒体时重置所有状态
+      _resetRetryState();
       _loadMedia();
     }
   }
 
+  /// 🆕 重置重试状态
+  void _resetRetryState() {
+    _imageReloadKey = 0;
+    _imageRetryCount = 0;
+    _videoRetryCount = 0;
+    _isImageLoading = false;
+    _isVideoLoading = false;
+    _imageLoadFailed = false;
+    _videoLoadFailed = false;
+    _lastImageError = null;
+    _lastVideoError = null;
+    _retryTimer?.cancel();
+    _retryTimer = null;
+  }
+
   @override
   void dispose() {
+    _retryTimer?.cancel();
     _disposeVideoPlayer();
+    _dio.close();
     super.dispose();
   }
 
+  /// 🆕 预热连接并加载媒体
+  Future<void> _warmUpAndLoadMedia() async {
+    await _warmUpConnection();
+    _loadMedia();
+  }
+
+  /// 🆕 预热 MinIO 连接（唤醒 P2P 隧道）
+  Future<bool> _warmUpConnection() async {
+    // 检查预热是否仍有效
+    if (_isConnectionWarmedUp && _lastWarmUpTime != null) {
+      final elapsed = DateTime.now().difference(_lastWarmUpTime!);
+      if (elapsed < _warmUpValidDuration) {
+        debugPrint('[PreviewPanel] 连接预热仍有效，跳过预热');
+        return true;
+      }
+    }
+
+    final baseUrl = AppConfig.minio();
+    debugPrint('[PreviewPanel] 开始预热连接: $baseUrl');
+
+    try {
+      await _dio.head(
+        baseUrl,
+        options: Options(
+          sendTimeout: Duration(
+              seconds: PreviewRetryConfig.warmUpTimeoutSeconds),
+          receiveTimeout: Duration(
+              seconds: PreviewRetryConfig.warmUpTimeoutSeconds),
+          validateStatus: (status) => true,
+        ),
+      );
+
+      _isConnectionWarmedUp = true;
+      _lastWarmUpTime = DateTime.now();
+      debugPrint('[PreviewPanel] 连接预热成功');
+      return true;
+    } catch (e) {
+      debugPrint('[PreviewPanel] 连接预热失败: $e');
+
+      // 等待后重试一次
+      await Future.delayed(const Duration(milliseconds: 500));
+
+      try {
+        await _dio.head(
+          baseUrl,
+          options: Options(
+            sendTimeout: Duration(
+                seconds: PreviewRetryConfig.warmUpTimeoutSeconds),
+            receiveTimeout: Duration(
+                seconds: PreviewRetryConfig.warmUpTimeoutSeconds),
+            validateStatus: (status) => true,
+          ),
+        );
+
+        _isConnectionWarmedUp = true;
+        _lastWarmUpTime = DateTime.now();
+        debugPrint('[PreviewPanel] 连接预热第二次尝试成功');
+        return true;
+      } catch (e2) {
+        debugPrint('[PreviewPanel] 连接预热第二次尝试也失败: $e2');
+        return false;
+      }
+    }
+  }
+
   void _loadMedia() {
-    if (widget.previewIndex < 0 || widget.previewIndex >= widget.mediaItems.length) {
+    if (widget.previewIndex < 0 ||
+        widget.previewIndex >= widget.mediaItems.length) {
       return;
     }
 
@@ -85,16 +200,30 @@ class _AlbumPreviewPanelState extends State<AlbumPreviewPanel> {
 
     if (url.isEmpty) return;
 
+    _isVideoLoading = true;
+    _videoLoadFailed = false;
+    _lastVideoError = null;
+
+    if (mounted) setState(() {});
+
     _videoPlayer = Player();
     _videoController = VideoController(_videoPlayer!);
 
     final fullUrl = "${AppConfig.minio()}/$url";
+    debugPrint('[PreviewPanel] 加载视频: $fullUrl');
+
     _videoPlayer!.open(Media(fullUrl));
 
     _videoPlayer!.stream.playing.listen((playing) {
       if (mounted) {
         setState(() {
           _isPlaying = playing;
+          // 🆕 播放成功，重置重试计数
+          if (playing) {
+            _isVideoLoading = false;
+            _videoLoadFailed = false;
+            _videoRetryCount = 0;
+          }
         });
       }
     });
@@ -111,6 +240,11 @@ class _AlbumPreviewPanelState extends State<AlbumPreviewPanel> {
       if (mounted) {
         setState(() {
           _duration = duration;
+          // 🆕 获取到时长说明加载成功
+          if (duration.inSeconds > 0) {
+            _isVideoLoading = false;
+            _videoLoadFailed = false;
+          }
         });
       }
     });
@@ -120,6 +254,83 @@ class _AlbumPreviewPanelState extends State<AlbumPreviewPanel> {
         setState(() {
           _volume = volume / 100;
         });
+      }
+    });
+
+    // 🆕 监听错误
+    _videoPlayer!.stream.error.listen((error) {
+      if (mounted && error.isNotEmpty) {
+        debugPrint('[PreviewPanel] 视频加载错误: $error');
+        _handleVideoLoadError(error, url);
+      }
+    });
+  }
+
+  /// 🆕 处理视频加载错误
+  void _handleVideoLoadError(String error, String url) {
+    _lastVideoError = error;
+
+    if (_videoRetryCount < PreviewRetryConfig.maxVideoRetries) {
+      _videoRetryCount++;
+      debugPrint('[PreviewPanel] 视频重试 $_videoRetryCount/${PreviewRetryConfig
+          .maxVideoRetries}');
+
+      // 标记需要重新预热
+      _isConnectionWarmedUp = false;
+
+      // 延迟后重试
+      _retryTimer?.cancel();
+      _retryTimer = Timer(
+        Duration(seconds: PreviewRetryConfig.retryDelaySeconds),
+            () async {
+          if (mounted) {
+            await _warmUpConnection();
+            _initVideoPlayer(url);
+          }
+        },
+      );
+
+      _checkNetwork();
+      setState(() {
+        _isVideoLoading = true;
+      });
+    } else {
+      // 超过最大重试次数
+      setState(() {
+        _isVideoLoading = false;
+        _videoLoadFailed = true;
+      });
+      debugPrint('[PreviewPanel] 视频加载失败，已达最大重试次数');
+    }
+  }
+
+  /// 🆕 手动重试视频
+  void _retryVideo() {
+    if (widget.previewIndex < 0 ||
+        widget.previewIndex >= widget.mediaItems.length) {
+      return;
+    }
+
+    final item = widget.mediaItems[widget.previewIndex];
+    if (item.fileType != 'V') return;
+
+    final videoUrl = item.originPath ?? item.mediumPath ?? '';
+    if (videoUrl.isEmpty) return;
+
+    // 重置重试计数
+    _videoRetryCount = 0;
+    _videoLoadFailed = false;
+    _lastVideoError = null;
+    _isConnectionWarmedUp = false;
+
+    setState(() {
+      _isVideoLoading = true;
+    });
+
+    // 预热后重新加载
+    _warmUpConnection().then((_) {
+      if (mounted) {
+        _initVideoPlayer(videoUrl);
       }
     });
   }
@@ -148,7 +359,8 @@ class _AlbumPreviewPanelState extends State<AlbumPreviewPanel> {
 
   @override
   Widget build(BuildContext context) {
-    if (widget.previewIndex < 0 || widget.previewIndex >= widget.mediaItems.length) {
+    if (widget.previewIndex < 0 ||
+        widget.previewIndex >= widget.mediaItems.length) {
       return const SizedBox.shrink();
     }
 
@@ -322,11 +534,80 @@ class _AlbumPreviewPanelState extends State<AlbumPreviewPanel> {
     );
   }
 
-  /// 视频预览
+  /// 视频预览 - 增强版：带重试机制
   Widget _buildVideoPreview() {
-    if (_videoController == null) {
-      return const Center(
-        child: CircularProgressIndicator(),
+    // 🆕 视频加载失败
+    if (_videoLoadFailed) {
+      return Container(
+        color: Colors.black,
+        child: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                Icons.videocam_off,
+                size: 64,
+                color: Colors.grey.shade400,
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                '视频加载失败',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+              const SizedBox(height: 8),
+              if (_lastVideoError != null) ...[
+                const SizedBox(height: 8),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 32),
+                  child: Text(
+                    _lastVideoError!,
+                    style: TextStyle(
+                      color: Colors.grey.shade500,
+                      fontSize: 11,
+                    ),
+                    textAlign: TextAlign.center,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+              const SizedBox(height: 20),
+              ElevatedButton.icon(
+                onPressed: _retryVideo,
+                icon: const Icon(Icons.refresh, size: 18),
+                label: const Text('重新加载'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.orange,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 20, vertical: 10),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    // 🆕 视频加载中
+    if (_videoController == null || _isVideoLoading) {
+      return Container(
+        color: Colors.black,
+        child: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const CircularProgressIndicator(
+                valueColor: AlwaysStoppedAnimation<Color>(Colors.orange),
+              ),
+              const SizedBox(height: 16),
+            ],
+          ),
+        ),
       );
     }
 
@@ -339,7 +620,7 @@ class _AlbumPreviewPanelState extends State<AlbumPreviewPanel> {
     );
   }
 
-  /// 图片预览 - 修复版：正确处理竖向图片
+  /// 图片预览 - 增强版：带自动重试
   Widget _buildImagePreview(ResList item) {
     final imageUrl = item.originPath ?? item.mediumPath ?? item.thumbnailPath;
 
@@ -353,10 +634,6 @@ class _AlbumPreviewPanelState extends State<AlbumPreviewPanel> {
       );
     }
 
-    // 🔑 关键修复：使用 Container + alignment + CachedNetworkImage 组合
-    // Container 会填满父容器（Positioned.fill 提供的约束）
-    // alignment: Alignment.center 让图片居中
-    // CachedNetworkImage 的 fit: BoxFit.contain 确保图片保持宽高比完整显示
     return Container(
       color: Colors.grey.shade100,
       alignment: Alignment.center,
@@ -368,47 +645,103 @@ class _AlbumPreviewPanelState extends State<AlbumPreviewPanel> {
         alignment: Alignment.center,
         fadeInDuration: const Duration(milliseconds: 200),
         fadeOutDuration: const Duration(milliseconds: 100),
-        placeholder: (context, url) => const Center(
+        placeholder: (context, url) =>
+        const Center(
           child: CircularProgressIndicator(),
         ),
         errorWidget: (context, url, error) {
-          debugPrint('预览图片加载失败: $imageUrl, $error');
-          return Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(
-                  Icons.broken_image,
-                  size: 64,
-                  color: Colors.grey.shade400,
-                ),
-                const SizedBox(height: 12),
-                Text(
-                  '图片加载失败',
-                  style: TextStyle(
-                    color: Colors.grey.shade500,
-                    fontSize: 12,
-                  ),
-                ),
-                const SizedBox(height: 16),
-                ElevatedButton.icon(
-                  onPressed: () {
-                    setState(() {
-                      _imageReloadKey++;
-                    });
-                  },
-                  icon: const Icon(Icons.refresh, size: 18),
-                  label: const Text('重新加载'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.orange,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                  ),
-                ),
-              ],
-            ),
-          );
+          debugPrint('[PreviewPanel] 图片加载失败: $imageUrl, $error');
+
+          // 🆕 检查是否需要自动重试
+          if (_imageRetryCount < PreviewRetryConfig.maxImageRetries &&
+              !_imageLoadFailed) {
+            // 延迟后自动重试
+            Future.delayed(
+              Duration(seconds: PreviewRetryConfig.retryDelaySeconds),
+                  () {
+                if (mounted && !_imageLoadFailed) {
+                  _imageRetryCount++;
+                  debugPrint(
+                      '[PreviewPanel] 图片自动重试 $_imageRetryCount/${PreviewRetryConfig
+                          .maxImageRetries}');
+                  _isConnectionWarmedUp = false; // 标记需要重新预热
+                  _warmUpConnection().then((_) {
+                    if (mounted) {
+                      setState(() {
+                        _imageReloadKey++;
+                      });
+                    }
+                  });
+                }
+              },
+            );
+
+            _checkNetwork();
+            // 显示重试中状态
+            return Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const CircularProgressIndicator(),
+                  const SizedBox(height: 16),
+                ],
+              ),
+            );
+          }
+
+          // 超过最大重试次数，显示失败界面
+          return _buildImageErrorWidget(imageUrl, error.toString());
         },
+      ),
+    );
+  }
+
+  /// 🆕 图片加载失败界面
+  Widget _buildImageErrorWidget(String imageUrl, String error) {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(
+            Icons.broken_image,
+            size: 64,
+            color: Colors.grey.shade400,
+          ),
+          const SizedBox(height: 12),
+          Text(
+            '图片加载失败',
+            style: TextStyle(
+              color: Colors.grey.shade500,
+              fontSize: 14,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+          const SizedBox(height: 8),
+          const SizedBox(height: 16),
+          ElevatedButton.icon(
+            onPressed: () {
+              // 重置重试计数并重新加载
+              _imageRetryCount = 0;
+              _imageLoadFailed = false;
+              _isConnectionWarmedUp = false;
+
+              _warmUpConnection().then((_) {
+                if (mounted) {
+                  setState(() {
+                    _imageReloadKey++;
+                  });
+                }
+              });
+            },
+            icon: const Icon(Icons.refresh, size: 18),
+            label: const Text('重新加载'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.orange,
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -444,8 +777,10 @@ class _AlbumPreviewPanelState extends State<AlbumPreviewPanel> {
                 child: SliderTheme(
                   data: SliderTheme.of(context).copyWith(
                     trackHeight: 2,
-                    thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 5),
-                    overlayShape: const RoundSliderOverlayShape(overlayRadius: 10),
+                    thumbShape: const RoundSliderThumbShape(
+                        enabledThumbRadius: 5),
+                    overlayShape: const RoundSliderOverlayShape(
+                        overlayRadius: 10),
                   ),
                   child: Slider(
                     value: _duration.inSeconds > 0
@@ -504,8 +839,10 @@ class _AlbumPreviewPanelState extends State<AlbumPreviewPanel> {
                 child: SliderTheme(
                   data: SliderTheme.of(context).copyWith(
                     trackHeight: 2,
-                    thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 4),
-                    overlayShape: const RoundSliderOverlayShape(overlayRadius: 8),
+                    thumbShape: const RoundSliderThumbShape(
+                        enabledThumbRadius: 4),
+                    overlayShape: const RoundSliderOverlayShape(
+                        overlayRadius: 8),
                   ),
                   child: Slider(
                     value: _volume,
@@ -535,9 +872,19 @@ class _AlbumPreviewPanelState extends State<AlbumPreviewPanel> {
     final secs = seconds % 60;
 
     if (hours > 0) {
-      return '$hours:${minutes.toString().padLeft(2, '0')}:${secs.toString().padLeft(2, '0')}';
+      return '$hours:${minutes.toString().padLeft(2, '0')}:${secs
+          .toString()
+          .padLeft(2, '0')}';
     } else {
       return '$minutes:${secs.toString().padLeft(2, '0')}';
     }
+  }
+
+  ///p2p与局域网直接切换
+  Future<void> _checkNetwork() async {
+    var deviceCode = MyInstance().deviceCode;
+    await MyNetworkProvider().getDevice(deviceCode);
+    var p6IP = MyInstance().deviceModel?.p2pAddress;
+    DevEnvironmentHelper().resetEnvironment(p6IP!);
   }
 }

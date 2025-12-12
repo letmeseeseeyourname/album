@@ -5,6 +5,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image/image.dart' as img;
@@ -14,6 +15,8 @@ import 'package:path_provider/path_provider.dart';
 import 'package:semaphore_plus/semaphore_plus.dart';
 
 import '../../minio/minio_service.dart';
+import '../../network/constant_sign.dart';
+import '../../network/network.dart';
 import '../../services/thumbnail_helper.dart';
 import '../../services/transfer_speed_service.dart';
 import '../../user/my_instance.dart';
@@ -134,12 +137,15 @@ class FailedFileRecord {
   MapEntry<LocalFileInfo, String> toEntry() => MapEntry(fileInfo, md5Hash);
 }
 
-/// 本地文件夹上传管理器（增强版 - 带失败队列重试）
+/// 本地文件夹上传管理器（增强版 - 带失败队列重试和连接预热）
 class LocalFolderUploadManager extends ChangeNotifier {
   DatabaseHelper dbHelper = DatabaseHelper.instance;
   UploadFileTaskManager taskManager = UploadFileTaskManager.instance;
   AlbumProvider provider = AlbumProvider();
   final minioService = MinioService.instance;
+
+  // 🆕 用于预热连接的 Dio 实例
+  final Dio _dio = Network.instance.getDio();
 
   LocalUploadProgress? _currentProgress;
   bool _isUploading = false;
@@ -152,6 +158,12 @@ class LocalFolderUploadManager extends ChangeNotifier {
   final List<FailedFileRecord> _permanentlyFailedFiles = [];
   // ✅ 累计已上传字节数（用于速度计算）
   int _totalUploadedBytes = 0;
+
+  // 🆕 连接预热状态
+  bool _isConnectionWarmedUp = false;
+  DateTime? _lastWarmUpTime;
+  static const Duration _warmUpValidDuration = Duration(minutes: 5);
+
   LocalFolderUploadManager();
 
   LocalUploadProgress? get currentProgress => _currentProgress;
@@ -163,6 +175,75 @@ class LocalFolderUploadManager extends ChangeNotifier {
   void cancelUpload() {
     _isCancelled = true;
     LogUtil.log('[UploadManager] Upload cancelled by user');
+  }
+
+  /// 🆕 预热 MinIO 连接（唤醒 P2P 隧道）
+  Future<bool> _warmUpMinioConnection() async {
+    // 检查预热是否仍有效
+    if (_isConnectionWarmedUp && _lastWarmUpTime != null) {
+      final elapsed = DateTime.now().difference(_lastWarmUpTime!);
+      if (elapsed < _warmUpValidDuration) {
+        LogUtil.log('[UploadManager] 连接预热仍有效，跳过预热');
+        return true;
+      }
+    }
+
+    final baseUrl = AppConfig.minio();
+    LogUtil.log('[UploadManager] 开始预热 MinIO 连接: $baseUrl, usedIP: ${AppConfig.usedIP},currentIP: ${AppConfig.currentIP},');
+
+    try {
+      // 发送轻量级 HEAD 请求唤醒隧道
+      await _dio.head(
+        baseUrl,
+        options: Options(
+          sendTimeout: const Duration(seconds: 5),
+          receiveTimeout: const Duration(seconds: 5),
+          validateStatus: (status) => true, // 接受任何状态码
+        ),
+      );
+
+      _isConnectionWarmedUp = true;
+      _lastWarmUpTime = DateTime.now();
+      LogUtil.log('[UploadManager] MinIO 连接预热成功');
+      return true;
+    } catch (e) {
+      LogUtil.log('[UploadManager] MinIO 连接预热失败（隧道可能正在建立）: $e');
+
+      // 等待一小段时间让隧道建立
+      await Future.delayed(const Duration(milliseconds: 500));
+
+      // 再试一次
+      try {
+        await _dio.head(
+          baseUrl,
+          options: Options(
+            sendTimeout: const Duration(seconds: 5),
+            receiveTimeout: const Duration(seconds: 5),
+            validateStatus: (status) => true,
+          ),
+        );
+
+        _isConnectionWarmedUp = true;
+        _lastWarmUpTime = DateTime.now();
+        LogUtil.log('[UploadManager] MinIO 连接预热第二次尝试成功');
+        return true;
+      } catch (e2) {
+        LogUtil.log('[UploadManager] MinIO 连接预热第二次尝试也失败: $e2');
+        // 即使预热失败，也继续上传，让上传逻辑处理重试
+        return false;
+      }
+    }
+  }
+
+  /// 🆕 检查是否是连接关闭错误（P2P 隧道冷启动问题）
+  bool _isConnectionClosedError(dynamic error) {
+    final errorStr = error.toString().toLowerCase();
+    return errorStr.contains('connection closed') ||
+        errorStr.contains('connection reset') ||
+        errorStr.contains('socket') ||
+        errorStr.contains('broken pipe') ||
+        errorStr.contains('connection refused') ||
+        errorStr.contains('network is unreachable');
   }
 
   /// 更新上传进度
@@ -311,7 +392,11 @@ class LocalFolderUploadManager extends ChangeNotifier {
       _updateProgress(total: totalFiles, uploaded: uploadedFiles, failed: failedFiles);
       onProgress?.call(_currentProgress!);
 
-      // 5. 分批处理
+      // 🆕 5. 预热 MinIO 连接
+      LogUtil.log('[UploadManager] 上传前预热 MinIO 连接...');
+      await _warmUpMinioConnection();
+
+      // 6. 分批处理
       final chunks = _splitIntoChunks(uniqueFiles, LocalUploadConfig.imageChunkSize);
 
       for (var chunk in chunks) {
@@ -414,6 +499,11 @@ class LocalFolderUploadManager extends ChangeNotifier {
 
       // 等待一段时间再重试（让网络恢复）
       await Future.delayed(Duration(seconds: LocalUploadConfig.retryRoundDelaySeconds));
+
+      // 🆕 预热连接
+      LogUtil.log('[UploadManager] 重试轮次 $currentRound 前预热连接...');
+      _isConnectionWarmedUp = false; // 强制重新预热
+      await _warmUpMinioConnection();
 
       // 取出当前轮次要重试的文件
       final filesToRetry = List<FailedFileRecord>.from(_failedQueue);
@@ -752,6 +842,12 @@ class LocalFolderUploadManager extends ChangeNotifier {
         if (attempt > 0) {
           LogUtil.log("[UploadManager] Retry $attempt/${LocalUploadConfig.maxRetryAttempts}: ${fileInfo.fileName}");
           await Future.delayed(Duration(seconds: LocalUploadConfig.retryDelaySeconds));
+
+          // 🆕 如果是连接错误导致的重试，先预热连接
+          if (!_isConnectionWarmedUp) {
+            LogUtil.log('[UploadManager] 重试前预热连接...');
+            await _warmUpMinioConnection();
+          }
         }
 
         final success = await _doUpload(fileInfo, md5Hash, uploadPath);
@@ -759,6 +855,12 @@ class LocalFolderUploadManager extends ChangeNotifier {
 
       } catch (e) {
         LogUtil.log("[UploadManager] Upload error (attempt $attempt): $e");
+
+        // 🆕 如果是连接关闭错误，标记需要重新预热
+        if (_isConnectionClosedError(e)) {
+          LogUtil.log('[UploadManager] 检测到连接错误，标记需要重新预热');
+          _isConnectionWarmedUp = false;
+        }
       }
     }
 

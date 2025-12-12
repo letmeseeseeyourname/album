@@ -9,7 +9,7 @@ import '../models/file_upload_model.dart';
 import '../models/file_upload_response_model.dart';
 
 class AlbumProvider extends ChangeNotifier {
-  static final int myPageSize = 1000;
+  static final int myPageSize = 100;
 
   //nass/ps/storage/reportSyncTaskFiles
   Future<ResponseModel<bool>> reportSyncTaskFiles(
@@ -112,6 +112,7 @@ class AlbumProvider extends ChangeNotifier {
             "isPrivate": isPrivate ? "Y" : "N",
           },
           netMethod: NetMethod.post,
+          useCache: false
         );
 
     return responseModel;

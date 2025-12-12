@@ -83,7 +83,7 @@ class AlbumToolbar extends StatelessWidget {
             onPressed: onClearSelection,
             child: const Text(
               '取消选择',
-              style: TextStyle(color: Colors.black87),
+              style: TextStyle(color: Colors.orange),
             ),
           ),
           const SizedBox(width: 8),

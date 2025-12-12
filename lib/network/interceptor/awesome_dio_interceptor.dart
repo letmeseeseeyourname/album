@@ -206,9 +206,18 @@ class AwesomeDioInterceptor implements Interceptor {
   void onResponse(Response response, ResponseInterceptorHandler handler) async {
     _logResponse(response, style: _responseStyle);
     _logNewLine();
-    final body = json.decode(response.data);
-    if (body["code"] == 208) {
-      MCEventBus.fire(P6loginEvent());
+    // 🌟 关键修改：检查响应体是否为字符串且非空 🌟
+    if (response.data is String && (response.data as String).isNotEmpty) {
+      try {
+        final body = json.decode(response.data);
+        // 确保解析结果是 Map 类型，这样才能安全地访问 'code'
+        if (body is Map && body["code"] == 208) {
+          MCEventBus.fire(P6loginEvent());
+        }
+      } catch (e) {
+        // 可以在这里记录解析失败的错误，但不会阻止请求继续
+        _logger('Warning: Failed to decode JSON in onResponse: $e');
+      }
     }
 
     handler.next(response);

@@ -1,8 +1,8 @@
 ; Flutter Windows 应用程序 Inno Setup 配置文件
 ; 请根据你的实际项目信息修改以下配置
 
-#define MyAppName "亲选相册"
-#define MyAppVersion "1.0.3"
+#define MyAppName "AI相册管家"
+#define MyAppVersion "1.0.7"
 #define MyAppPublisher "joykee"
 #define MyAppURL "https://www.joykee.com"
 #define MyAppExeName "ablumwin.exe"
@@ -74,6 +74,9 @@ Source: "{#MyAppBuildDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubd
 ; 如果有额外的资源文件
 ;Source: "README.txt"; DestDir: "{app}"; Flags: ignoreversion
 ;Source: "LICENSE.txt"; DestDir: "{app}"; Flags: ignoreversion
+
+; P2P 隧道 DLL 库（位于 windows 目录下）
+Source: "windows\pgDllTunnel.dll"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 ; 开始菜单图标

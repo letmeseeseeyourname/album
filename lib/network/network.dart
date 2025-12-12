@@ -1,3 +1,4 @@
+import 'package:ablumwin/network/interceptor/error_interceptor.dart';
 import 'package:dio/dio.dart';
 
 import 'interceptor/awesome_dio_interceptor.dart';
@@ -40,6 +41,7 @@ class Network {
     List<Interceptor> interceptors = [];
     ///header公共参数
     interceptors.add(HeaderInterceptor());
+    interceptors.add(ErrorInterceptor());
     interceptors.add(AwesomeDioInterceptor());
     return interceptors;
   }

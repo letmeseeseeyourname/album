@@ -1,15 +1,30 @@
-// album/managers/album_data_manager.dart (修复版 - 添加 clearAllCache 方法)
+// album/managers/album_data_manager.dart (增强版 - 添加请求重试机制)
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import '../../../album/provider/album_provider.dart';
+import '../../../network/constant_sign.dart';
 import '../../../user/models/resource_list_model.dart';
 
-/// 相册数据管理器（优化版 - 修复 Group 切换问题）
+/// 数据加载重试配置
+class DataLoadRetryConfig {
+  static const int maxRetries = 5;            // 最大重试次数
+  static const int retryDelaySeconds = 2;     // 重试延迟（秒）
+  static const int warmUpTimeoutSeconds = 5;  // 预热超时（秒）
+}
+
+/// 相册数据管理器（优化版 - 修复 Group 切换问题 + 请求重试机制）
 /// 负责数据加载、分页、分组、缓存等逻辑
 class AlbumDataManager extends ChangeNotifier {
   final AlbumProvider _albumProvider = AlbumProvider();
+
+  // 🆕 连接预热
+  final Dio _dio = Dio();
+  bool _isConnectionWarmedUp = false;
+  DateTime? _lastWarmUpTime;
+  static const Duration _warmUpValidDuration = Duration(minutes: 5);
 
   // Tab 分离缓存 - 为每个 Tab 维护独立的数据
   final Map<bool, List<ResList>> _cachedResources = {
@@ -184,7 +199,73 @@ class AlbumDataManager extends ChangeNotifier {
     await loadResources(isPrivate: isPrivate);
   }
 
-  /// 加载资源
+  /// 🆕 预热连接（唤醒 P2P 隧道）
+  Future<bool> _warmUpConnection() async {
+    // 检查预热是否仍有效
+    if (_isConnectionWarmedUp && _lastWarmUpTime != null) {
+      final elapsed = DateTime.now().difference(_lastWarmUpTime!);
+      if (elapsed < _warmUpValidDuration) {
+        debugPrint('[AlbumDataManager] 连接预热仍有效，跳过预热');
+        return true;
+      }
+    }
+
+    final baseUrl = AppConfig.minio();
+    debugPrint('[AlbumDataManager] 开始预热连接: $baseUrl');
+
+    try {
+      await _dio.head(
+        baseUrl,
+        options: Options(
+          sendTimeout: Duration(seconds: DataLoadRetryConfig.warmUpTimeoutSeconds),
+          receiveTimeout: Duration(seconds: DataLoadRetryConfig.warmUpTimeoutSeconds),
+          validateStatus: (status) => true,
+        ),
+      );
+
+      _isConnectionWarmedUp = true;
+      _lastWarmUpTime = DateTime.now();
+      debugPrint('[AlbumDataManager] 连接预热成功');
+      return true;
+    } catch (e) {
+      debugPrint('[AlbumDataManager] 连接预热失败: $e');
+
+      // 等待后重试一次
+      await Future.delayed(const Duration(milliseconds: 500));
+
+      try {
+        await _dio.head(
+          baseUrl,
+          options: Options(
+            sendTimeout: Duration(seconds: DataLoadRetryConfig.warmUpTimeoutSeconds),
+            receiveTimeout: Duration(seconds: DataLoadRetryConfig.warmUpTimeoutSeconds),
+            validateStatus: (status) => true,
+          ),
+        );
+
+        _isConnectionWarmedUp = true;
+        _lastWarmUpTime = DateTime.now();
+        debugPrint('[AlbumDataManager] 连接预热第二次尝试成功');
+        return true;
+      } catch (e2) {
+        debugPrint('[AlbumDataManager] 连接预热第二次尝试也失败: $e2');
+        return false;
+      }
+    }
+  }
+
+  /// 🆕 检查是否是连接错误
+  bool _isConnectionError(dynamic error) {
+    final errorStr = error.toString().toLowerCase();
+    return errorStr.contains('connection') ||
+        errorStr.contains('socket') ||
+        errorStr.contains('timeout') ||
+        errorStr.contains('network') ||
+        errorStr.contains('refused') ||
+        errorStr.contains('unreachable');
+  }
+
+  /// 加载资源（带重试机制）
   Future<void> loadResources({required bool isPrivate}) async {
     if (_isLoading) return;
 
@@ -192,57 +273,97 @@ class AlbumDataManager extends ChangeNotifier {
     _errorMessage = null;
     notifyListeners();
 
-    try {
-      final response = await _albumProvider.listResources(
-        _currentPage,
-        isPrivate: isPrivate,
-      );
+    // 🆕 先预热连接
+    await _warmUpConnection();
 
-      if (response.isSuccess && response.model != null) {
-        final newResources = response.model!.resList;
+    int retryCount = 0;
+    bool success = false;
 
-        debugPrint('加载数据: 页码=$_currentPage, 新增=${newResources.length}项');
+    while (!success && retryCount <= DataLoadRetryConfig.maxRetries) {
+      try {
+        if (retryCount > 0) {
+          debugPrint('[AlbumDataManager] 重试第 $retryCount/${DataLoadRetryConfig.maxRetries} 次...');
 
-        // 去重：只添加不存在的资源
-        final existingIds = _resourceIndex.keys.toSet();
-        final uniqueResources = newResources
-            .where((r) => r.resId != null && !existingIds.contains(r.resId))
-            .toList();
+          // 重试前等待
+          await Future.delayed(Duration(seconds: DataLoadRetryConfig.retryDelaySeconds));
 
-        debugPrint('去重后: 实际新增=${uniqueResources.length}项');
-
-        if (uniqueResources.isNotEmpty) {
-          _allResources.addAll(uniqueResources);
-          _addResourcesToGroups(uniqueResources); // 增量分组
+          // 重新预热连接
+          _isConnectionWarmedUp = false;
+          await _warmUpConnection();
         }
 
-        _hasMore = newResources.length >= AlbumProvider.myPageSize;
+        final response = await _albumProvider.listResources(
+          _currentPage,
+          isPrivate: isPrivate,
+        );
 
-        debugPrint('加载完成: 总资源=${_allResources.length}, 索引=${_resourceIndex.length}, hasMore=$_hasMore');
+        if (response.isSuccess && response.model != null) {
+          final newResources = response.model!.resList;
 
-        // 保存到本地缓存
-        await _saveToLocalCache(isPrivate);
+          debugPrint('[AlbumDataManager] 加载数据: 页码=$_currentPage, 新增=${newResources.length}项');
 
-        // 更新内存缓存
-        _cachedResources[isPrivate] = _allResources;
-        _cachedGroupedResources[isPrivate] = _groupedResources;
-        _cachedPages[isPrivate] = _currentPage;
-        _cachedHasMore[isPrivate] = _hasMore;
-        _resourceIndexes[isPrivate] = _resourceIndex;
+          // 去重：只添加不存在的资源
+          final existingIds = _resourceIndex.keys.toSet();
+          final uniqueResources = newResources
+              .where((r) => r.resId != null && !existingIds.contains(r.resId))
+              .toList();
 
-        notifyListeners();
-      } else {
-        _errorMessage = '加载数据失败';
-        notifyListeners();
+          debugPrint('[AlbumDataManager] 去重后: 实际新增=${uniqueResources.length}项');
+
+          if (uniqueResources.isNotEmpty) {
+            _allResources.addAll(uniqueResources);
+            _addResourcesToGroups(uniqueResources); // 增量分组
+          }
+
+          _hasMore = newResources.length >= AlbumProvider.myPageSize;
+
+          debugPrint('[AlbumDataManager] 加载完成: 总资源=${_allResources.length}, 索引=${_resourceIndex.length}, hasMore=$_hasMore');
+
+          // 保存到本地缓存
+          await _saveToLocalCache(isPrivate);
+
+          // 更新内存缓存
+          _cachedResources[isPrivate] = _allResources;
+          _cachedGroupedResources[isPrivate] = _groupedResources;
+          _cachedPages[isPrivate] = _currentPage;
+          _cachedHasMore[isPrivate] = _hasMore;
+          _resourceIndexes[isPrivate] = _resourceIndex;
+
+          success = true;
+          _errorMessage = null;
+        } else {
+          // API 返回失败，但不是网络错误
+          final errorMsg = response.message ?? '加载数据失败';
+          debugPrint('[AlbumDataManager] API 返回失败: $errorMsg');
+
+          // 检查是否需要重试
+          if (_isConnectionError(errorMsg) && retryCount < DataLoadRetryConfig.maxRetries) {
+            retryCount++;
+            continue;
+          }
+
+          _errorMessage = errorMsg;
+          break;
+        }
+      } catch (e) {
+        debugPrint('[AlbumDataManager] 加载相册资源异常: $e');
+
+        // 检查是否是连接错误，决定是否重试
+        if (_isConnectionError(e) && retryCount < DataLoadRetryConfig.maxRetries) {
+          retryCount++;
+          _isConnectionWarmedUp = false; // 标记需要重新预热
+          continue;
+        }
+
+        _errorMessage = retryCount > 0
+            ? '加载失败（已重试 $retryCount 次）: $e'
+            : '加载失败: $e';
+        break;
       }
-    } catch (e) {
-      _errorMessage = '加载失败: $e';
-      debugPrint('加载相册资源失败: $e');
-      notifyListeners();
-    } finally {
-      _isLoading = false;
-      notifyListeners();
     }
+
+    _isLoading = false;
+    notifyListeners();
   }
 
   /// 加载更多
@@ -389,7 +510,7 @@ class AlbumDataManager extends ChangeNotifier {
 
   /// 根据ID获取资源列表（性能优化：O(m) 而非 O(n)）
   List<ResList> getResourcesByIds(Set<String> ids) {
-    debugPrint('查询资源: 请求=${ids.length}个, 索引有=${_resourceIndex.length}个');
+    //debugPrint('查询资源: 请求=${ids.length}个, 索引有=${_resourceIndex.length}个');
 
     final result = ids
         .where((id) {
@@ -459,6 +580,7 @@ class AlbumDataManager extends ChangeNotifier {
 
   @override
   void dispose() {
+    _dio.close();
     _albumProvider.dispose();
     super.dispose();
   }

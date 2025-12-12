@@ -1,10 +1,13 @@
 // album/components/album_bottom_bar.dart (优化版 - 新样式)
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
 import 'dart:io';
 import '../../../user/my_instance.dart';
 import '../../../album/database/download_task_db_helper.dart';
 import '../../../album/manager/download_queue_manager.dart';
+import '../../../eventbus/event_bus.dart';
+import '../../../eventbus/download_events.dart'; // 新增：导入下载事件
 import '../managers/selection_manager.dart';
 import '../managers/album_data_manager.dart';
 
@@ -34,11 +37,31 @@ class _AlbumBottomBarState extends State<AlbumBottomBar> {
   String _downloadPath = '';
   String _freeSpace = '计算中...';
 
+  // 事件订阅
+  StreamSubscription? _downloadPathSubscription;
+
   @override
   void initState() {
     super.initState();
     _initializeDownloadManager();
     _loadDownloadPath();
+    _subscribeToEvents();
+  }
+
+  // 订阅事件
+  void _subscribeToEvents() {
+    // 监听下载路径变更事件
+    _downloadPathSubscription = MCEventBus.on<DownloadPathChangedEvent>().listen((event) {
+      if (mounted) {
+        _loadDownloadPath();
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _downloadPathSubscription?.cancel();
+    super.dispose();
   }
 
   Future<void> _initializeDownloadManager() async {
@@ -255,11 +278,16 @@ class _AlbumBottomBarState extends State<AlbumBottomBar> {
               ),
             ),
             const SizedBox(width: 24),
-            Text(
-              '下载位置：$_downloadPath',
-              style: TextStyle(
-                fontSize: 12,
-                color: Colors.grey.shade500,
+            // 使用Flexible包裹下载路径，防止溢出
+            Flexible(
+              child: Text(
+                '下载位置：$_downloadPath',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: Colors.grey.shade500,
+                ),
+                overflow: TextOverflow.ellipsis,
+                maxLines: 1,
               ),
             ),
             const SizedBox(width: 12),
@@ -392,7 +420,7 @@ class _AlbumBottomBarState extends State<AlbumBottomBar> {
             content: Text('已添加 $addedCount 个文件到下载队列'),
             backgroundColor: Colors.green,
             action: SnackBarAction(
-              label: '查看队列',
+              label: '',//查看队列
               textColor: Colors.white,
               onPressed: () => _showDownloadQueue(context),
             ),

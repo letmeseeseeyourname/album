@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:ablumwin/network/utils/dev_environment_helper.dart';
 import 'package:ablumwin/pages/remote_album/managers/album_data_manager.dart';
 import 'package:crypto/crypto.dart';
 import 'package:flutter/material.dart';
@@ -210,6 +211,10 @@ class MyNetworkProvider extends ChangeNotifier {
         code: -1,
         model: null,
       );
+    }else{
+      /// 局域网与p2p 判断
+      var p6IP = resp.model?.p2pAddress??"";
+      await DevEnvironmentHelper().resetEnvironment(p6IP);
     }
     MyInstance().deviceCode = deviceCode;
     MyInstance().deviceModel = resp.model!;
@@ -416,7 +421,7 @@ class MyNetworkProvider extends ChangeNotifier {
           formData: {
             "deviceCode": deviceCode,
             "token": user?.accessToken ?? "",
-            "loginType": "A",
+            "loginType": "B",
             "userId": user?.user?.id ?? 0,
           },
           netMethod: NetMethod.post,
@@ -495,6 +500,9 @@ class MyNetworkProvider extends ChangeNotifier {
           netMethod: NetMethod.post,
           isUrlEncode: true,
         );
+    if (responseModel.isSuccess) {
+      MyInstance().deviceModel = responseModel.model;
+    }
     return responseModel;
   }
 

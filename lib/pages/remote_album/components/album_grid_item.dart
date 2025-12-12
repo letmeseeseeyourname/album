@@ -95,7 +95,7 @@ class AlbumGridItem extends StatelessWidget {
       fit: _getBoxFit(),
       placeholder: (context, url) => _buildPlaceholder(),
       errorWidget: (context, url, error) {
-        debugPrint('网格图片加载失败: $url, error: $error');
+        //debugPrint('网格图片加载失败: $url, error: $error');
         return _buildPlaceholder();
       },
     );

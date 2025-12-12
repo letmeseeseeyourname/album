@@ -1,15 +1,20 @@
 class AppConfig {
   // static bool paySign = true;
   static int environment = 0;
-  static String baseIP = "http://127.0.0.1";
-  // static String baseIP = "http://192.168.3.222";
+  static String p2pIP = "127.0.0.1";
+  static String usedIP = p2pIP;
   static String hostPort = "8080";
   static String minioPort = "9000";
+
+  static String  get currentIP {
+    return "http://$usedIP";
+  }
+
   static String hostUrl() {
     if (environment == 0) {
-      return "$baseIP:$hostPort";
+      return "$currentIP:$hostPort";
     }
-    return "$baseIP:$hostPort";
+    return "$currentIP:$hostPort";
   }
 
   static String userUrl() {
@@ -21,9 +26,9 @@ class AppConfig {
 
   static String minio() {
     if (environment == 0) {
-      return "$baseIP:$minioPort";
+      return "$currentIP:$minioPort";
     }
-    return "$baseIP:$minioPort";
+    return "$currentIP:$minioPort";
   }
 
   static String avatarURL() {

@@ -1,4 +1,4 @@
-// download_queue_manager.dart (修复版 - 添加连接预热和自动重试)
+// download_queue_manager.dart (增强版 - 添加多轮重试队列机制)
 import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
@@ -8,10 +8,13 @@ import '../../../user/my_instance.dart';
 import '../../../user/models/resource_list_model.dart';
 import '../../../network/constant_sign.dart';
 import '../../../services/transfer_speed_service.dart';
+import '../../../eventbus/event_bus.dart';
+import '../../../eventbus/download_events.dart'; // 新增：导入下载事件
+import '../../pages/remote_album/components/album_bottom_bar.dart';
 import '../database/download_task_db_helper.dart';
 
 
-/// 下载队列管理器（修复版 - 解决 P2P 隧道冷启动问题）
+/// 下载队列管理器（增强版 - 多轮重试队列机制）
 class DownloadQueueManager extends ChangeNotifier {
   static final DownloadQueueManager instance = DownloadQueueManager._init();
   DownloadQueueManager._init();
@@ -29,16 +32,35 @@ class DownloadQueueManager extends ChangeNotifier {
   // 当前正在下载的任务
   final Map<String, CancelToken> _activeTasks = {};
 
+  // ==================== 重试配置 ====================
   // 最大并发下载数
   static const int maxConcurrentDownloads = 3;
 
-  // 🆕 连接错误自动重试次数
-  static const int _maxConnectionRetries = 2;
+  // 单文件连接错误自动重试次数
+  static const int _maxConnectionRetries = 3;
 
-  // 🆕 记录每个任务的重试次数
+  // 🆕 失败队列最大重试轮次
+  static const int _maxRetryRounds = 6;
+
+  // 🆕 每轮重试前的等待时间（秒）
+  static const int _retryRoundDelaySeconds = 5;
+
+  // 记录每个任务的重试次数
   final Map<String, int> _taskRetryCount = {};
 
-  // 🆕 连接预热状态（避免重复预热）
+  // 🆕 失败队列（等待批量重试）
+  final List<DownloadTaskRecord> _failedQueue = [];
+
+  // 🆕 永久失败列表（超过重试轮次）
+  final List<DownloadTaskRecord> _permanentlyFailedTasks = [];
+
+  // 🆕 当前重试轮次
+  int _currentRetryRound = 0;
+
+  // 🆕 是否正在进行批量重试
+  bool _isRetrying = false;
+
+  // 连接预热状态（避免重复预热）
   bool _isConnectionWarmedUp = false;
   DateTime? _lastWarmUpTime;
   static const Duration _warmUpValidDuration = Duration(minutes: 5);
@@ -46,6 +68,7 @@ class DownloadQueueManager extends ChangeNotifier {
   // 下载目录
   String _downloadPath = '';
 
+  // ==================== Getters ====================
   // 获取所有任务
   List<DownloadTaskRecord> get downloadTasks => List.unmodifiable(_downloadTasks);
 
@@ -63,6 +86,21 @@ class DownloadQueueManager extends ChangeNotifier {
 
   // 获取失败的任务数量
   int get failedCount => _downloadTasks.where((t) => t.status == DownloadTaskStatus.failed).length;
+
+  // 🆕 获取失败队列
+  List<DownloadTaskRecord> get failedQueue => List.unmodifiable(_failedQueue);
+
+  // 🆕 获取永久失败列表
+  List<DownloadTaskRecord> get permanentlyFailedTasks => List.unmodifiable(_permanentlyFailedTasks);
+
+  // 🆕 获取当前重试轮次
+  int get currentRetryRound => _currentRetryRound;
+
+  // 🆕 获取最大重试轮次
+  int get maxRetryRounds => _maxRetryRounds;
+
+  // 🆕 是否正在重试
+  bool get isRetrying => _isRetrying;
 
   /// 初始化管理器
   Future<void> initialize({
@@ -453,6 +491,13 @@ class DownloadQueueManager extends ChangeNotifier {
         status: DownloadTaskStatus.completed,
       );
 
+      // 🆕 发送下载完成事件
+      MCEventBus.fire(DownloadCompleteEvent(
+        taskId: taskId,
+        fileName: task.fileName,
+        savePath: task.savePath,
+      ));
+
     } catch (e) {
       if (e is DioException && CancelToken.isCancel(e)) {
         // 用户取消
@@ -531,6 +576,12 @@ class DownloadQueueManager extends ChangeNotifier {
             errorMessage: e.toString(),
             updatedAt: DateTime.now().millisecondsSinceEpoch,
           );
+
+          // 🆕 如果正在批量重试模式，将任务添加到失败队列
+          if (_isRetrying) {
+            _addToFailedQueue(_downloadTasks[index]);
+          }
+
           notifyListeners();
         }
 
@@ -727,6 +778,219 @@ class DownloadQueueManager extends ChangeNotifier {
     );
   }
 
+  // ==================== 🆕 增强重试功能 ====================
+
+  /// 🆕 重试所有失败的下载任务
+  Future<void> retryAllFailedDownloads() async {
+    final failedTasks = _downloadTasks
+        .where((t) => t.status == DownloadTaskStatus.failed)
+        .toList();
+
+    if (failedTasks.isEmpty) {
+      debugPrint('没有失败的任务需要重试');
+      return;
+    }
+
+    debugPrint('═══════════════════════════════════════════');
+    debugPrint('批量重试 ${failedTasks.length} 个失败任务');
+    debugPrint('═══════════════════════════════════════════');
+
+    // 重置重试状态
+    _failedQueue.clear();
+    _permanentlyFailedTasks.clear();
+    _currentRetryRound = 0;
+    _isRetrying = true;
+
+    // 将失败任务加入失败队列
+    _failedQueue.addAll(failedTasks);
+
+    notifyListeners();
+
+    // 开始多轮重试
+    await _processFailedQueueWithRetry();
+
+    _isRetrying = false;
+    notifyListeners();
+
+    // 生成最终报告
+    _generateRetryReport();
+  }
+
+  /// 🆕 多轮重试失败队列（核心方法）
+  Future<void> _processFailedQueueWithRetry() async {
+    while (_failedQueue.isNotEmpty &&
+        _currentRetryRound < _maxRetryRounds) {
+
+      _currentRetryRound++;
+      debugPrint('════════════════════════════════════════');
+      debugPrint('重试轮次 $_currentRetryRound/$_maxRetryRounds');
+      debugPrint('待重试任务: ${_failedQueue.length} 个');
+      debugPrint('════════════════════════════════════════');
+
+      notifyListeners();
+
+      // 等待一段时间再重试（让网络恢复）
+      debugPrint('等待 $_retryRoundDelaySeconds 秒后开始重试...');
+      await Future.delayed(Duration(seconds: _retryRoundDelaySeconds));
+
+      // 预热连接
+      await _warmUpConnection();
+
+      // 取出当前轮次要重试的任务
+      final tasksToRetry = List<DownloadTaskRecord>.from(_failedQueue);
+      _failedQueue.clear();
+
+      // 重置这些任务的状态为 pending
+      for (final task in tasksToRetry) {
+        // 重置单文件重试计数
+        _taskRetryCount.remove(task.taskId);
+
+        final index = _downloadTasks.indexWhere((t) => t.taskId == task.taskId);
+        if (index != -1) {
+          _downloadTasks[index] = _downloadTasks[index].copyWith(
+            status: DownloadTaskStatus.pending,
+            errorMessage: null,
+            updatedAt: DateTime.now().millisecondsSinceEpoch,
+          );
+
+          await _dbHelper.updateStatus(
+            taskId: task.taskId,
+            userId: _currentUserId!,
+            groupId: _currentGroupId!,
+            status: DownloadTaskStatus.pending,
+          );
+        }
+      }
+
+      notifyListeners();
+
+      // 启动并发下载
+      for (int i = 0; i < maxConcurrentDownloads; i++) {
+        _processNextDownload();
+      }
+
+      // 等待所有任务完成（或失败）
+      await _waitForCurrentRoundComplete(tasksToRetry.length);
+
+      // 收集本轮失败的任务
+      _collectFailedTasks();
+
+      debugPrint('本轮结束: 失败队列剩余 ${_failedQueue.length} 个');
+
+      // 检查是否有超过最大重试轮次的任务
+      _moveExceededTasksToPermanentFailed();
+    }
+
+    // 如果还有剩余失败任务，全部移到永久失败
+    if (_failedQueue.isNotEmpty) {
+      debugPrint('达到最大重试轮次，${_failedQueue.length} 个任务永久失败');
+      _permanentlyFailedTasks.addAll(_failedQueue);
+      _failedQueue.clear();
+    }
+  }
+
+  /// 🆕 等待当前轮次的下载完成
+  Future<void> _waitForCurrentRoundComplete(int expectedCount) async {
+    debugPrint('等待当前轮次下载完成...');
+
+    int maxWaitSeconds = 300; // 最多等待5分钟
+    int waited = 0;
+
+    while (waited < maxWaitSeconds) {
+      await Future.delayed(const Duration(seconds: 1));
+      waited++;
+
+      // 检查是否所有活动任务都完成了
+      if (_activeTasks.isEmpty && pendingCount == 0) {
+        debugPrint('当前轮次下载完成，用时 $waited 秒');
+        break;
+      }
+
+      // 每30秒打印一次状态
+      if (waited % 30 == 0) {
+        debugPrint('等待中... 活动任务: ${_activeTasks.length}, 待处理: $pendingCount');
+      }
+    }
+
+    if (waited >= maxWaitSeconds) {
+      debugPrint('等待超时，强制结束当前轮次');
+      // 取消所有活动任务
+      for (final cancelToken in _activeTasks.values) {
+        cancelToken.cancel('Retry round timeout');
+      }
+      _activeTasks.clear();
+    }
+  }
+
+  /// 🆕 收集失败的任务到失败队列
+  void _collectFailedTasks() {
+    final newlyFailed = _downloadTasks
+        .where((t) => t.status == DownloadTaskStatus.failed)
+        .where((t) => !_failedQueue.any((f) => f.taskId == t.taskId))
+        .where((t) => !_permanentlyFailedTasks.any((p) => p.taskId == t.taskId))
+        .toList();
+
+    if (newlyFailed.isNotEmpty) {
+      debugPrint('收集到 ${newlyFailed.length} 个新失败任务');
+      _failedQueue.addAll(newlyFailed);
+    }
+  }
+
+  /// 🆕 将超过重试次数的任务移到永久失败列表
+  void _moveExceededTasksToPermanentFailed() {
+    // 目前使用轮次来判断，每个任务最多重试 _maxRetryRounds 轮
+    // 如果需要更细粒度的控制，可以为每个任务维护重试轮次计数
+  }
+
+  /// 🆕 生成重试报告
+  void _generateRetryReport() {
+    final successCount = _downloadTasks
+        .where((t) => t.status == DownloadTaskStatus.completed)
+        .length;
+    final failedCount = _permanentlyFailedTasks.length +
+        _downloadTasks.where((t) => t.status == DownloadTaskStatus.failed).length;
+
+    debugPrint('═══════════════════════════════════════════');
+    debugPrint('重试完成报告');
+    debugPrint('───────────────────────────────────────────');
+    debugPrint('总重试轮次: $_currentRetryRound');
+    debugPrint('成功下载: $successCount 个');
+    debugPrint('永久失败: ${_permanentlyFailedTasks.length} 个');
+    debugPrint('仍然失败: ${failedCount - _permanentlyFailedTasks.length} 个');
+    debugPrint('═══════════════════════════════════════════');
+
+    if (_permanentlyFailedTasks.isNotEmpty) {
+      debugPrint('永久失败的文件:');
+      for (final task in _permanentlyFailedTasks) {
+        debugPrint('  - ${task.fileName}: ${task.errorMessage ?? "未知错误"}');
+      }
+    }
+  }
+
+  /// 🆕 添加任务到失败队列（供 startDownload 调用）
+  void _addToFailedQueue(DownloadTaskRecord task) {
+    // 避免重复添加
+    if (!_failedQueue.any((t) => t.taskId == task.taskId)) {
+      _failedQueue.add(task);
+      debugPrint('任务加入失败队列: ${task.fileName}');
+    }
+  }
+
+  /// 🆕 清空失败队列和永久失败列表
+  void clearRetryState() {
+    _failedQueue.clear();
+    _permanentlyFailedTasks.clear();
+    _currentRetryRound = 0;
+    _isRetrying = false;
+    notifyListeners();
+  }
+
+  /// 🆕 获取重试状态消息
+  String get retryStatusMessage {
+    if (!_isRetrying) return '';
+    return '重试第 $_currentRetryRound/$_maxRetryRounds 轮，剩余 ${_failedQueue.length} 个任务...';
+  }
+
   @override
   void dispose() {
     // 取消所有活动下载
@@ -735,6 +999,8 @@ class DownloadQueueManager extends ChangeNotifier {
     }
     _activeTasks.clear();
     _taskRetryCount.clear();
+    _failedQueue.clear();
+    _permanentlyFailedTasks.clear();
     _dio.close();
     super.dispose();
   }

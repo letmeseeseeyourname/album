@@ -1,5 +1,4 @@
 // services/minio_service.dart
-// Minio 对象存储服务
 
 import 'dart:io';
 import 'dart:typed_data';
@@ -7,53 +6,54 @@ import 'package:minio/io.dart';
 import 'package:minio/minio.dart';
 import 'minio_config.dart';
 
-class MinioService {
-  static MinioService? _instance;
-  late Minio _minio;
+class MinioServiceHelper {
+  static MinioServiceHelper? _instance;
+  // 将 _minio 声明为可空，以支持延迟初始化
+  Minio? _minio;
+  // 添加一个字段来保存当前的配置，可选
+  MinioConfig? _currentConfig;
 
-  // 单例模式
-  static MinioService get instance {
-    _instance ??= MinioService._internal();
+  // 单例模式 (修改: 移除构造函数中的自动初始化)
+  static MinioServiceHelper get instance {
+    _instance ??= MinioServiceHelper._internal();
     return _instance!;
   }
 
-  MinioService._internal() {
-    _initMinio();
-  }
+  // 私有构造函数，现在它不执行任何操作
+  MinioServiceHelper._internal();
 
-  // 初始化 Minio 客户端
-  void _initMinio() {
+  /// 【新增】手动初始化 Minio 客户端
+  /// 传入 MinioConfig 对象来配置客户端。
+  /// 此方法必须在任何 Minio 操作之前调用。
+  void initializeMinio(MinioConfig config) {
+    _currentConfig = config;
     _minio = Minio(
-      endPoint: MinioConfig.host,        // ✅ 使用 host
-      port: MinioConfig.port,            // ✅ 使用 port
-      accessKey: MinioConfig.accessKey,
-      secretKey: MinioConfig.secretKey,
-      useSSL: MinioConfig.useSSL,
-    );
-
-    print('Minio initialized: ${MinioConfig.host}:${MinioConfig.port}');
-  }
-
-  void reInitializeMinio(String host) {
-    _minio = Minio(
-      endPoint: host,
+      endPoint: MinioConfig.host,
       port: MinioConfig.port,
       accessKey: MinioConfig.accessKey,
       secretKey: MinioConfig.secretKey,
       useSSL: MinioConfig.useSSL,
     );
 
-    print('Minio initialized manually: $host:${MinioConfig.port}');
+    print('Minio initialized manually: ${MinioConfig.host}:${MinioConfig.port}');
   }
 
+  /// 【修改】获取 Minio 实例，确保它已被初始化
+  Minio get _minioClient {
+    if (_minio == null) {
+      throw StateError(
+          'MinioService must be initialized before use. Call MinioService.instance.initializeMinio() first.');
+    }
+    return _minio!;
+  }
 
-
-  /// 创建存储桶
+  /// 【修改】创建存储桶
   Future<bool> createBucket(String bucketName) async {
     try {
-      final exists = await _minio.bucketExists(bucketName);
+      // 使用 _minioClient 代替 _minio
+      final exists = await _minioClient.bucketExists(bucketName);
       if (!exists) {
-        await _minio.makeBucket(bucketName);
+        await _minioClient.makeBucket(bucketName);
         print('存储桶创建成功: $bucketName');
         return true;
       }
@@ -68,7 +68,7 @@ class MinioService {
   /// 检查存储桶是否存在
   Future<bool> bucketExists(String bucketName) async {
     try {
-      return await _minio.bucketExists(bucketName);
+      return await _minioClient.bucketExists(bucketName);
     } catch (e) {
       print('检查存储桶失败: $e');
       return false;
@@ -100,7 +100,7 @@ class MinioService {
       final fileSize = await file.length();
 
       // 上传文件
-      await _minio.fPutObject(bucketName, objectName, filePath);
+      await _minioClient.fPutObject(bucketName, objectName, filePath);
 
       final url = MinioConfig.getFileUrl(bucketName, objectName);
 
@@ -141,7 +141,7 @@ class MinioService {
           : null;
 
       // 上传字节数据
-      await _minio.putObject(
+      await _minioClient.putObject(
         bucketName,
         objectName,
         Stream.value(data),
@@ -177,7 +177,7 @@ class MinioService {
       String savePath,
       ) async {
     try {
-      await _minio.fGetObject(bucketName, objectName, savePath);
+      await _minioClient.fGetObject(bucketName, objectName, savePath);
 
       final file = File(savePath);
       final size = await file.length();
@@ -205,7 +205,7 @@ class MinioService {
       String objectName,
       ) async {
     try {
-      final stream = await _minio.getObject(bucketName, objectName);
+      final stream = await _minioClient.getObject(bucketName, objectName);
       final bytes = await stream.toList();
       return Uint8List.fromList(bytes.expand((x) => x).toList());
     } catch (e) {
@@ -219,7 +219,7 @@ class MinioService {
   /// [objectName] 对象名称
   Future<bool> deleteFile(String bucketName, String objectName) async {
     try {
-      await _minio.removeObject(bucketName, objectName);
+      await _minioClient.removeObject(bucketName, objectName);
       print('文件删除成功: $objectName');
       return true;
     } catch (e) {
@@ -240,109 +240,7 @@ class MinioService {
     }
     return successCount;
   }
-
-  /// 列出存储桶中的所有对象
-  /// [bucketName] 存储桶名称
-  /// [prefix] 对象名称前缀（可选）
-  // Future<List<MinioObject>> listObjects(
-  //     String bucketName, {
-  //       String? prefix,
-  //     }) async {
-  //   try {
-  //     final objects = <MinioObject>[];
-  //     final stream = _minio.listObjects(
-  //       bucketName,
-  //       prefix: prefix ?? '',
-  //     );
-  //
-  //     await for (final obj in stream) {
-  //       // ListObjectsResult 的属性：name, lastModified, eTag, size, isDir
-  //       if (obj.name != null && !obj.isDir) {
-  //         objects.add(MinioObject(
-  //           key: obj.name!,
-  //           size: obj.size ?? 0,
-  //           lastModified: obj.lastModified,
-  //         ));
-  //       }
-  //     }
-  //
-  //     return objects;
-  //   } catch (e) {
-  //     print('列出对象失败: $e');
-  //     return [];
-  //   }
-  // }
-
-  /// 获取文件的预签名 URL（用于临时访问）
-  /// [bucketName] 存储桶名称
-  /// [objectName] 对象名称
-  /// [expires] 过期时间（秒），默认7天
-  Future<String?> getPresignedUrl(
-      String bucketName,
-      String objectName, {
-        int expires = 604800, // 7天
-      }) async {
-    try {
-      final url = await _minio.presignedGetObject(
-        bucketName,
-        objectName,
-        expires: expires,
-      );
-      return url;
-    } catch (e) {
-      print('获取预签名URL失败: $e');
-      return null;
-    }
-  }
-
-  /// 复制对象
-  /// [sourceBucket] 源存储桶
-  /// [sourceObject] 源对象名称
-  /// [destBucket] 目标存储桶
-  /// [destObject] 目标对象名称
-  Future<bool> copyObject(
-      String sourceBucket,
-      String sourceObject,
-      String destBucket,
-      String destObject,
-      ) async {
-    try {
-      await _minio.copyObject(
-        destBucket,
-        destObject,
-        '$sourceBucket/$sourceObject',
-      );
-      print('对象复制成功');
-      return true;
-    } catch (e) {
-      print('复制对象失败: $e');
-      return false;
-    }
-  }
-
-/// 获取对象信息
-/// [bucketName] 存储桶名称
-/// [objectName] 对象名称
-//   Future<ObjectStat?> getObjectStat(
-//       String bucketName,
-//       String objectName,
-//       ) async {
-//     try {
-//       final stat = await _minio.statObject(bucketName, objectName);
-//       // StatObjectResult 的属性：size, lastModified, eTag, metaData
-//       return ObjectStat(
-//         size: stat.size ?? 0,
-//         contentType: stat.metaData?['content-type'],
-//         lastModified: stat.lastModified,
-//         etag: stat.eTag,
-//       );
-//     } catch (e) {
-//       print('获取对象信息失败: $e');
-//       return null;
-//     }
-//   }
 }
-
 // 上传结果类
 class UploadResult {
   final bool success;

@@ -4,6 +4,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import '../../../eventbus/event_bus.dart';
 import '../../../eventbus/p2p_events.dart';
+import '../../../eventbus/download_events.dart'; // 新增：导入下载事件
 import '../../../pages/home_page.dart'; // 导入 GroupChangedEvent
 import '../../../user/models/group.dart';
 import '../../../user/provider/mine_provider.dart';
@@ -69,6 +70,7 @@ class _AlbumLibraryPageState extends State<AlbumLibraryPage> {
   P2pConnectionStatus _p2pStatus = P2pConnectionStatus.disconnected;
   StreamSubscription? _p2pSubscription;
   StreamSubscription? _groupChangedSubscription;
+  StreamSubscription? _downloadCompleteSubscription; // 新增：下载完成事件订阅
   String? _p2pErrorMessage;
 
   @override
@@ -85,6 +87,9 @@ class _AlbumLibraryPageState extends State<AlbumLibraryPage> {
 
     // 监听 Group 切换事件（在此事件中触发数据加载）
     _groupChangedSubscription = MCEventBus.on<GroupChangedEvent>().listen(_onGroupChanged);
+
+    // 监听下载完成事件
+    _downloadCompleteSubscription = MCEventBus.on<DownloadCompleteEvent>().listen(_onDownloadComplete);
 
     // 初始加载数据
     _loadInitialData();
@@ -107,7 +112,21 @@ class _AlbumLibraryPageState extends State<AlbumLibraryPage> {
     _dataManager.dispose();
     _p2pSubscription?.cancel();
     _groupChangedSubscription?.cancel();
+    _downloadCompleteSubscription?.cancel(); // 新增：取消下载完成事件订阅
     super.dispose();
+  }
+
+  // 处理下载完成事件
+  void _onDownloadComplete(DownloadCompleteEvent event) {
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('${event.fileName} 下载完成'),
+        backgroundColor: Colors.green,
+        duration: const Duration(seconds: 2),
+      ),
+    );
   }
 
   // 处理 Group 切换事件
@@ -192,6 +211,23 @@ class _AlbumLibraryPageState extends State<AlbumLibraryPage> {
   bool get _isPersonalTab => widget.currentTabIndex == 0;
 
   // ============ 预览相关 ============
+
+  // 处理item点击 - 选择状态下切换选中，否则打开预览
+  void _handleItemClick(int index) {
+    // 如果处于选择状态，则切换选中状态
+    if (_selectionManager.hasSelection) {
+      final resources = _dataManager.allResources;
+      if (index >= 0 && index < resources.length) {
+        final resId = resources[index].resId;
+        if (resId != null && resId.isNotEmpty) {
+          _selectionManager.toggleSelection(resId);
+        }
+      }
+    } else {
+      // 否则打开预览
+      _openPreview(index);
+    }
+  }
 
   void _openPreview(int index) {
     setState(() {
@@ -404,7 +440,7 @@ class _AlbumLibraryPageState extends State<AlbumLibraryPage> {
                 ),
                 const SizedBox(height: 16),
                 Text(
-                  _dataManager.errorMessage!,
+                  '加载失败:${_dataManager.errorMessage}',
                   style: const TextStyle(fontSize: 16),
                 ),
                 const SizedBox(height: 16),
@@ -448,7 +484,7 @@ class _AlbumLibraryPageState extends State<AlbumLibraryPage> {
               groupedResources: _dataManager.groupedResources,
               allResources: _dataManager.allResources,
               selectionManager: _selectionManager,
-              onItemClick: _openPreview,
+              onItemClick: _handleItemClick,
               scrollController: _scrollController,
               isGridView: true,
               showPreview: _showPreview,
@@ -457,7 +493,7 @@ class _AlbumLibraryPageState extends State<AlbumLibraryPage> {
               groupedResources: _dataManager.groupedResources,
               allResources: _dataManager.allResources,
               selectionManager: _selectionManager,
-              onItemClick: _openPreview,
+              onItemClick: _handleItemClick,
               scrollController: _scrollController,
               isGridView: false,
               showPreview: _showPreview,

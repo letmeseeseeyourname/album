@@ -4,7 +4,8 @@ import 'package:ablumwin/network/constant_sign.dart';
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
 import '../eventbus/event_bus.dart';
-import '../eventbus/upgrade_events.dart';
+import '../eventbus/upgrade_events.dart' hide DownloadProgressEvent;
+import '../eventbus/download_events.dart'; // 新增：导入下载事件
 import '../manager/upgrade_manager.dart';
 import '../user/my_instance.dart';
 import 'package:package_info_plus/package_info_plus.dart';
@@ -97,6 +98,9 @@ class _SettingsPageState extends State<SettingsPage> {
         _downloadPath = selectedDirectory;
       });
       await MyInstance().setDownloadPath(selectedDirectory);
+
+      // 发送下载路径变更事件
+      MCEventBus.fire(DownloadPathChangedEvent(selectedDirectory));
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -485,7 +489,7 @@ class _UpdateCheckContentState extends State<UpdateCheckContent> {
     _downloadSubscription = MCEventBus.on<DownloadProgressEvent>().listen((event) {
       if (mounted) {
         setState(() {
-          _downloadProgress = event.progress;
+          _downloadProgress = event.progress as DownloadProgress;
         });
       }
     });
