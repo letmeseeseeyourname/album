@@ -9,6 +9,7 @@ import '../eventbus/p2p_events.dart';
 import '../eventbus/upgrade_events.dart'; // 🆕 新增
 import '../manager/upgrade_manager.dart'; // 🆕 新增
 import '../network/constant_sign.dart';
+import '../network/utils/dev_environment_helper.dart';
 import '../pages/settings_page.dart';
 import '../pages/upload_records_page.dart';
 import '../pages/user_info_page.dart';
@@ -59,6 +60,11 @@ class _CustomTitleBarState extends State<CustomTitleBar> {
   bool _hasUpdate = false;
   StreamSubscription? _upgradeSubscription;
 
+  // 🆕 环境IP状态
+  String _currentIP = '';
+  bool _isPrimaryIP = false;
+  StreamSubscription? _environmentSubscription;
+
   @override
   void initState() {
     super.initState();
@@ -88,6 +94,17 @@ class _CustomTitleBarState extends State<CustomTitleBar> {
         });
       }
     });
+
+    // 🆕 监听环境重置事件
+    _environmentSubscription = MCEventBus.on<EnvironmentResetEvent>().listen((event) {
+      if (mounted) {
+        debugPrint('CustomTitleBar 收到环境重置事件: IP=${event.usedIP}, isPrimary=${event.isPrimaryIP}');
+        setState(() {
+          _currentIP = event.usedIP;
+          _isPrimaryIP = event.isPrimaryIP;
+        });
+      }
+    });
   }
 
   @override
@@ -105,6 +122,7 @@ class _CustomTitleBarState extends State<CustomTitleBar> {
   void dispose() {
     _p2pSubscription?.cancel();
     _upgradeSubscription?.cancel(); // 🆕 新增
+    _environmentSubscription?.cancel();  // 🆕 新增
     super.dispose();
   }
 
@@ -296,6 +314,50 @@ class _CustomTitleBarState extends State<CustomTitleBar> {
     );
   }
 
+  // 🆕 构建环境IP显示组件
+  Widget _buildEnvironmentIPIndicator() {
+    if (_currentIP.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    return Tooltip(
+      message: '',//_isPrimaryIP ? '使用主IP (局域网)' : '使用备用IP'
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        margin: const EdgeInsets.only(right: 8),
+        decoration: BoxDecoration(
+          color: _isPrimaryIP
+              ? Colors.green.withOpacity(0.1)
+              : Colors.orange.withOpacity(0.1),
+          borderRadius: BorderRadius.circular(4),
+          border: Border.all(
+            color: _isPrimaryIP
+                ? Colors.green.withOpacity(0.3)
+                : Colors.orange.withOpacity(0.3),
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              _isPrimaryIP ? Icons.lan : Icons.cloud,
+              size: 14,
+              color: _isPrimaryIP ? Colors.green : Colors.orange,
+            ),
+            const SizedBox(width: 4),
+            Text(
+              _currentIP,
+              style: TextStyle(
+                fontSize: 12,
+                color: _isPrimaryIP ? Colors.green.shade700 : Colors.orange.shade700,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
   // 构建Tab栏
   Widget _buildTabBar() {
     return Container(
@@ -489,7 +551,8 @@ class _CustomTitleBarState extends State<CustomTitleBar> {
                                     ),
                                   ),
                                 const Spacer(),
-
+                                // 🆕 环境IP显示
+                                _buildEnvironmentIPIndicator(),
                                 // 传输速率显示
                                 TransferSpeedIndicator(
                                   speedService:

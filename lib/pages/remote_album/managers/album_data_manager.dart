@@ -20,6 +20,9 @@ class DataLoadRetryConfig {
 class AlbumDataManager extends ChangeNotifier {
   final AlbumProvider _albumProvider = AlbumProvider();
 
+  // 🆕 disposed 标志 - 防止异步操作完成后调用已销毁的对象
+  bool _isDisposed = false;
+
   // 🆕 连接预热
   final Dio _dio = Dio();
   bool _isConnectionWarmedUp = false;
@@ -77,9 +80,18 @@ class AlbumDataManager extends ChangeNotifier {
   String? get errorMessage => _errorMessage;
   bool get hasData => _allResources.isNotEmpty;
 
+  /// 🆕 安全的 notifyListeners - 防止 disposed 后调用
+  void _safeNotifyListeners() {
+    if (!_isDisposed) {
+      notifyListeners();
+    }
+  }
+
   /// 🆕 清空所有缓存（用于 Group 切换时）
   /// 这会清空两个 Tab 的所有内存缓存和本地缓存
   Future<void> clearAllCache() async {
+    if (_isDisposed) return;
+
     debugPrint('清空所有相册缓存（Group 切换）');
 
     // 清空内存缓存 - 个人相册
@@ -108,11 +120,13 @@ class AlbumDataManager extends ChangeNotifier {
     await _clearLocalCache(true);
     await _clearLocalCache(false);
 
-    notifyListeners();
+    _safeNotifyListeners();
   }
 
   /// 切换 Tab（不重新加载数据）
   void switchTab(bool isPrivate) {
+    if (_isDisposed) return;
+
     if (_currentIsPrivate != isPrivate) {
       // 保存当前 Tab 的状态到缓存
       _cachedResources[_currentIsPrivate] = _allResources;
@@ -131,12 +145,14 @@ class AlbumDataManager extends ChangeNotifier {
 
       debugPrint('切换Tab: isPrivate=$isPrivate, 资源数=${_allResources.length}, 索引数=${_resourceIndex.length}');
 
-      notifyListeners();
+      _safeNotifyListeners();
     }
   }
 
   /// 重置并加载数据
   Future<void> resetAndLoad({required bool isPrivate}) async {
+    if (_isDisposed) return;
+
     debugPrint('重置并加载数据: isPrivate=$isPrivate');
 
     _currentIsPrivate = isPrivate;
@@ -151,14 +167,14 @@ class AlbumDataManager extends ChangeNotifier {
       _resourceIndex = Map.from(_resourceIndexes[isPrivate]!);
 
       debugPrint('从内存缓存恢复: 资源数=${_allResources.length}, 索引数=${_resourceIndex.length}');
-      notifyListeners();
+      _safeNotifyListeners();
       return;
     }
 
     // 尝试从本地缓存加载
     final hasCache = await _loadFromLocalCache(isPrivate);
 
-    if (!hasCache) {
+    if (!hasCache && !_isDisposed) {
       // 缓存无效，清空并重新加载
       _allResources.clear();
       _groupedResources.clear();
@@ -166,7 +182,7 @@ class AlbumDataManager extends ChangeNotifier {
       _currentPage = 1;
       _hasMore = true;
       _errorMessage = null;
-      notifyListeners();
+      _safeNotifyListeners();
 
       await loadResources(isPrivate: isPrivate);
     }
@@ -174,6 +190,8 @@ class AlbumDataManager extends ChangeNotifier {
 
   /// 强制刷新（清空缓存重新加载）
   Future<void> forceRefresh({required bool isPrivate}) async {
+    if (_isDisposed) return;
+
     debugPrint('强制刷新: isPrivate=$isPrivate');
 
     _currentIsPrivate = isPrivate;
@@ -195,12 +213,14 @@ class AlbumDataManager extends ChangeNotifier {
     // 清空本地缓存
     await _clearLocalCache(isPrivate);
 
-    notifyListeners();
+    _safeNotifyListeners();
     await loadResources(isPrivate: isPrivate);
   }
 
   /// 🆕 预热连接（唤醒 P2P 隧道）
   Future<bool> _warmUpConnection() async {
+    if (_isDisposed) return false;
+
     // 检查预热是否仍有效
     if (_isConnectionWarmedUp && _lastWarmUpTime != null) {
       final elapsed = DateTime.now().difference(_lastWarmUpTime!);
@@ -230,8 +250,12 @@ class AlbumDataManager extends ChangeNotifier {
     } catch (e) {
       debugPrint('[AlbumDataManager] 连接预热失败: $e');
 
+      if (_isDisposed) return false;
+
       // 等待后重试一次
       await Future.delayed(const Duration(milliseconds: 500));
+
+      if (_isDisposed) return false;
 
       try {
         await _dio.head(
@@ -267,19 +291,25 @@ class AlbumDataManager extends ChangeNotifier {
 
   /// 加载资源（带重试机制）
   Future<void> loadResources({required bool isPrivate}) async {
-    if (_isLoading) return;
+    if (_isLoading || _isDisposed) return;
 
     _isLoading = true;
     _errorMessage = null;
-    notifyListeners();
+    _safeNotifyListeners();
 
     // 🆕 先预热连接
     await _warmUpConnection();
 
+    // 🆕 预热后检查是否已销毁
+    if (_isDisposed) {
+      _isLoading = false;
+      return;
+    }
+
     int retryCount = 0;
     bool success = false;
 
-    while (!success && retryCount <= DataLoadRetryConfig.maxRetries) {
+    while (!success && retryCount <= DataLoadRetryConfig.maxRetries && !_isDisposed) {
       try {
         if (retryCount > 0) {
           debugPrint('[AlbumDataManager] 重试第 $retryCount/${DataLoadRetryConfig.maxRetries} 次...');
@@ -287,15 +317,23 @@ class AlbumDataManager extends ChangeNotifier {
           // 重试前等待
           await Future.delayed(Duration(seconds: DataLoadRetryConfig.retryDelaySeconds));
 
+          // 🆕 等待后检查是否已销毁
+          if (_isDisposed) break;
+
           // 重新预热连接
           _isConnectionWarmedUp = false;
           await _warmUpConnection();
+
+          if (_isDisposed) break;
         }
 
         final response = await _albumProvider.listResources(
           _currentPage,
           isPrivate: isPrivate,
         );
+
+        // 🆕 请求完成后检查是否已销毁
+        if (_isDisposed) break;
 
         if (response.isSuccess && response.model != null) {
           final newResources = response.model!.resList;
@@ -321,6 +359,9 @@ class AlbumDataManager extends ChangeNotifier {
 
           // 保存到本地缓存
           await _saveToLocalCache(isPrivate);
+
+          // 🆕 保存缓存后检查是否已销毁
+          if (_isDisposed) break;
 
           // 更新内存缓存
           _cachedResources[isPrivate] = _allResources;
@@ -363,12 +404,12 @@ class AlbumDataManager extends ChangeNotifier {
     }
 
     _isLoading = false;
-    notifyListeners();
+    _safeNotifyListeners();
   }
 
   /// 加载更多
   Future<void> loadMore({required bool isPrivate}) async {
-    if (!_hasMore || _isLoading) return;
+    if (!_hasMore || _isLoading || _isDisposed) return;
 
     _currentPage++;
     await loadResources(isPrivate: isPrivate);
@@ -447,6 +488,8 @@ class AlbumDataManager extends ChangeNotifier {
 
   /// 从本地缓存加载
   Future<bool> _loadFromLocalCache(bool isPrivate) async {
+    if (_isDisposed) return false;
+
     try {
       final prefs = await SharedPreferences.getInstance();
       final cacheKey = '$_cacheKeyPrefix${isPrivate ? "private" : "family"}';
@@ -467,6 +510,9 @@ class AlbumDataManager extends ChangeNotifier {
         return false;
       }
 
+      // 🆕 解析数据前检查是否已销毁
+      if (_isDisposed) return false;
+
       _currentPage = cacheData['page'];
       _hasMore = cacheData['hasMore'];
       _allResources = (cacheData['resources'] as List)
@@ -483,7 +529,7 @@ class AlbumDataManager extends ChangeNotifier {
       _resourceIndexes[isPrivate] = _resourceIndex;
 
       debugPrint('从本地缓存加载: 资源=${_allResources.length}, 索引=${_resourceIndex.length}');
-      notifyListeners();
+      _safeNotifyListeners();
       return true;
     } catch (e) {
       debugPrint('加载缓存失败: $e');
@@ -523,7 +569,7 @@ class AlbumDataManager extends ChangeNotifier {
         .map((id) => _resourceIndex[id]!)
         .toList();
 
-    debugPrint('查询结果: 找到${result.length}个资源');
+    // debugPrint('查询结果: 找到${result.length}个资源');
     return result;
   }
 
@@ -580,6 +626,7 @@ class AlbumDataManager extends ChangeNotifier {
 
   @override
   void dispose() {
+    _isDisposed = true;  // 🆕 首先标记已销毁，阻止后续异步操作
     _dio.close();
     _albumProvider.dispose();
     super.dispose();

@@ -4,7 +4,20 @@ import 'dart:io';
 import 'package:ablumwin/minio/minio_service.dart';
 import 'package:flutter/cupertino.dart';
 
+import '../../eventbus/event_bus.dart';
 import '../constant_sign.dart';
+class EnvironmentResetEvent {
+  /// 最终使用的 IP 地址
+  final String usedIP;
+
+  /// 是否使用的是主 IP (targetIP1)
+  final bool isPrimaryIP;
+
+  EnvironmentResetEvent({
+    required this.usedIP,
+    required this.isPrimaryIP,
+  });
+}
 
 class DevEnvironmentHelper {
 
@@ -71,6 +84,11 @@ class DevEnvironmentHelper {
       debugPrint('端口不可用，reason: $reason');
     }
     MinioService.instance.reInitializeMinio(AppConfig.usedIP);
+
+    MCEventBus.fire(EnvironmentResetEvent(
+      usedIP: AppConfig.usedIP,
+      isPrimaryIP: AppConfig.usedIP.contains("127.0.0.1"),
+    ));
   }
 
   /// 判断目标IP是否与本机在同一局域网内
