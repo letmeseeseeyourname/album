@@ -28,19 +28,22 @@ class FolderGridComponent extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 20),
+      padding: const EdgeInsets.symmetric(horizontal: 25, vertical: 10),
       child: LayoutBuilder(
         builder: (context, constraints) {
           // 固定的 items 尺寸
-          const itemWidth = 135.0;
-          const itemHeight = 120.0;
-          const spacing = 10.0;
+          const itemWidth = 150.0;
+          const itemHeight = 130.0;
+          const spacing = 8.0;
 
           // 计算可用宽度
           final availableWidth = constraints.maxWidth;
 
           // 计算每行可以显示多少个 items
-          final crossAxisCount = ((availableWidth + spacing) / (itemWidth + spacing)).floor().clamp(1, 10);
+          final crossAxisCount =
+              ((availableWidth + spacing) / (itemWidth + spacing))
+                  .floor()
+                  .clamp(1, 10);
 
           return GridView.builder(
             gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
@@ -137,29 +140,27 @@ class _FolderCardWidgetState extends State<FolderCardWidget> {
                   children: [
                     // 文件夹图标 - 固定尺寸
                     SizedBox(
-                      width: 80,
-                      height: 64,
+                      width: 105,
+                      height: 84,
                       child: SvgPicture.asset(
                         'assets/icons/folder_icon.svg',
                         fit: BoxFit.contain,
                       ),
                     ),
 
-                    const SizedBox(height: 5),
-
+                    const SizedBox(height: 8),
                     // 文件夹名称 - 固定高度
                     SizedBox(
-                      height: 30,
+                      height: 18,
                       child: Center(
                         child: Text(
                           widget.folder.name,
                           style: const TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w400,
-                            height: 1.2,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w500,
                           ),
                           textAlign: TextAlign.center,
-                          maxLines: 2,
+                          maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
                       ),
@@ -182,10 +183,14 @@ class _FolderCardWidgetState extends State<FolderCardWidget> {
                         width: 24,
                         height: 24,
                         decoration: BoxDecoration(
-                          color: widget.isSelected ? Colors.orange : Colors.white,
+                          color: widget.isSelected
+                              ? Colors.orange
+                              : Colors.white,
                           shape: BoxShape.circle,
                           border: Border.all(
-                            color: widget.isSelected ? Colors.orange : Colors.grey.shade400,
+                            color: widget.isSelected
+                                ? Colors.orange
+                                : Colors.grey.shade400,
                             width: 2,
                           ),
                           boxShadow: [
@@ -198,10 +203,10 @@ class _FolderCardWidgetState extends State<FolderCardWidget> {
                         ),
                         child: widget.isSelected
                             ? const Icon(
-                          Icons.check,
-                          size: 16,
-                          color: Colors.white,
-                        )
+                                Icons.check,
+                                size: 16,
+                                color: Colors.white,
+                              )
                             : null,
                       ),
                     ),

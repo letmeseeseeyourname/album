@@ -70,7 +70,7 @@ class FolderItem extends StatelessWidget {
                     fontWeight: FontWeight.w500,
                   ),
                   textAlign: TextAlign.center,
-                  maxLines: 2,
+                  maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
@@ -82,8 +82,10 @@ class FolderItem extends StatelessWidget {
   }
 
   Widget _buildFolderIcon() {
-    final iconWidth = (width ?? 140) * 0.5;
-    final iconHeight = (height ?? 140) * 0.4;
+    // final iconWidth = (width ?? 140) * 0.5;
+    final iconWidth = 105.0;
+    // final iconHeight = (height ?? 140) * 0.4;
+    final iconHeight = 84.0;
 
     return SvgPicture.asset(
       'assets/icons/folder_icon.svg',

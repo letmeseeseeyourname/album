@@ -280,8 +280,8 @@ class _FolderGridItemState extends State<_FolderGridItem> {
                       child: Center(
                         child: SvgPicture.asset(
                           'assets/icons/folder_icon.svg',
-                          width: 70,
-                          height: 56,
+                          width: 105,
+                          height: 84,
                           fit: BoxFit.contain,
                         ),
                       ),
@@ -295,7 +295,7 @@ class _FolderGridItemState extends State<_FolderGridItem> {
                         fontWeight: FontWeight.w500,
                       ),
                       textAlign: TextAlign.center,
-                      maxLines: 2,
+                      maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
                   ],

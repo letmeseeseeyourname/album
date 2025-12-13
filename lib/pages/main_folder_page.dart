@@ -13,8 +13,10 @@ import '../user/models/group.dart';
 import '../services/folder_manager.dart';
 import '../album/manager/local_folder_upload_manager.dart';
 import '../user/my_instance.dart';
+import '../widgets/upload_bottom_bar.dart';
+import 'local_album/controllers/upload_coordinator.dart';
 import 'local_album/pages/folder_detail_page.dart';
-
+import '../services/global_upload_service.dart';
 // MARK: - 辅助模型和静态方法 (用于在后台隔离区运行)
 
 /// 用于返回上传分析结果的模型
@@ -116,16 +118,16 @@ class MainFolderPage extends StatefulWidget {
   State<MainFolderPage> createState() => _MainFolderPageState();
 }
 
-class _MainFolderPageState extends State<MainFolderPage> {
+class _MainFolderPageState extends State<MainFolderPage> with UploadCoordinatorMixin {
   final FolderManager _folderManager = FolderManager();
-  final LocalFolderUploadManager _uploadManager = LocalFolderUploadManager();
+  // final LocalFolderUploadManager _uploadManager = LocalFolderUploadManager();
+  // LocalUploadProgress? uploadProgress;
+  // bool isUploading = false;
   List<FolderInfo> folders = [];
   Set<int> selectedIndices = {};
   bool isSelectionMode = false;
   int? hoveredIndex;
   bool _isLoading = true;
-  bool isUploading = false;
-  LocalUploadProgress? uploadProgress;
   bool isGridView = true;  // 添加视图模式状态，默认为网格视图
 
   // 添加递归统计缓存
@@ -138,23 +140,23 @@ class _MainFolderPageState extends State<MainFolderPage> {
   void initState() {
     super.initState();
     _loadFolders();
-    _uploadManager.addListener(_onUploadProgressChanged);
+    // _uploadManager.addListener(_onUploadProgressChanged);
   }
 
   @override
   void dispose() {
-    _uploadManager.removeListener(_onUploadProgressChanged);
+    // _uploadManager.removeListener(_onUploadProgressChanged);
     super.dispose();
   }
 
-  void _onUploadProgressChanged() {
-    if (mounted) {
-      setState(() {
-        uploadProgress = _uploadManager.currentProgress;
-        isUploading = _uploadManager.isUploading;
-      });
-    }
-  }
+  // void _onUploadProgressChanged() {
+  //   if (mounted) {
+  //     setState(() {
+  //       uploadProgress = _uploadManager.currentProgress;
+  //       isUploading = _uploadManager.isUploading;
+  //     });
+  //   }
+  // }
 
   /// 从持久化存储加载本地图库文件夹列表
   Future<void> _loadFolders() async {
@@ -352,9 +354,9 @@ class _MainFolderPageState extends State<MainFolderPage> {
     }
 
     // 允许在有上传任务时添加新任务（支持多任务并发）
-    if (isUploading) {
-      _showMessage('正在添加新的上传任务到队列...', isError: false);
-    }
+    // if (isUploading) {
+    //   _showMessage('正在添加新的上传任务到队列...', isError: false);
+    // }
 
     // 1. 获取所有选中的文件夹
     final selectedFolders = selectedIndices
@@ -365,7 +367,7 @@ class _MainFolderPageState extends State<MainFolderPage> {
     final List<String> allFilesToUpload = [];
 
     // 递归处理选中的文件夹
-    _showMessage('正在扫描选中的文件夹，请稍候...', isError: false);
+    //_showMessage('正在扫描选中的文件夹，请稍候...', isError: false);
     for (final folder in selectedFolders) {
       // 在后台线程递归获取所有媒体文件路径
       final filesInFolder = await compute(_getAllMediaFilesRecursive, folder.path);
@@ -386,34 +388,54 @@ class _MainFolderPageState extends State<MainFolderPage> {
     if (!confirmed) return;
 
     // 4. 开始上传
-    setState(() {
-      isUploading = true;
-    });
+    // setState(() {
+    //   isUploading = true;
+    // });
 
-    await _uploadManager.uploadLocalFiles(
-      finalUploadList, // 传递实际的文件路径列表
-      onProgress: (progress) {
-        // 进度在 listener 中自动更新
+    // await _uploadManager.uploadLocalFiles(
+    //   finalUploadList, // 传递实际的文件路径列表
+    //   onProgress: (progress) {
+    //     // 进度在 listener 中自动更新
+    //   },
+    //   onComplete: (success, message) {
+    //     if (mounted) {
+    //       setState(() {
+    //         // 检查_uploadManager是否还有其他任务在运行
+    //         // 只有当所有任务都完成时才设置 isUploading 为 false
+    //         isUploading = _uploadManager.isUploading;
+    //         uploadProgress = _uploadManager.currentProgress;
+    //         // 只有当所有任务都完成且当前任务成功时才清空选择
+    //         if (success && !_uploadManager.isUploading) {
+    //           // 清空选择
+    //           selectedIndices.clear();
+    //           isSelectionMode = false;
+    //           // 清除缓存
+    //           _cachedImageCount = 0;
+    //           _cachedVideoCount = 0;
+    //           _cachedTotalSizeMB = 0.0;
+    //         }
+    //       });
+    //       _showMessage(message, isError: !success);
+    //     }
+    //   },
+    // );
+
+    // ✅ 使用 uploadCoordinator（来自 Mixin）
+    await uploadCoordinator.startUpload(
+      finalUploadList,
+          (message, {isError = false}) {
+        _showMessage(message, isError: isError);
       },
-      onComplete: (success, message) {
-        if (mounted) {
+          () {
+        // 完成回调
+        if (mounted && !isUploading) {
           setState(() {
-            // 检查_uploadManager是否还有其他任务在运行
-            // 只有当所有任务都完成时才设置 isUploading 为 false
-            isUploading = _uploadManager.isUploading;
-            uploadProgress = _uploadManager.currentProgress;
-            // 只有当所有任务都完成且当前任务成功时才清空选择
-            if (success && !_uploadManager.isUploading) {
-              // 清空选择
-              selectedIndices.clear();
-              isSelectionMode = false;
-              // 清除缓存
-              _cachedImageCount = 0;
-              _cachedVideoCount = 0;
-              _cachedTotalSizeMB = 0.0;
-            }
+            selectedIndices.clear();
+            isSelectionMode = false;
+            _cachedImageCount = 0;
+            _cachedVideoCount = 0;
+            _cachedTotalSizeMB = 0.0;
           });
-          _showMessage(message, isError: !success);
         }
       },
     );
@@ -961,125 +983,16 @@ class _MainFolderPageState extends State<MainFolderPage> {
   }
 
   Widget _buildBottomBar() {
-    if (selectedIndices.isEmpty && !isUploading) {
-      return const SizedBox.shrink();
-    }
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 20),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        border: Border(
-          top: BorderSide(color: Colors.grey.shade300),
-        ),
-      ),
-      child: Row(
-        children: [
-          // 左侧信息
-          if (selectedIndices.isNotEmpty) ...[
-            // 显示统计中状态或统计结果
-            _isCountingFiles
-                ? Row(
-              children: [
-                SizedBox(
-                  width: 16,
-                  height: 16,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
-                    valueColor: AlwaysStoppedAnimation<Color>(Colors.grey.shade600),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Text(
-                  '正在统计文件...',
-                  style: TextStyle(
-                    fontSize: 14,
-                    color: Colors.grey.shade600,
-                  ),
-                ),
-              ],
-            )
-                : Text(
-              '已选：${_formatFileSize(_getSelectedTotalSize())} · ${_getSelectedImageCount()}张照片/${_getSelectedVideoCount()}条视频',
-              style: TextStyle(
-                fontSize: 14,
-                color: Colors.grey.shade600,
-              ),
-            ),
-          ],
-
-          // 上传进度
-          if (isUploading && uploadProgress != null) ...[
-            const SizedBox(width: 20),
-            Expanded(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: LinearProgressIndicator(
-                          value: uploadProgress!.progress,
-                          backgroundColor: Colors.grey.shade200,
-                          valueColor: const AlwaysStoppedAnimation<Color>(Colors.orange),
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      Text(
-                        '${(uploadProgress!.progress * 100).toStringAsFixed(0)}%',
-                        style: const TextStyle(fontSize: 12),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    '${uploadProgress!.uploadedFiles}/${uploadProgress!.totalFiles} · ${uploadProgress!.currentFileName ?? ""}',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: Colors.grey.shade600,
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ],
-              ),
-            ),
-          ],
-
-          const Spacer(),
-
-          // 右侧按钮
-          Text(
-            '设备剩余空间：${_getDeviceStorageUsed()}G',
-            style: TextStyle(
-              fontSize: 14,
-              color: Colors.grey.shade600,
-            ),
-          ),
-          const SizedBox(width: 30),
-          ElevatedButton(
-            onPressed: _handleSync,  // 始终可用，支持多任务并发
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF2C2C2C),
-              padding: const EdgeInsets.symmetric(
-                horizontal: 40,
-                vertical: 16,
-              ),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(8),
-              ),
-            ),
-            child: Text(
-              isUploading ? '继续上传' : '上传',  // 动态文字提示
-              style: const TextStyle(
-                fontSize: 16,
-                color: Colors.white,
-              ),
-            ),
-          ),
-        ],
-      ),
+    return UploadBottomBar(
+      selectedCount: selectedIndices.length,
+      selectedTotalSizeMB: _cachedTotalSizeMB,
+      selectedImageCount: _cachedImageCount,
+      selectedVideoCount: _cachedVideoCount,
+      deviceStorageSurplusGB: double.tryParse(_getDeviceStorageUsed()) ?? 0,
+      isUploading: isUploading,           // ✅ 来自 Mixin
+      uploadProgress: uploadProgress,      // ✅ 来自 Mixin
+      onUploadPressed: _handleSync,
+      isCountingFiles: _isCountingFiles,
     );
   }
 }

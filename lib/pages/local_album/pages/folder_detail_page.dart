@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:ablumwin/user/my_instance.dart';
 
 import '../../../album/manager/local_folder_upload_manager.dart';
+import '../../../services/global_upload_service.dart';
+import '../../../widgets/upload_bottom_bar.dart';
 import '../controllers/path_navigation_controller.dart';
 import '../controllers/selection_controller.dart';
 import '../controllers/upload_coordinator.dart';
@@ -47,7 +49,7 @@ class FolderDetailPage extends StatefulWidget {
   State<FolderDetailPage> createState() => _FolderDetailPageState();
 }
 
-class _FolderDetailPageState extends State<FolderDetailPage> {
+class _FolderDetailPageState extends State<FolderDetailPage> with UploadCoordinatorMixin {
   // 服务
   final ThumbnailHelper _thumbnailHelper = ThumbnailHelper();
   final FileService _fileService = FileService();
@@ -56,7 +58,7 @@ class _FolderDetailPageState extends State<FolderDetailPage> {
   // 控制器
   late final PathNavigationController _pathController;
   late final SelectionController _selectionController;
-  late final UploadCoordinator _uploadCoordinator;
+  // late final UploadCoordinator _uploadCoordinator;
 
   // 状态
   List<FileItem> _fileItems = [];
@@ -79,7 +81,7 @@ class _FolderDetailPageState extends State<FolderDetailPage> {
 
   @override
   void dispose() {
-    _uploadCoordinator.removeListener(_onUploadProgressChanged);
+    // _uploadCoordinator.removeListener(_onUploadProgressChanged);
     super.dispose();
   }
 
@@ -97,11 +99,11 @@ class _FolderDetailPageState extends State<FolderDetailPage> {
 
     _selectionController = SelectionController();
 
-    _uploadCoordinator = UploadCoordinator(
-      LocalFolderUploadManager(),
-      _fileService,
-    );
-    _uploadCoordinator.addListener(_onUploadProgressChanged);
+    // _uploadCoordinator = UploadCoordinator(
+    //   LocalFolderUploadManager(),
+    //   _fileService,
+    // );
+    // _uploadCoordinator.addListener(_onUploadProgressChanged);
   }
 
   /// 初始化缩略图辅助工具
@@ -336,7 +338,7 @@ class _FolderDetailPageState extends State<FolderDetailPage> {
     }
 
     // 准备上传 - 新API只需传入选中的项目列表
-    final prepareResult = await _uploadCoordinator.prepareUpload(selectedItems);
+    final prepareResult = await uploadCoordinator.prepareUpload(selectedItems);
 
     if (!prepareResult.success) {
       _showMessage(prepareResult.message ?? '准备上传失败', isError: true);
@@ -357,7 +359,7 @@ class _FolderDetailPageState extends State<FolderDetailPage> {
 
     if (!confirmed) return;
 
-    await _uploadCoordinator.startUpload(
+    await uploadCoordinator.startUpload(
       prepareResult.filePaths!,
           (String message, {bool isError = false}) => _showMessage(message, isError: isError),
           () {
@@ -526,7 +528,7 @@ class _FolderDetailPageState extends State<FolderDetailPage> {
       onFilterChange: _setFilterType,
       viewMode: _viewMode,
       onViewModeChange: _setViewMode,
-      isUploading: _uploadCoordinator.isUploading,
+      isUploading: uploadCoordinator.isUploading,
       selectedCount: _selectionController.selectedCount,
       onCancelSelection: _cancelSelection,
     );
@@ -556,16 +558,16 @@ class _FolderDetailPageState extends State<FolderDetailPage> {
       totalSizeMB = _selectionController.getSelectedTotalSize(filteredFiles);
     }
 
-    return FolderDetailBottomBar(
+    return UploadBottomBar(
       selectedCount: _selectionController.selectedCount,
       selectedTotalSizeMB: totalSizeMB,
       selectedImageCount: imageCount,
       selectedVideoCount: videoCount,
-      deviceStorageUsedPercent: _getDeviceStorageSurplus(),
-      isUploading: _uploadCoordinator.isUploading,
-      uploadProgress: _uploadCoordinator.uploadProgress,
-      onSyncPressed: _handleSync,
-      isCountingFiles: _selectionController.isCountingFiles, // ✅ 传递统计状态
+      deviceStorageSurplusGB: _getDeviceStorageSurplus(),
+      isUploading: isUploading,           // ✅ 来自 Mixin
+      uploadProgress: uploadProgress,      // ✅ 来自 Mixin
+      onUploadPressed: _handleSync,
+      isCountingFiles: _selectionController.isCountingFiles,
     );
   }
 

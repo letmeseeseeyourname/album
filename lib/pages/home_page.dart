@@ -11,6 +11,8 @@ import '../user/models/group.dart';
 import '../user/models/p6device_info_model.dart';
 import '../user/my_instance.dart';
 import '../user/provider/mine_provider.dart';
+import 'local_album/controllers/upload_coordinator.dart';
+import 'local_album/services/file_service.dart';
 import 'main_folder_page.dart';
 
 class P6loginEvent {
@@ -55,7 +57,7 @@ class _HomePageState extends State<HomePage> {
   @override
   void initState() {
     super.initState();
-
+    UploadCoordinator.initialize(FileService());
     _p6loginSubscription = MCEventBus.on<P6loginEvent>().listen((event) {//
       if (mounted) {
         _p6loginAction();

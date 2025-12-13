@@ -1,20 +1,63 @@
-// controllers/upload_coordinator_fixed.dart
-// ============ 修复 Stack Overflow 错误的版本 ============
+// controllers/upload_coordinator.dart
+// ============ 全局单例版本 - 支持跨页面上传状态共享 ============
+
 import 'package:flutter/material.dart';
 import '../../../album/manager/local_folder_upload_manager.dart';
 import '../../../models/file_item.dart';
 import '../services/file_service.dart';
 
-/// 上传协调器 - 负责协调上传流程
+/// 上传协调器 - 全局单例
 ///
-/// ✅ 修复版: 继承 ChangeNotifier,避免循环调用
+/// ✅ 改进：
+/// 1. 单例模式，确保上传状态全局共享
+/// 2. 切换页面后上传进度条仍然显示
+/// 3. 支持多任务并发
 class UploadCoordinator extends ChangeNotifier {
-  final FileService _fileService;
+  // ========== 单例实现 ==========
+  static UploadCoordinator? _instance;
+  static FileService? _fileService;
+
+  /// 初始化单例（应用启动时调用一次）
+  static void initialize(FileService fileService) {
+    _fileService = fileService;
+    _instance ??= UploadCoordinator._internal(fileService);
+  }
+
+  /// 获取单例实例
+  static UploadCoordinator get instance {
+    if (_instance == null) {
+      throw StateError(
+        'UploadCoordinator 未初始化，请先调用 UploadCoordinator.initialize(fileService)',
+      );
+    }
+    return _instance!;
+  }
+
+  /// 便捷方法：获取实例（如果未初始化则使用默认 FileService）
+  static UploadCoordinator of([FileService? fileService]) {
+    if (_instance == null && fileService != null) {
+      initialize(fileService);
+    }
+    return instance;
+  }
+
+  // ========== 内部实现 ==========
+  final FileService _internalFileService;
 
   // 活跃的上传任务列表
   final List<UploadTaskContext> _activeTasks = [];
 
-  UploadCoordinator(LocalFolderUploadManager _, this._fileService);
+  // 私有构造函数
+  UploadCoordinator._internal(this._internalFileService);
+
+  /// @deprecated 保留旧构造函数以兼容现有代码，但建议使用单例
+  /// 如果调用此构造函数，会返回单例实例
+  factory UploadCoordinator(LocalFolderUploadManager _, FileService fileService) {
+    if (_instance == null) {
+      initialize(fileService);
+    }
+    return _instance!;
+  }
 
   /// 获取是否有上传任务进行中
   bool get isUploading => _activeTasks.isNotEmpty;
@@ -25,9 +68,8 @@ class UploadCoordinator extends ChangeNotifier {
     return _activeTasks.first.progress;
   }
 
-  // ✅ 使用 ChangeNotifier 的内置方法,不需要自定义监听器管理
-  // addListener() 和 removeListener() 由 ChangeNotifier 提供
-  // notifyListeners() 由 ChangeNotifier 提供
+  /// 活跃任务数量
+  int get activeTaskCount => _activeTasks.length;
 
   /// 准备上传文件列表
   Future<UploadPrepareResult> prepareUpload(List<FileItem> selectedItems) async {
@@ -48,7 +90,8 @@ class UploadCoordinator extends ChangeNotifier {
     // 递归处理选中的文件夹
     if (selectedFolders.isNotEmpty) {
       for (final folder in selectedFolders) {
-        final filesInFolder = await _fileService.getAllMediaFilesRecursive(folder.path);
+        final filesInFolder =
+        await _internalFileService.getAllMediaFilesRecursive(folder.path);
         allFilesToUpload.addAll(filesInFolder);
       }
     }
@@ -61,7 +104,8 @@ class UploadCoordinator extends ChangeNotifier {
     }
 
     // 分析文件
-    final analysis = await _fileService.analyzeFilesForUpload(finalUploadList);
+    final analysis =
+    await _internalFileService.analyzeFilesForUpload(finalUploadList);
 
     return UploadPrepareResult(
       success: true,
@@ -73,14 +117,11 @@ class UploadCoordinator extends ChangeNotifier {
   }
 
   /// 开始上传
-  ///
-  /// ✅ 修复: 直接使用 notifyListeners(),不需要中间方法
   Future<void> startUpload(
       List<String> filePaths,
       Function(String message, {bool isError}) onMessage,
       Function() onComplete,
       ) async {
-
     // 创建独立的上传管理器实例 (支持多任务并发)
     final uploadManager = LocalFolderUploadManager();
 
@@ -92,7 +133,7 @@ class UploadCoordinator extends ChangeNotifier {
 
     // 添加到活跃任务列表
     _activeTasks.add(taskContext);
-    notifyListeners();  // ✅ 直接调用 ChangeNotifier 的方法
+    notifyListeners();
 
     try {
       await uploadManager.uploadLocalFiles(
@@ -100,12 +141,12 @@ class UploadCoordinator extends ChangeNotifier {
         onProgress: (progress) {
           // 更新任务进度
           taskContext.progress = progress;
-          notifyListeners();  // ✅ 直接通知,不需要额外的 updateProgress 方法
+          notifyListeners();
         },
         onComplete: (success, message) {
           // 从活跃任务中移除
           _activeTasks.remove(taskContext);
-          notifyListeners();  // ✅ 直接通知
+          notifyListeners();
 
           // 回调通知
           onMessage(message, isError: !success);
@@ -115,7 +156,7 @@ class UploadCoordinator extends ChangeNotifier {
     } catch (e) {
       // 异常时也要清理任务
       _activeTasks.remove(taskContext);
-      notifyListeners();  // ✅ 直接通知
+      notifyListeners();
 
       onMessage('上传失败: $e', isError: true);
       onComplete();
@@ -127,15 +168,75 @@ class UploadCoordinator extends ChangeNotifier {
     return _activeTasks.map((task) => task.progress).toList();
   }
 
-  /// 取消所有上传任务 (可选功能)
+  /// 取消所有上传任务
   Future<void> cancelAllUploads() async {
+    for (final task in _activeTasks) {
+      task.uploadManager.cancelUpload();
+    }
     _activeTasks.clear();
-    notifyListeners();  // ✅ 直接通知
+    notifyListeners();
+  }
+
+  /// 重置单例（仅用于测试）
+  @visibleForTesting
+  static void reset() {
+    _instance?.dispose();
+    _instance = null;
+    _fileService = null;
+  }
+}
+
+/// 上传协调器 Mixin
+///
+/// 为 StatefulWidget 提供便捷的上传状态监听能力。
+/// 使用后自动监听 UploadCoordinator 状态变化并刷新 UI。
+///
+/// 使用方式：
+/// ```dart
+/// class _MyPageState extends State<MyPage> with UploadCoordinatorMixin {
+///   @override
+///   Widget build(BuildContext context) {
+///     return UploadBottomBar(
+///       isUploading: isUploading,        // 来自 Mixin
+///       uploadProgress: uploadProgress,   // 来自 Mixin
+///       // ...
+///     );
+///   }
+/// }
+/// ```
+mixin UploadCoordinatorMixin<T extends StatefulWidget> on State<T> {
+  late final UploadCoordinator _uploadCoordinator;
+
+  /// 是否正在上传
+  bool get isUploading => _uploadCoordinator.isUploading;
+
+  /// 当前上传进度
+  LocalUploadProgress? get uploadProgress => _uploadCoordinator.uploadProgress;
+
+  /// 上传协调器实例（用于调用上传方法）
+  UploadCoordinator get uploadCoordinator => _uploadCoordinator;
+
+  @override
+  void initState() {
+    super.initState();
+    _uploadCoordinator = UploadCoordinator.instance;
+    _uploadCoordinator.addListener(_onUploadStateChanged);
+  }
+
+  @override
+  void dispose() {
+    _uploadCoordinator.removeListener(_onUploadStateChanged);
+    super.dispose();
+  }
+
+  void _onUploadStateChanged() {
+    if (mounted) {
+      setState(() {});
+    }
   }
 }
 
 /// 上传任务上下文
-/// 用于管理单个上传任务的状态
 class UploadTaskContext {
   final LocalFolderUploadManager uploadManager;
   final List<String> filePaths;
