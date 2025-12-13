@@ -43,6 +43,25 @@ class MyApp extends StatelessWidget {
       theme: ThemeData(
         primarySwatch: Colors.orange,
         scaffoldBackgroundColor: const Color(0xFFF5F5F5),
+        // 更精细的文字样式控制
+        textTheme: const TextTheme(
+          // 大标题
+          headlineLarge: TextStyle(
+            fontFamily: 'Microsoft YaHei',
+            fontWeight: FontWeight.bold,
+          ),
+          // 正文
+          bodyLarge: TextStyle(
+            fontFamily: 'Microsoft YaHei',
+          ),
+          bodyMedium: TextStyle(
+            fontFamily: 'Microsoft YaHei',
+          ),
+          // 标签/按钮文字
+          labelLarge: TextStyle(
+            fontFamily: 'Microsoft YaHei',
+          ),
+        ),
       ),
       home: const AppInitializer(),
     );
