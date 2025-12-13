@@ -156,6 +156,7 @@ class LocalFolderUploadManager extends ChangeNotifier {
 
   // 永久失败文件（超过重试次数）
   final List<FailedFileRecord> _permanentlyFailedFiles = [];
+
   // ✅ 累计已上传字节数（用于速度计算）
   int _totalUploadedBytes = 0;
 
@@ -167,9 +168,13 @@ class LocalFolderUploadManager extends ChangeNotifier {
   LocalFolderUploadManager();
 
   LocalUploadProgress? get currentProgress => _currentProgress;
+
   bool get isUploading => _isUploading;
+
   List<FailedFileRecord> get failedQueue => List.unmodifiable(_failedQueue);
-  List<FailedFileRecord> get permanentlyFailedFiles => List.unmodifiable(_permanentlyFailedFiles);
+
+  List<FailedFileRecord> get permanentlyFailedFiles =>
+      List.unmodifiable(_permanentlyFailedFiles);
 
   /// 取消上传
   void cancelUpload() {
@@ -189,7 +194,9 @@ class LocalFolderUploadManager extends ChangeNotifier {
     }
 
     final baseUrl = AppConfig.minio();
-    LogUtil.log('[UploadManager] 开始预热 MinIO 连接: $baseUrl, usedIP: ${AppConfig.usedIP},currentIP: ${AppConfig.currentIP},');
+    LogUtil.log(
+        '[UploadManager] 开始预热 MinIO 连接: $baseUrl, usedIP: ${AppConfig
+            .usedIP},currentIP: ${AppConfig.currentIP},');
 
     try {
       // 发送轻量级 HEAD 请求唤醒隧道
@@ -268,11 +275,10 @@ class LocalFolderUploadManager extends ChangeNotifier {
   }
 
   /// 从本地文件列表上传（主入口）
-  Future<void> uploadLocalFiles(
-      List<String> localFilePaths, {
-        Function(LocalUploadProgress)? onProgress,
-        Function(bool success, String message)? onComplete,
-      }) async {
+  Future<void> uploadLocalFiles(List<String> localFilePaths, {
+    Function(LocalUploadProgress)? onProgress,
+    Function(bool success, String message)? onComplete,
+  }) async {
     if (_isUploading) {
       LogUtil.log("[UploadManager] Upload already in progress");
       onComplete?.call(false, "已有上传任务在进行中");
@@ -289,7 +295,7 @@ class LocalFolderUploadManager extends ChangeNotifier {
     _isCancelled = false;
     _failedQueue.clear();
     _permanentlyFailedFiles.clear();
-    _totalUploadedBytes = 0;  // ✅ 重置累计字节数
+    _totalUploadedBytes = 0; // ✅ 重置累计字节数
 
     int totalFiles = localFilePaths.length;
     int uploadedFiles = 0;
@@ -306,7 +312,8 @@ class LocalFolderUploadManager extends ChangeNotifier {
       if (deviceCode.isEmpty) throw Exception("设备标识无效");
 
       LogUtil.log("[UploadManager] Starting upload, total: $totalFiles");
-      LogUtil.log("[UploadManager] User: $userId, Device: $deviceCode, Group: $groupId");
+      LogUtil.log(
+          "[UploadManager] User: $userId, Device: $deviceCode, Group: $groupId");
 
       // 1. 解析本地文件信息
       final localFileInfos = <LocalFileInfo>[];
@@ -320,7 +327,8 @@ class LocalFolderUploadManager extends ChangeNotifier {
             failedFiles++;
           }
         } catch (e) {
-          LogUtil.log("[UploadManager] Failed to parse file: $filePath, error: $e");
+          LogUtil.log(
+              "[UploadManager] Failed to parse file: $filePath, error: $e");
           failedFiles++;
         }
       }
@@ -334,7 +342,8 @@ class LocalFolderUploadManager extends ChangeNotifier {
         throw Exception("没有有效的文件");
       }
 
-      _updateProgress(total: totalFiles, uploaded: uploadedFiles, failed: failedFiles);
+      _updateProgress(
+          total: totalFiles, uploaded: uploadedFiles, failed: failedFiles);
       onProgress?.call(_currentProgress!);
 
       // 2. 计算 MD5 并检查数据库去重
@@ -346,7 +355,8 @@ class LocalFolderUploadManager extends ChangeNotifier {
           final md5Hash = await _getFileMd5(file);
           filesWithMd5.add(MapEntry(fileInfo, md5Hash));
         } catch (e) {
-          LogUtil.log("[UploadManager] Failed to calculate MD5: ${fileInfo.filePath}");
+          LogUtil.log(
+              "[UploadManager] Failed to calculate MD5: ${fileInfo.filePath}");
           failedFiles++;
         }
       }
@@ -363,7 +373,8 @@ class LocalFolderUploadManager extends ChangeNotifier {
       for (var entry in filesWithMd5) {
         final existingFile = existingFilesMap[entry.value];
         if (existingFile != null && existingFile.status == 2) {
-          LogUtil.log("[UploadManager] File already uploaded: ${entry.key.fileName}");
+          LogUtil.log(
+              "[UploadManager] File already uploaded: ${entry.key.fileName}");
           uploadedFiles++;
         } else {
           newFiles.add(entry);
@@ -389,7 +400,8 @@ class LocalFolderUploadManager extends ChangeNotifier {
         return;
       }
 
-      _updateProgress(total: totalFiles, uploaded: uploadedFiles, failed: failedFiles);
+      _updateProgress(
+          total: totalFiles, uploaded: uploadedFiles, failed: failedFiles);
       onProgress?.call(_currentProgress!);
 
       // 🆕 5. 预热 MinIO 连接
@@ -397,12 +409,14 @@ class LocalFolderUploadManager extends ChangeNotifier {
       await _warmUpMinioConnection();
 
       // 6. 分批处理
-      final chunks = _splitIntoChunks(uniqueFiles, LocalUploadConfig.imageChunkSize);
+      final chunks = _splitIntoChunks(
+          uniqueFiles, LocalUploadConfig.imageChunkSize);
 
       for (var chunk in chunks) {
         if (_isCancelled) break;
 
-        final chunkSize = chunk.fold<double>(0, (sum, e) => sum + e.key.fileSize) / (1024 * 1024 * 1024);
+        final chunkSize = chunk.fold<double>(
+            0, (sum, e) => sum + e.key.fileSize) / (1024 * 1024 * 1024);
         if (!_hasEnoughStorage(chunkSize)) {
           throw Exception("云端存储空间不足");
         }
@@ -424,7 +438,8 @@ class LocalFolderUploadManager extends ChangeNotifier {
 
       // 6. ✅ 处理失败队列重试
       if (_failedQueue.isNotEmpty && !_isCancelled) {
-        LogUtil.log("[UploadManager] Starting retry rounds for ${_failedQueue.length} failed files");
+        LogUtil.log("[UploadManager] Starting retry rounds for ${_failedQueue
+            .length} failed files");
 
         final retryResult = await _processFailedQueueWithRetry(
           userId,
@@ -441,14 +456,14 @@ class LocalFolderUploadManager extends ChangeNotifier {
       }
 
       // 7. 生成最终结果
-      final finalMessage = _generateCompletionMessage(uploadedFiles, failedFiles, totalFiles);
+      final finalMessage = _generateCompletionMessage(
+          uploadedFiles, failedFiles, totalFiles);
       LogUtil.log("[UploadManager] $finalMessage");
 
       onComplete?.call(
         _permanentlyFailedFiles.isEmpty,
         finalMessage,
       );
-
     } catch (e, stackTrace) {
       LogUtil.log("[UploadManager] Error: $e\n$stackTrace");
       onComplete?.call(false, "上传失败：$e");
@@ -467,24 +482,22 @@ class LocalFolderUploadManager extends ChangeNotifier {
   }
 
   /// ✅ 处理失败队列重试（核心新增方法）
-  Future<Map<String, int>> _processFailedQueueWithRetry(
-      int userId,
+  Future<Map<String, int>> _processFailedQueueWithRetry(int userId,
       int groupId,
       String deviceCode,
       int totalFiles,
       int uploadedFiles,
       int failedFiles,
-      Function(LocalUploadProgress)? onProgress,
-      ) async {
+      Function(LocalUploadProgress)? onProgress,) async {
     int currentRound = 0;
 
     while (_failedQueue.isNotEmpty &&
         currentRound < LocalUploadConfig.maxRetryRounds &&
         !_isCancelled) {
-
       currentRound++;
       LogUtil.log('[UploadManager] ════════════════════════════════════════');
-      LogUtil.log('[UploadManager] Retry Round $currentRound/${LocalUploadConfig.maxRetryRounds}');
+      LogUtil.log('[UploadManager] Retry Round $currentRound/${LocalUploadConfig
+          .maxRetryRounds}');
       LogUtil.log('[UploadManager] Files to retry: ${_failedQueue.length}');
       LogUtil.log('[UploadManager] ════════════════════════════════════════');
 
@@ -493,12 +506,14 @@ class LocalFolderUploadManager extends ChangeNotifier {
         uploaded: uploadedFiles,
         failed: failedFiles,
         retryRound: currentRound,
-        statusMessage: '重试第 $currentRound/${LocalUploadConfig.maxRetryRounds} 轮...',
+        statusMessage: '重试第 $currentRound/${LocalUploadConfig
+            .maxRetryRounds} 轮...',
       );
       onProgress?.call(_currentProgress!);
 
       // 等待一段时间再重试（让网络恢复）
-      await Future.delayed(Duration(seconds: LocalUploadConfig.retryRoundDelaySeconds));
+      await Future.delayed(
+          Duration(seconds: LocalUploadConfig.retryRoundDelaySeconds));
 
       // 🆕 预热连接
       LogUtil.log('[UploadManager] 重试轮次 $currentRound 前预热连接...');
@@ -513,7 +528,8 @@ class LocalFolderUploadManager extends ChangeNotifier {
       final retryEntries = filesToRetry.map((r) => r.toEntry()).toList();
 
       // 分批重试
-      final chunks = _splitIntoChunks(retryEntries, LocalUploadConfig.imageChunkSize);
+      final chunks = _splitIntoChunks(
+          retryEntries, LocalUploadConfig.imageChunkSize);
 
       for (var chunk in chunks) {
         if (_isCancelled) break;
@@ -547,7 +563,8 @@ class LocalFolderUploadManager extends ChangeNotifier {
 
     // 如果还有剩余失败文件，全部移到永久失败列表
     if (_failedQueue.isNotEmpty) {
-      LogUtil.log('[UploadManager] Moving ${_failedQueue.length} files to permanently failed');
+      LogUtil.log('[UploadManager] Moving ${_failedQueue
+          .length} files to permanently failed');
       _permanentlyFailedFiles.addAll(_failedQueue);
       _failedQueue.clear();
     }
@@ -563,7 +580,9 @@ class LocalFolderUploadManager extends ChangeNotifier {
       if (record.retryCount >= LocalUploadConfig.maxRetryRounds) {
         _permanentlyFailedFiles.add(record);
         toRemove.add(record);
-        LogUtil.log('[UploadManager] File exceeded max retries: ${record.fileInfo.fileName}');
+        LogUtil.log(
+            '[UploadManager] File exceeded max retries: ${record.fileInfo
+                .fileName}');
       }
     }
 
@@ -571,7 +590,8 @@ class LocalFolderUploadManager extends ChangeNotifier {
   }
 
   /// 添加文件到失败队列
-  void _addToFailedQueue(LocalFileInfo fileInfo, String md5Hash, String? errorMessage, {bool isRetry = false}) {
+  void _addToFailedQueue(LocalFileInfo fileInfo, String md5Hash,
+      String? errorMessage, {bool isRetry = false}) {
     // 检查是否已在队列中
     final existingIndex = _failedQueue.indexWhere((r) => r.md5Hash == md5Hash);
 
@@ -588,13 +608,13 @@ class LocalFolderUploadManager extends ChangeNotifier {
       ));
     }
 
-    LogUtil.log('[UploadManager] Added to failed queue: ${fileInfo.fileName} (retries: ${_failedQueue.last.retryCount})');
+    LogUtil.log('[UploadManager] Added to failed queue: ${fileInfo
+        .fileName} (retries: ${_failedQueue.last.retryCount})');
   }
 
   /// MD5 去重
   List<MapEntry<LocalFileInfo, String>> _deduplicateByMd5(
-      List<MapEntry<LocalFileInfo, String>> files,
-      ) {
+      List<MapEntry<LocalFileInfo, String>> files,) {
     final uniqueFiles = <MapEntry<LocalFileInfo, String>>[];
     final seenMd5 = <String>{};
 
@@ -617,7 +637,7 @@ class LocalFolderUploadManager extends ChangeNotifier {
     } else {
       buffer.write('上传完成，成功 $uploaded 个');
       if (_permanentlyFailedFiles.isNotEmpty) {
-        buffer.write('，失败 ${_permanentlyFailedFiles.length} 个');//（已达最大重试次数）
+        buffer.write('，失败 ${_permanentlyFailedFiles.length} 个'); //（已达最大重试次数）
       }
     }
 
@@ -645,7 +665,8 @@ class LocalFolderUploadManager extends ChangeNotifier {
         final fileInfo = entry.key;
         final md5Hash = entry.value;
 
-        final fileItem = fileInfo.toFileItem(userId.toString(), deviceCode, md5Hash);
+        final fileItem = fileInfo.toFileItem(
+            userId.toString(), deviceCode, md5Hash);
         await dbHelper.insertFile(fileItem);
         fileItemsToInsert.add(fileItem);
 
@@ -670,19 +691,26 @@ class LocalFolderUploadManager extends ChangeNotifier {
       final response = await provider.createSyncTask(uploadList);
 
       if (!response.isSuccess) {
-        LogUtil.log("[UploadManager] Failed to create sync task: ${response.message}");
+        LogUtil.log(
+            "[UploadManager] Failed to create sync task: ${response.message}");
         // 将所有文件加入失败队列
         for (var entry in chunk) {
-          _addToFailedQueue(entry.key, entry.value, response.message, isRetry: isRetry);
+          _addToFailedQueue(
+              entry.key, entry.value, response.message, isRetry: isRetry);
         }
-        return {'uploaded': uploadedFiles, 'failed': failedFiles + uploadList.length};
+        return {
+          'uploaded': uploadedFiles,
+          'failed': failedFiles + uploadList.length
+        };
       }
 
-      final uploadPath = _removeFirstAndLastSlash(response.model?.uploadPath ?? "");
+      final uploadPath = _removeFirstAndLastSlash(
+          response.model?.uploadPath ?? "");
       final taskId = response.model?.taskId ?? 0;
 
       final chunkFileCount = chunk.length;
-      final chunkTotalSize = chunk.fold<int>(0, (sum, e) => sum + e.key.fileSize);
+      final chunkTotalSize = chunk.fold<int>(
+          0, (sum, e) => sum + e.key.fileSize);
 
       await taskManager.insertTask(
         taskId: taskId,
@@ -734,9 +762,13 @@ class LocalFolderUploadManager extends ChangeNotifier {
       LogUtil.log("[UploadManager] Error processing chunk: $e\n$stackTrace");
       // 将所有文件加入失败队列
       for (var entry in chunk) {
-        _addToFailedQueue(entry.key, entry.value, e.toString(), isRetry: isRetry);
+        _addToFailedQueue(
+            entry.key, entry.value, e.toString(), isRetry: isRetry);
       }
-      return {'uploaded': uploadedFiles, 'failed': failedFiles + uploadList.length};
+      return {
+        'uploaded': uploadedFiles,
+        'failed': failedFiles + uploadList.length
+      };
     }
   }
 
@@ -785,14 +817,14 @@ class LocalFolderUploadManager extends ChangeNotifier {
           if (success) {
             LogUtil.log("[UploadManager] ✅ Uploaded: ${fileInfo.fileName}");
             uploadedEntries.add(entry);
-            await dbHelper.updateStatusByMd5Hash(md5Hash, 2);
+            // ✅ 修改：不在这里更新状态，等上报成功后再更新
             uploadedFiles++;
           } else {
             LogUtil.log("[UploadManager] ❌ Failed: ${fileInfo.fileName}");
             await dbHelper.updateStatusByMd5Hash(md5Hash, 3);
             failedFiles++;
-            // ✅ 加入失败队列
-            _addToFailedQueue(fileInfo, md5Hash, 'Upload failed', isRetry: isRetry);
+            _addToFailedQueue(
+                fileInfo, md5Hash, 'Upload failed', isRetry: isRetry);
           }
 
           _updateProgress(
@@ -812,16 +844,15 @@ class LocalFolderUploadManager extends ChangeNotifier {
       });
     }
 
-    // 等待所有任务完成
     if (pendingTasks > 0) {
       await completer.future;
     }
 
-    // 报告上传结果
     if (uploadedEntries.isNotEmpty) {
       await _reportUploadedFiles(uploadedEntries, uploadPath, taskId);
     } else {
-      LogUtil.log("[UploadManager] No files uploaded successfully, revoking task");
+      LogUtil.log(
+          "[UploadManager] No files uploaded successfully, revoking task");
       await provider.revokeSyncTask(taskId);
       await taskManager.deleteTask(taskId);
     }
@@ -830,18 +861,19 @@ class LocalFolderUploadManager extends ChangeNotifier {
   }
 
   /// 上传单个文件（带重试）
-  Future<bool> _uploadSingleFile(
-      LocalFileInfo fileInfo,
+  Future<bool> _uploadSingleFile(LocalFileInfo fileInfo,
       String md5Hash,
-      String uploadPath,
-      ) async {
-    for (int attempt = 0; attempt < LocalUploadConfig.maxRetryAttempts; attempt++) {
+      String uploadPath,) async {
+    for (int attempt = 0; attempt <
+        LocalUploadConfig.maxRetryAttempts; attempt++) {
       if (_isCancelled) return false;
 
       try {
         if (attempt > 0) {
-          LogUtil.log("[UploadManager] Retry $attempt/${LocalUploadConfig.maxRetryAttempts}: ${fileInfo.fileName}");
-          await Future.delayed(Duration(seconds: LocalUploadConfig.retryDelaySeconds));
+          LogUtil.log("[UploadManager] Retry $attempt/${LocalUploadConfig
+              .maxRetryAttempts}: ${fileInfo.fileName}");
+          await Future.delayed(
+              Duration(seconds: LocalUploadConfig.retryDelaySeconds));
 
           // 🆕 如果是连接错误导致的重试，先预热连接
           if (!_isConnectionWarmedUp) {
@@ -852,7 +884,6 @@ class LocalFolderUploadManager extends ChangeNotifier {
 
         final success = await _doUpload(fileInfo, md5Hash, uploadPath);
         if (success) return true;
-
       } catch (e) {
         LogUtil.log("[UploadManager] Upload error (attempt $attempt): $e");
 
@@ -868,11 +899,9 @@ class LocalFolderUploadManager extends ChangeNotifier {
   }
 
   /// 执行实际上传
-  Future<bool> _doUpload(
-      LocalFileInfo fileInfo,
+  Future<bool> _doUpload(LocalFileInfo fileInfo,
       String md5Hash,
-      String uploadPath,
-      ) async {
+      String uploadPath,) async {
     try {
       final file = File(fileInfo.filePath);
       if (!await file.exists()) {
@@ -911,7 +940,8 @@ class LocalFolderUploadManager extends ChangeNotifier {
       TransferSpeedService.instance.updateUploadProgress(_totalUploadedBytes);
 
       // 2. 生成并上传缩略图
-      final thumbnailFile = await _createThumbnail(file, imageFileName, fileInfo.fileType);
+      final thumbnailFile = await _createThumbnail(
+          file, imageFileName, fileInfo.fileType);
       if (thumbnailFile == null) {
         LogUtil.log("Failed to create thumbnail");
         return false;
@@ -935,7 +965,8 @@ class LocalFolderUploadManager extends ChangeNotifier {
       }
 
       // 3. 生成并上传中等尺寸
-      final mediumFile = await _createMedium(file, imageFileName, fileInfo.fileType);
+      final mediumFile = await _createMedium(
+          file, imageFileName, fileInfo.fileType);
       if (mediumFile == null) {
         LogUtil.log("Failed to create medium file");
         return false;
@@ -992,7 +1023,15 @@ class LocalFolderUploadManager extends ChangeNotifier {
 
   LocalFileType _detectFileType(String filePath) {
     final ext = p.extension(filePath).toLowerCase();
-    const imageExts = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.heic'];
+    const imageExts = [
+      '.jpg',
+      '.jpeg',
+      '.png',
+      '.gif',
+      '.bmp',
+      '.webp',
+      '.heic'
+    ];
     const videoExts = ['.mp4', '.mov', '.avi', '.mkv', '.3gp', '.3gp2'];
 
     if (imageExts.contains(ext)) return LocalFileType.image;
@@ -1002,14 +1041,18 @@ class LocalFolderUploadManager extends ChangeNotifier {
 
   List<List<MapEntry<LocalFileInfo, String>>> _splitIntoChunks(
       List<MapEntry<LocalFileInfo, String>> files,
-      int chunkSize,
-      ) {
+      int chunkSize,) {
     final chunks = <List<MapEntry<LocalFileInfo, String>>>[];
-    final imageList = files.where((e) => e.key.fileType == LocalFileType.image).toList();
-    final videoList = files.where((e) => e.key.fileType == LocalFileType.video).toList();
+    final imageList = files
+        .where((e) => e.key.fileType == LocalFileType.image)
+        .toList();
+    final videoList = files
+        .where((e) => e.key.fileType == LocalFileType.video)
+        .toList();
 
     for (var i = 0; i < imageList.length; i += chunkSize) {
-      chunks.add(imageList.sublist(i, (i + chunkSize).clamp(0, imageList.length)));
+      chunks.add(
+          imageList.sublist(i, (i + chunkSize).clamp(0, imageList.length)));
     }
 
     for (var video in videoList) {
@@ -1042,8 +1085,10 @@ class LocalFolderUploadManager extends ChangeNotifier {
   }
 
   bool _hasEnoughStorage(double additionalSizeGB) {
-    final used = (MyInstance().p6deviceInfoModel?.ttlUsed ?? 0) + additionalSizeGB;
-    final max = (MyInstance().p6deviceInfoModel?.ttlAll ?? 0) - LocalUploadConfig.reservedStorageGB;
+    final used = (MyInstance().p6deviceInfoModel?.ttlUsed ?? 0) +
+        additionalSizeGB;
+    final max = (MyInstance().p6deviceInfoModel?.ttlAll ?? 0) -
+        LocalUploadConfig.reservedStorageGB;
     return used < max;
   }
 
@@ -1054,14 +1099,16 @@ class LocalFolderUploadManager extends ChangeNotifier {
   }
 
   /// 创建缩略图
-  Future<File?> _createThumbnail(File file, String outputFileName, LocalFileType fileType) async {
+  Future<File?> _createThumbnail(File file, String outputFileName,
+      LocalFileType fileType) async {
     try {
       final tempDir = await getTemporaryDirectory();
       final filePath = "${tempDir.path}/thumbnail_$outputFileName";
 
       if (fileType == LocalFileType.video) {
         // 使用 ThumbnailHelper 生成视频缩略图
-        final thumbnailPath = await ThumbnailHelper.generateThumbnail(file.path);
+        final thumbnailPath = await ThumbnailHelper.generateThumbnail(
+            file.path);
 
         if (thumbnailPath == null) {
           LogUtil.log("Failed to generate video thumbnail");
@@ -1114,7 +1161,8 @@ class LocalFolderUploadManager extends ChangeNotifier {
   }
 
   /// 创建中等尺寸
-  Future<File?> _createMedium(File file, String outputFileName, LocalFileType fileType) async {
+  Future<File?> _createMedium(File file, String outputFileName,
+      LocalFileType fileType) async {
     try {
       if (fileType == LocalFileType.video) {
         // 视频不需要中等尺寸，复用缩略图
@@ -1194,8 +1242,10 @@ class LocalFolderUploadManager extends ChangeNotifier {
               int duration = 0;
               if (stream['duration'] != null) {
                 duration = double.parse(stream['duration'].toString()).toInt();
-              } else if (data['format'] != null && data['format']['duration'] != null) {
-                duration = double.parse(data['format']['duration'].toString()).toInt();
+              } else if (data['format'] != null &&
+                  data['format']['duration'] != null) {
+                duration =
+                    double.parse(data['format']['duration'].toString()).toInt();
               }
 
               return VideoMetadata(
@@ -1266,8 +1316,7 @@ class LocalFolderUploadManager extends ChangeNotifier {
   Future<void> _reportUploadedFiles(
       List<MapEntry<LocalFileInfo, String>> uploadedFiles,
       String uploadPath,
-      int taskId,
-      ) async {
+      int taskId,) async {
     try {
       final fileDetailList = <FileDetailModel>[];
 
@@ -1278,26 +1327,25 @@ class LocalFolderUploadManager extends ChangeNotifier {
         final fileNameWithoutExt = p.basenameWithoutExtension(fileName);
         final fileExt = p.extension(fileName).replaceFirst('.', '');
         final imageFileName = "$fileNameWithoutExt.jpg";
-        final photoDate = DateFormat('yyyy-MM-dd HH:mm:ss').format(fileInfo.createTime);
+        final photoDate = DateFormat('yyyy-MM-dd HH:mm:ss').format(
+            fileInfo.createTime);
 
-        // 获取媒体尺寸和时长
         int width = 0;
         int height = 0;
         int duration = 0;
 
         if (fileInfo.fileType == LocalFileType.image) {
-          // 获取图片尺寸
           final dimensions = await _getImageDimensions(fileInfo.filePath);
           width = dimensions.width;
           height = dimensions.height;
           duration = 0;
         } else if (fileInfo.fileType == LocalFileType.video) {
-          // 获取视频元数据
           final metadata = await _getVideoMetadata(fileInfo.filePath);
           width = metadata.width;
           height = metadata.height;
           duration = metadata.duration;
-          LogUtil.log("[UploadManager] Video metadata for ${fileInfo.fileName}: ${width}x${height}, ${duration}s");
+          LogUtil.log("[UploadManager] Video metadata for ${fileInfo
+              .fileName}: ${width}x${height}, ${duration}s");
         }
 
         fileDetailList.add(FileDetailModel(
@@ -1318,9 +1366,21 @@ class LocalFolderUploadManager extends ChangeNotifier {
         ));
       }
 
-      final response = await provider.reportSyncTaskFiles(taskId, fileDetailList);
+      final response = await provider.reportSyncTaskFiles(
+          taskId, fileDetailList);
+
       if (response.isSuccess) {
         LogUtil.log("[UploadManager] Reported uploaded files successfully");
+
+        // ✅ 上报成功后批量更新状态为 status=2
+        for (var entry in uploadedFiles) {
+          final md5Hash = entry.value;
+          await dbHelper.updateStatusByMd5Hash(md5Hash, 2);
+        }
+
+        await taskManager.updateStatus(taskId, UploadTaskStatus.success);
+        LogUtil.log("[UploadManager] Updated ${uploadedFiles
+            .length} files status to success");
       } else {
         LogUtil.log("[UploadManager] Failed to report: ${response.message}");
       }
@@ -1329,7 +1389,6 @@ class LocalFolderUploadManager extends ChangeNotifier {
     }
   }
 }
-
 /// 视频元数据
 class VideoMetadata {
   final int duration;  // 时长（秒）
