@@ -31,6 +31,57 @@ import 'package:media_kit/media_kit.dart';
 /// 文件类型枚举
 enum LocalFileType { image, video, unknown }
 
+// 1. 新增：进度追踪器类（添加到文件顶部的类定义区域）
+// ============================================================
+
+/// 实时上传进度追踪器
+/// 用于追踪多个并发上传文件的实时进度
+class UploadProgressTracker {
+  /// 已确认完成上传的字节数
+  int _confirmedBytes = 0;
+
+  /// 当前正在上传的各文件的实时进度
+  /// key: 文件唯一标识（如 md5Hash_original, md5Hash_thumbnail）
+  /// value: 当前文件已上传的字节数
+  final Map<String, int> _currentFileProgress = {};
+
+  /// 重置追踪器
+  void reset() {
+    _confirmedBytes = 0;
+    _currentFileProgress.clear();
+  }
+
+  /// 更新单个文件的上传进度（实时调用）
+  void updateFileProgress(String fileKey, int uploadedBytes) {
+    _currentFileProgress[fileKey] = uploadedBytes;
+    _notifySpeedService();
+  }
+
+  /// 标记文件上传完成
+  void confirmFileComplete(String fileKey, int totalFileSize) {
+    _confirmedBytes += totalFileSize;
+    _currentFileProgress.remove(fileKey);
+    _notifySpeedService();
+  }
+
+  /// 移除文件进度（上传失败时）
+  void removeFileProgress(String fileKey) {
+    _currentFileProgress.remove(fileKey);
+    _notifySpeedService();
+  }
+
+  /// 计算总已上传字节数
+  int get totalUploadedBytes {
+    int currentProgress = _currentFileProgress.values.fold(0, (a, b) => a + b);
+    return _confirmedBytes + currentProgress;
+  }
+
+  /// 通知速度服务更新
+  void _notifySpeedService() {
+    TransferSpeedService.instance.updateUploadProgress(totalUploadedBytes);
+  }
+}
+
 /// 本地文件信息
 class LocalFileInfo {
   final String filePath;
@@ -159,7 +210,10 @@ class LocalFolderUploadManager extends ChangeNotifier {
   final List<FailedFileRecord> _permanentlyFailedFiles = [];
 
   // ✅ 累计已上传字节数（用于速度计算）
-  int _totalUploadedBytes = 0;
+  // int _totalUploadedBytes = 0;
+  // ✅ 替换为：
+  final UploadProgressTracker _progressTracker = UploadProgressTracker();
+
 
   // 🆕 连接预热状态
   bool _isConnectionWarmedUp = false;
@@ -296,7 +350,7 @@ class LocalFolderUploadManager extends ChangeNotifier {
     _isCancelled = false;
     _failedQueue.clear();
     _permanentlyFailedFiles.clear();
-    _totalUploadedBytes = 0; // ✅ 重置累计字节数
+    _progressTracker.reset();// ✅ 重置累计字节数
 
     int totalFiles = localFilePaths.length;
     int uploadedFiles = 0;
@@ -914,6 +968,8 @@ class LocalFolderUploadManager extends ChangeNotifier {
       final fileNameWithoutExt = p.basenameWithoutExtension(fileName);
       final imageFileName = "$fileNameWithoutExt.jpg";
 
+
+
       // 解析bucket和路径
       final pathParts = uploadPath.split('/');
       if (pathParts.isEmpty) {
@@ -924,21 +980,32 @@ class LocalFolderUploadManager extends ChangeNotifier {
       final bucketName = pathParts.first;
       final uploadPathWithoutBucket = pathParts.skip(1).join('/');
 
+      // ✅ 为每个子文件创建唯一的进度key
+      final originalFileKey = "${md5Hash}_original";
+      final thumbnailFileKey = "${md5Hash}_thumbnail";
+      final mediumFileKey = "${md5Hash}_medium";
+
       // 1. 上传原始文件
       LogUtil.log("Uploading original file: ${fileInfo.filePath}");
-      var result = await minioService.uploadFile(
+      // ✅ 使用带进度回调的上传方法
+      var result = await minioService.uploadFileWithProgress(
         bucketName,
         "$uploadPathWithoutBucket/$md5Hash/$fileName",
         file.path,
+        onProgress: (sent, total) {
+          // ✅ 实时更新上传进度
+          _progressTracker.updateFileProgress(originalFileKey, sent);
+        },
       );
+
 
       if (!result.success) {
         LogUtil.log("Failed to upload original file");
         return false;
       }
-      // ✅ 更新累计字节数并通知速度服务
-      _totalUploadedBytes += fileInfo.fileSize;
-      TransferSpeedService.instance.updateUploadProgress(_totalUploadedBytes);
+
+      // ✅ 标记原始文件上传完成
+      _progressTracker.confirmFileComplete(originalFileKey, fileInfo.fileSize);
 
       // 2. 生成并上传缩略图
       final thumbnailFile = await _createThumbnail(
@@ -948,22 +1015,27 @@ class LocalFolderUploadManager extends ChangeNotifier {
         return false;
       }
 
-      result = await minioService.uploadFile(
+      final thumbnailSize = await thumbnailFile.length();
+
+      // ✅ 使用带进度回调的上传方法
+      result = await minioService.uploadFileWithProgress(
         bucketName,
         "$uploadPathWithoutBucket/$md5Hash/thumbnail_$imageFileName",
         thumbnailFile.path,
+        onProgress: (sent, total) {
+          _progressTracker.updateFileProgress(thumbnailFileKey, sent);
+        },
       );
 
-      // ✅ 更新累计字节数
-      final thumbnailSize = await thumbnailFile.length();
-      _totalUploadedBytes += thumbnailSize;
-      TransferSpeedService.instance.updateUploadProgress(_totalUploadedBytes);
       await _cleanupFile(thumbnailFile);
 
       if (!result.success) {
         LogUtil.log("Failed to upload thumbnail");
+        _progressTracker.removeFileProgress(thumbnailFileKey);
         return false;
       }
+      // ✅ 标记缩略图上传完成
+      _progressTracker.confirmFileComplete(thumbnailFileKey, thumbnailSize);
 
       // 3. 生成并上传中等尺寸
       final mediumFile = await _createMedium(
@@ -972,23 +1044,28 @@ class LocalFolderUploadManager extends ChangeNotifier {
         LogUtil.log("Failed to create medium file");
         return false;
       }
+      final mediumSize = await mediumFile.length();
 
-      result = await minioService.uploadFile(
+      // ✅ 使用带进度回调的上传方法
+      result = await minioService.uploadFileWithProgress(
         bucketName,
         "$uploadPathWithoutBucket/$md5Hash/show_$imageFileName",
         mediumFile.path,
+        onProgress: (sent, total) {
+          _progressTracker.updateFileProgress(mediumFileKey, sent);
+        },
       );
 
-      // ✅ 更新累计字节数
-      final mediumSize = await mediumFile.length();
-      _totalUploadedBytes += mediumSize;
-      TransferSpeedService.instance.updateUploadProgress(_totalUploadedBytes);
       await _cleanupFile(mediumFile);
 
       if (!result.success) {
         LogUtil.log("Failed to upload medium file");
+        _progressTracker.removeFileProgress(mediumFileKey);
         return false;
       }
+
+      // ✅ 标记中等尺寸上传完成
+      _progressTracker.confirmFileComplete(mediumFileKey, mediumSize);
 
       LogUtil.log("Successfully uploaded: ${fileInfo.fileName}");
       return true;
@@ -1090,6 +1167,7 @@ class LocalFolderUploadManager extends ChangeNotifier {
         additionalSizeGB;
     final max = (MyInstance().p6deviceInfoModel?.ttlAll ?? 0) -
         LocalUploadConfig.reservedStorageGB;
+    debugPrint('P6 device storage: $used/$max GB');
     return used < max;
   }
 

@@ -4,12 +4,14 @@ import 'package:path/path.dart' as p;
 import '../../../models/file_item.dart';
 import '../../../album/database/database_helper.dart';
 import '../../../album/models/local_file_item.dart' as db; // 数据库中的 FileItem
+import '../../../services/sync_status_service.dart';
 import '../../../user/my_instance.dart';
+
 
 /// 文件服务 - 负责加载文件列表并查询上传状态
 class FileService {
   final DatabaseHelper _dbHelper = DatabaseHelper.instance;
-
+  final SyncStatusService _syncService = SyncStatusService.instance;
   /// 支持的图片扩展名
   static const Set<String> _imageExtensions = {
     'bmp', 'gif', 'jpg', 'jpeg', 'png', 'webp', 'wbmp', 'heic'
@@ -23,7 +25,7 @@ class FileService {
   /// 加载指定路径下的文件列表
   ///
   /// ✅ 会查询数据库获取每个文件的上传状态
-  Future<List<FileItem>> loadFiles(String path) async {
+  Future<List<FileItem>> loadFiles1(String path) async {
     final directory = Directory(path);
     if (!await directory.exists()) {
       return [];
@@ -115,6 +117,79 @@ class FileService {
       return {};
     }
   }
+
+  /// 加载指定路径下的文件列表
+  ///
+  /// ✅ 通过 SyncStatusService 查询服务端判断同步状态
+  Future<List<FileItem>> loadFiles(String path) async {
+    final directory = Directory(path);
+    if (!await directory.exists()) {
+      return [];
+    }
+
+    final entities = await directory.list().toList();
+    final items = <FileItem>[];
+    final mediaFilePaths = <String>[];  // 收集需要检查同步状态的文件路径
+
+    // 第一遍：解析所有文件，收集媒体文件路径
+    for (final entity in entities) {
+      final name = p.basename(entity.path);
+      if (name.startsWith('.')) continue;
+
+      if (entity is Directory) {
+        items.add(FileItem(
+          name: name,
+          path: entity.path,
+          type: FileItemType.folder,
+          size: 0,
+          isUploaded: null,  // 文件夹不需要同步状态
+        ));
+      } else if (entity is File) {
+        final extension = p.extension(name).toLowerCase().replaceFirst('.', '');
+        final type = _getFileType(extension);
+
+        if (type == FileItemType.image || type == FileItemType.video) {
+          final stat = await entity.stat();
+          items.add(FileItem(
+            name: name,
+            path: entity.path,
+            type: type,
+            size: stat.size,
+            isUploaded: false,  // 先默认为未同步，后续批量更新
+          ));
+          mediaFilePaths.add(entity.path);
+        }
+      }
+    }
+
+    // 第二遍：批量查询同步状态
+    if (mediaFilePaths.isNotEmpty) {
+      final syncStatus = await _syncService.checkSyncStatusBatch(mediaFilePaths);
+
+      for (var i = 0; i < items.length; i++) {
+        final item = items[i];
+        if (item.type != FileItemType.folder) {
+          final isSynced = syncStatus[item.path];
+          if (isSynced != null) {
+            items[i] = item.copyWith(isUploaded: isSynced);
+          }
+        }
+      }
+    }
+
+    // 排序：文件夹在前，然后按名称排序
+    items.sort((a, b) {
+      if (a.type == FileItemType.folder && b.type != FileItemType.folder) {
+        return -1;
+      } else if (a.type != FileItemType.folder && b.type == FileItemType.folder) {
+        return 1;
+      }
+      return a.name.toLowerCase().compareTo(b.name.toLowerCase());
+    });
+
+    return items;
+  }
+
 
   /// 根据扩展名判断文件类型
   FileItemType _getFileType(String extension) {

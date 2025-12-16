@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../../../models/file_item.dart';
 import '../../../models/folder_info.dart';
 import '../../../models/media_item.dart';
+import '../../../services/sync_status_service.dart';
 import '../../../services/thumbnail_helper.dart';
 import '../../../widgets/custom_title_bar.dart';
 import '../../../widgets/media_viewer_page.dart';
@@ -73,7 +74,21 @@ class _FolderDetailPageState extends State<FolderDetailPage> with UploadCoordina
     _registerViewBuilders();
     _initializeControllers();
     _initializeHelper();
+    _initializeSyncService();  // 新增
     _loadFiles(_pathController.currentPath);
+  }
+
+  /// ✅ 初始化同步状态服务
+  Future<void> _initializeSyncService() async {
+    await SyncStatusService.instance.initialize();
+  }
+
+  /// ✅ 上传完成后刷新同步状态缓存
+  Future<void> _onUploadComplete(List<String> uploadedMd5s) async {
+    // 添加到缓存，避免重新拉取
+    SyncStatusService.instance.addSyncedResIds(uploadedMd5s);
+    // 刷新文件列表
+    await _refreshFiles();
   }
 
   @override

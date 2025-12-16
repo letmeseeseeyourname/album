@@ -1,11 +1,16 @@
 // services/minio_service.dart
-// Minio 对象存储服务
+// Minio 对象存储服务（改进版 - 支持实时上传进度）
 
 import 'dart:io';
 import 'dart:typed_data';
 import 'package:minio/io.dart';
 import 'package:minio/minio.dart';
 import 'minio_config.dart';
+
+/// 上传进度回调类型
+/// [sent] 已发送字节数
+/// [total] 总字节数
+typedef UploadProgressCallback = void Function(int sent, int total);
 
 class MinioService {
   static MinioService? _instance;
@@ -24,8 +29,8 @@ class MinioService {
   // 初始化 Minio 客户端
   void _initMinio() {
     _minio = Minio(
-      endPoint: MinioConfig.host,        // ✅ 使用 host
-      port: MinioConfig.port,            // ✅ 使用 port
+      endPoint: MinioConfig.host,
+      port: MinioConfig.port,
       accessKey: MinioConfig.accessKey,
       secretKey: MinioConfig.secretKey,
       useSSL: MinioConfig.useSSL,
@@ -45,8 +50,6 @@ class MinioService {
 
     print('Minio initialized manually: $host:${MinioConfig.port}');
   }
-
-
 
   /// 创建存储桶
   Future<bool> createBucket(String bucketName) async {
@@ -75,15 +78,19 @@ class MinioService {
     }
   }
 
-  /// 上传文件（从文件路径）
+  /// ============================================================
+  /// ✅ 新增：带进度回调的文件上传方法
+  /// ============================================================
   /// [bucketName] 存储桶名称
   /// [objectName] 对象名称（存储在 Minio 中的文件名）
   /// [filePath] 本地文件路径
-  Future<UploadResult> uploadFile(
+  /// [onProgress] 进度回调，实时报告已上传字节数
+  Future<UploadResult> uploadFileWithProgress(
       String bucketName,
       String objectName,
-      String filePath,
-      ) async {
+      String filePath, {
+        UploadProgressCallback? onProgress,
+      }) async {
     try {
       final file = File(filePath);
       if (!await file.exists()) {
@@ -99,8 +106,23 @@ class MinioService {
       // 获取文件大小
       final fileSize = await file.length();
 
-      // 上传文件
-      await _minio.fPutObject(bucketName, objectName, filePath);
+      // ✅ 创建带进度追踪的 Stream（转换为 Uint8List）
+      int uploadedBytes = 0;
+      final fileStream = file.openRead().map((chunk) {
+        uploadedBytes += chunk.length;
+        // 调用进度回调
+        onProgress?.call(uploadedBytes, fileSize);
+        // 转换为 Uint8List 以满足 minio 包的类型要求
+        return Uint8List.fromList(chunk);
+      });
+
+      // 使用 putObject 上传（支持 Stream）
+      await _minio.putObject(
+        bucketName,
+        objectName,
+        fileStream,
+        size: fileSize,
+      );
 
       final url = MinioConfig.getFileUrl(bucketName, objectName);
 
@@ -120,32 +142,61 @@ class MinioService {
     }
   }
 
-  /// 上传文件（从字节数据）
+  /// 上传文件（从文件路径）- 原方法保持兼容
   /// [bucketName] 存储桶名称
-  /// [objectName] 对象名称
-  /// [data] 文件字节数据
-  /// [contentType] 文件类型，如 'image/jpeg'
-  Future<UploadResult> uploadBytes(
+  /// [objectName] 对象名称（存储在 Minio 中的文件名）
+  /// [filePath] 本地文件路径
+  Future<UploadResult> uploadFile(
+      String bucketName,
+      String objectName,
+      String filePath,
+      ) async {
+    // ✅ 内部调用带进度的版本，但不传回调
+    return uploadFileWithProgress(bucketName, objectName, filePath);
+  }
+
+  /// ============================================================
+  /// ✅ 新增：带进度回调的字节数据上传方法
+  /// ============================================================
+  Future<UploadResult> uploadBytesWithProgress(
       String bucketName,
       String objectName,
       Uint8List data, {
         String? contentType,
+        UploadProgressCallback? onProgress,
       }) async {
     try {
       // 确保存储桶存在
       await createBucket(bucketName);
+
+      final totalSize = data.length;
 
       // 准备 metadata（如果有 contentType）
       final metadata = contentType != null
           ? {'Content-Type': contentType}
           : null;
 
+      // ✅ 创建带进度追踪的 Stream
+      // 将数据分块发送以支持进度回调
+      const chunkSize = 64 * 1024; // 64KB 分块
+      int uploadedBytes = 0;
+
+      Stream<Uint8List> createProgressStream() async* {
+        for (int i = 0; i < data.length; i += chunkSize) {
+          final end = (i + chunkSize > data.length) ? data.length : i + chunkSize;
+          final chunk = data.sublist(i, end);
+          uploadedBytes += chunk.length;
+          onProgress?.call(uploadedBytes, totalSize);
+          yield Uint8List.fromList(chunk);
+        }
+      }
+
       // 上传字节数据
       await _minio.putObject(
         bucketName,
         objectName,
-        Stream.value(data),
-        size: data.length,
+        createProgressStream(),
+        size: totalSize,
         metadata: metadata,
       );
 
@@ -156,7 +207,7 @@ class MinioService {
         message: '上传成功',
         url: url,
         objectName: objectName,
-        size: data.length,
+        size: totalSize,
       );
     } catch (e) {
       print('上传文件失败: $e');
@@ -167,10 +218,22 @@ class MinioService {
     }
   }
 
+  /// 上传文件（从字节数据）- 原方法保持兼容
+  Future<UploadResult> uploadBytes(
+      String bucketName,
+      String objectName,
+      Uint8List data, {
+        String? contentType,
+      }) async {
+    return uploadBytesWithProgress(
+      bucketName,
+      objectName,
+      data,
+      contentType: contentType,
+    );
+  }
+
   /// 下载文件
-  /// [bucketName] 存储桶名称
-  /// [objectName] 对象名称
-  /// [savePath] 保存路径
   Future<DownloadResult> downloadFile(
       String bucketName,
       String objectName,
@@ -198,8 +261,6 @@ class MinioService {
   }
 
   /// 获取文件字节数据
-  /// [bucketName] 存储桶名称
-  /// [objectName] 对象名称
   Future<Uint8List?> getFileBytes(
       String bucketName,
       String objectName,
@@ -215,8 +276,6 @@ class MinioService {
   }
 
   /// 删除文件
-  /// [bucketName] 存储桶名称
-  /// [objectName] 对象名称
   Future<bool> deleteFile(String bucketName, String objectName) async {
     try {
       await _minio.removeObject(bucketName, objectName);
@@ -229,8 +288,6 @@ class MinioService {
   }
 
   /// 批量删除文件
-  /// [bucketName] 存储桶名称
-  /// [objectNames] 对象名称列表
   Future<int> deleteFiles(String bucketName, List<String> objectNames) async {
     int successCount = 0;
     for (final objectName in objectNames) {
@@ -241,42 +298,7 @@ class MinioService {
     return successCount;
   }
 
-  /// 列出存储桶中的所有对象
-  /// [bucketName] 存储桶名称
-  /// [prefix] 对象名称前缀（可选）
-  // Future<List<MinioObject>> listObjects(
-  //     String bucketName, {
-  //       String? prefix,
-  //     }) async {
-  //   try {
-  //     final objects = <MinioObject>[];
-  //     final stream = _minio.listObjects(
-  //       bucketName,
-  //       prefix: prefix ?? '',
-  //     );
-  //
-  //     await for (final obj in stream) {
-  //       // ListObjectsResult 的属性：name, lastModified, eTag, size, isDir
-  //       if (obj.name != null && !obj.isDir) {
-  //         objects.add(MinioObject(
-  //           key: obj.name!,
-  //           size: obj.size ?? 0,
-  //           lastModified: obj.lastModified,
-  //         ));
-  //       }
-  //     }
-  //
-  //     return objects;
-  //   } catch (e) {
-  //     print('列出对象失败: $e');
-  //     return [];
-  //   }
-  // }
-
   /// 获取文件的预签名 URL（用于临时访问）
-  /// [bucketName] 存储桶名称
-  /// [objectName] 对象名称
-  /// [expires] 过期时间（秒），默认7天
   Future<String?> getPresignedUrl(
       String bucketName,
       String objectName, {
@@ -296,10 +318,6 @@ class MinioService {
   }
 
   /// 复制对象
-  /// [sourceBucket] 源存储桶
-  /// [sourceObject] 源对象名称
-  /// [destBucket] 目标存储桶
-  /// [destObject] 目标对象名称
   Future<bool> copyObject(
       String sourceBucket,
       String sourceObject,
@@ -319,28 +337,6 @@ class MinioService {
       return false;
     }
   }
-
-/// 获取对象信息
-/// [bucketName] 存储桶名称
-/// [objectName] 对象名称
-//   Future<ObjectStat?> getObjectStat(
-//       String bucketName,
-//       String objectName,
-//       ) async {
-//     try {
-//       final stat = await _minio.statObject(bucketName, objectName);
-//       // StatObjectResult 的属性：size, lastModified, eTag, metaData
-//       return ObjectStat(
-//         size: stat.size ?? 0,
-//         contentType: stat.metaData?['content-type'],
-//         lastModified: stat.lastModified,
-//         etag: stat.eTag,
-//       );
-//     } catch (e) {
-//       print('获取对象信息失败: $e');
-//       return null;
-//     }
-//   }
 }
 
 // 上传结果类
