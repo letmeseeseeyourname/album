@@ -91,6 +91,24 @@ Name: "{userappdata}\Microsoft\Internet Explorer\Quick Launch\{#MyAppName}"; Fil
 ; 安装完成后运行应用程序（可选）
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
 
+[UninstallDelete]
+; ===== 卸载时清理运行时生成的文件和目录 =====
+
+; 安装目录下的所有文件和子目录
+Type: filesandordirs; Name: "{app}\*"
+Type: dirifempty; Name: "{app}"
+
+; ===== 清理应用实际使用的数据目录 =====
+; Roaming 目录: C:\Users\xxx\AppData\Roaming\joykee\亲选相册
+Type: filesandordirs; Name: "{userappdata}\joykee\亲选相册"
+Type: dirifempty; Name: "{userappdata}\joykee"
+
+; Local 目录: C:\Users\xxx\AppData\Local\joykee\亲选相册
+Type: filesandordirs; Name: "{localappdata}\joykee\亲选相册"
+Type: dirifempty; Name: "{localappdata}\joykee"
+
+; 如果还有其他数据目录，请在此添加
+
 [Code]
 // 自定义安装目录选择页面（可选）
 procedure CurPageChanged(CurPageID: Integer);
@@ -102,8 +120,65 @@ begin
   end;
 end;
 
-// 卸载前确认（可选）
+// 卸载前：关闭应用并确认卸载
 function InitializeUninstall(): Boolean;
+var
+  ResultCode: Integer;
 begin
+  // 先尝试关闭正在运行的应用程序，避免文件被占用
+  Exec('taskkill.exe', '/F /IM {#MyAppExeName}', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+
+  // 等待进程完全退出
+  Sleep(500);
+
+  // 弹出确认对话框
   Result := MsgBox('确定要卸载 {#MyAppName} 吗？', mbConfirmation, MB_YESNO) = IDYES;
+end;
+
+// 卸载完成后：强制清理残留目录
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+var
+  AppDir: String;
+  RoamingDataDir: String;
+  RoamingJoykeeDir: String;
+  LocalDataDir: String;
+  LocalJoykeeDir: String;
+begin
+  if CurUninstallStep = usPostUninstall then
+  begin
+    // 清理安装目录
+    AppDir := ExpandConstant('{app}');
+    if DirExists(AppDir) then
+    begin
+      DelTree(AppDir, True, True, True);
+    end;
+
+    // 清理 Roaming\joykee\亲选相册 目录
+    RoamingDataDir := ExpandConstant('{userappdata}\joykee\亲选相册');
+    if DirExists(RoamingDataDir) then
+    begin
+      DelTree(RoamingDataDir, True, True, True);
+    end;
+
+    // 如果 joykee 目录为空，也删除它
+    RoamingJoykeeDir := ExpandConstant('{userappdata}\joykee');
+    if DirExists(RoamingJoykeeDir) then
+    begin
+      RemoveDir(RoamingJoykeeDir);
+    end;
+
+    // 清理 Local\joykee\亲选相册 目录
+    LocalDataDir := ExpandConstant('{localappdata}\joykee\亲选相册');
+    if DirExists(LocalDataDir) then
+    begin
+      DelTree(LocalDataDir, True, True, True);
+    end;
+
+    // 如果 joykee 目录为空，也删除它
+    LocalJoykeeDir := ExpandConstant('{localappdata}\joykee');
+    if DirExists(LocalJoykeeDir) then
+    begin
+      RemoveDir(LocalJoykeeDir);
+    end;
+  end;
 end;

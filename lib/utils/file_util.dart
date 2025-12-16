@@ -124,9 +124,7 @@ class FileUtils {
     'bmp', 'gif', 'jpg', 'jpeg', 'png', 'webp', 'wbmp', 'heic'
   ];
 
-  static const videoExtensions = [
-    'mp4', 'mov', 'avi', '3gp', 'mkv', '3gp2'
-  ];
+ static const videoExtensions = ['mp4', 'mov', 'avi', '3gp', 'mkv', '3gp2'];
 
   static const mediaExtensions = [
     ...imageExtensions,

@@ -1,4 +1,6 @@
 // download_task_db_helper.dart
+// ✅ 修复版：确保 download_tasks 表在任何情况下都会被创建
+
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
@@ -147,15 +149,21 @@ class DownloadTaskDbHelper {
   DownloadTaskDbHelper._init();
 
   static const _dbName = 'upload_tasks.db'; // 复用同一个数据库文件
-  static const _dbVersion = 4; // 升级版本号
   static const _table = 'download_tasks';
 
   Database? _db;
   Future<Database>? _openFuture;
+  bool _tableEnsured = false; // ✅ 标记表是否已确认存在
 
   /// 保证数据库已打开（单例模式）
   Future<Database> _database() async {
-    if (_db != null) return _db!;
+    if (_db != null) {
+      // ✅ 即使数据库已打开，也要确保表存在
+      if (!_tableEnsured) {
+        await _ensureTableExists(_db!);
+      }
+      return _db!;
+    }
     _openFuture ??= _openDb();
     _db = await _openFuture!;
     return _db!;
@@ -175,65 +183,49 @@ class DownloadTaskDbHelper {
       final path = p.join(dbPath, _dbName);
       debugPrint("数据库路径: $path");
 
-      final db = await databaseFactory.openDatabase(
-        path,
-        options: OpenDatabaseOptions(
-          version: _dbVersion,
-          onCreate: (db, version) async {
-            debugPrint('创建数据库，版本: $version');
-
-            // 创建 upload_tasks 表（保持兼容）
-            await db.execute('''
-              CREATE TABLE IF NOT EXISTS upload_tasks (
-                task_id INTEGER NOT NULL,
-                user_id INTEGER NOT NULL,
-                group_id INTEGER NOT NULL,
-                status INTEGER NOT NULL,
-                created_at INTEGER NOT NULL,
-                updated_at INTEGER NOT NULL,
-                PRIMARY KEY (task_id, user_id, group_id)
-              );
-            ''');
-            debugPrint('创建 upload_tasks 表成功');
-
-            // 创建 download_tasks 表
-            await _createDownloadTable(db);
-          },
-          onUpgrade: (db, oldVersion, newVersion) async {
-            debugPrint('升级数据库: $oldVersion -> $newVersion');
-            if (oldVersion < 4) {
-              // 添加 download_tasks 表
-              await _createDownloadTable(db);
-            }
-          },
-          onOpen: (db) async {
-            debugPrint('数据库已打开');
-
-            // 验证表是否存在
-            final tables = await db.rawQuery(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name='$_table'"
-            );
-
-            if (tables.isEmpty) {
-              debugPrint('警告：download_tasks 表不存在，尝试创建...');
-              await _createDownloadTable(db);
-            } else {
-              debugPrint('download_tasks 表存在');
-
-              // 获取表的列信息
-              final columns = await db.rawQuery('PRAGMA table_info($_table)');
-              debugPrint('表列数: ${columns.length}');
-            }
-          },
-        ),
-      );
+      // ✅ 简化：不依赖版本号，直接打开数据库
+      final db = await databaseFactory.openDatabase(path);
 
       debugPrint('数据库打开成功');
+
+      // ✅ 确保表存在
+      await _ensureTableExists(db);
+
       return db;
     } catch (e, stack) {
       debugPrint('打开数据库失败: $e');
       debugPrint('堆栈: $stack');
       rethrow;
+    }
+  }
+
+  /// ✅ 确保下载任务表存在
+  Future<void> _ensureTableExists(Database db) async {
+    if (_tableEnsured) return;
+
+    try {
+      // 检查表是否存在
+      final tables = await db.rawQuery(
+          "SELECT name FROM sqlite_master WHERE type='table' AND name='$_table'"
+      );
+
+      if (tables.isEmpty) {
+        debugPrint('download_tasks 表不存在，正在创建...');
+        await _createDownloadTable(db);
+      } else {
+        debugPrint('download_tasks 表已存在');
+      }
+
+      _tableEnsured = true;
+    } catch (e) {
+      debugPrint('检查/创建表失败: $e');
+      // 尝试强制创建
+      try {
+        await _createDownloadTable(db);
+        _tableEnsured = true;
+      } catch (e2) {
+        debugPrint('强制创建表也失败: $e2');
+      }
     }
   }
 
@@ -271,34 +263,16 @@ class DownloadTaskDbHelper {
       await db.execute('CREATE INDEX IF NOT EXISTS idx_${_table}_created ON $_table(created_at DESC);');
       debugPrint('索引创建成功');
 
-      // 验证表创建
-      final tables = await db.rawQuery(
-          "SELECT name FROM sqlite_master WHERE type='table' AND name='$_table'"
-      );
-
-      if (tables.isNotEmpty) {
-        debugPrint('确认：download_tasks 表已成功创建');
-
-        // 获取表的列信息
-        final columns = await db.rawQuery('PRAGMA table_info($_table)');
-        debugPrint('表有 ${columns.length} 列');
-        for (final col in columns) {
-          debugPrint('  列: ${col['name']} (${col['type']})');
-        }
-      } else {
-        debugPrint('错误：download_tasks 表创建失败！');
-      }
-    } catch (e, stack) {
+    } catch (e) {
       debugPrint('创建 download_tasks 表失败: $e');
-      debugPrint('堆栈: $stack');
       rethrow;
     }
   }
 
-  /// 插入新任务
-  Future<void> insertTask(DownloadTaskRecord task) async {
+  /// 插入新任务（或更新现有任务）
+  Future<int> insertTask(DownloadTaskRecord task) async {
     final db = await _database();
-    await db.insert(
+    return db.insert(
       _table,
       task.toMap(),
       conflictAlgorithm: ConflictAlgorithm.replace,
@@ -307,48 +281,20 @@ class DownloadTaskDbHelper {
 
   /// 批量插入任务
   Future<void> insertTasks(List<DownloadTaskRecord> tasks) async {
-    if (tasks.isEmpty) {
-      debugPrint('警告：insertTasks - 任务列表为空');
-      return;
+    if (tasks.isEmpty) return;
+
+    final db = await _database();
+    final batch = db.batch();
+
+    for (final task in tasks) {
+      batch.insert(
+        _table,
+        task.toMap(),
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
     }
 
-    try {
-      debugPrint('准备批量插入 ${tasks.length} 个任务');
-
-      final db = await _database();
-      final batch = db.batch();
-
-      for (final task in tasks) {
-        debugPrint('插入任务: ${task.fileName} (taskId: ${task.taskId})');
-        batch.insert(
-          _table,
-          task.toMap(),
-          conflictAlgorithm: ConflictAlgorithm.replace,
-        );
-      }
-
-      final results = await batch.commit(noResult: false);
-      debugPrint('批量插入完成，结果数量: ${results.length}');
-
-      // 验证插入
-      for (int i = 0; i < tasks.length; i++) {
-        debugPrint('任务 ${i+1}: ${tasks[i].fileName} - 插入结果: ${results[i]}');
-      }
-    } catch (e, stack) {
-      debugPrint('批量插入失败: $e');
-      debugPrint('堆栈: $stack');
-
-      // 如果批量插入失败，尝试逐个插入
-      debugPrint('尝试逐个插入任务...');
-      for (final task in tasks) {
-        try {
-          await insertTask(task);
-          debugPrint('成功插入: ${task.fileName}');
-        } catch (e) {
-          debugPrint('插入失败: ${task.fileName}, 错误: $e');
-        }
-      }
-    }
+    await batch.commit(noResult: true);
   }
 
   /// 更新任务状态
@@ -631,5 +577,6 @@ class DownloadTaskDbHelper {
     await _db?.close();
     _db = null;
     _openFuture = null;
+    _tableEnsured = false;
   }
 }

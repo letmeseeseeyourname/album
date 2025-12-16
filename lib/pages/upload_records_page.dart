@@ -1,4 +1,6 @@
 // pages/upload_records_page.dart
+// 修改版：统一上传和下载记录的显示样式（按批次/任务聚合显示）
+
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:window_manager/window_manager.dart';
@@ -8,6 +10,7 @@ import '../user/my_instance.dart';
 
 /// 传输记录页面
 /// 显示同步和下载任务的历史记录
+/// ✅ 修改：下载记录改为按批次聚合显示，与上传记录样式一致
 class UploadRecordsPage extends StatefulWidget {
   const UploadRecordsPage({super.key});
 
@@ -23,6 +26,10 @@ class _UploadRecordsPageState extends State<UploadRecordsPage>
 
   List<UploadTaskRecord> _uploadTasks = [];
   List<DownloadTaskRecord> _downloadTasks = [];
+
+  // ✅ 新增：下载任务聚合列表
+  List<DownloadBatchRecord> _downloadBatches = [];
+
   bool _isLoading = true;
 
   @override
@@ -74,6 +81,7 @@ class _UploadRecordsPageState extends State<UploadRecordsPage>
   }
 
   /// 加载下载任务列表
+  /// ✅ 修改：加载后按时间聚合为批次
   Future<void> _loadDownloadTasks() async {
     try {
       final userId = MyInstance().user?.user?.id ?? 0;
@@ -83,13 +91,55 @@ class _UploadRecordsPageState extends State<UploadRecordsPage>
         final tasks = await _downloadDbHelper.listTasks(
           userId: userId,
           groupId: groupId,
-          limit: 100,
+          limit: 500, // 增加限制以便聚合
         );
         _downloadTasks = tasks;
+
+        // ✅ 聚合为批次
+        _downloadBatches = _aggregateDownloadTasks(tasks);
       }
     } catch (e) {
       print('加载下载任务失败: $e');
     }
+  }
+
+  /// ✅ 新增：将下载任务按时间聚合为批次
+  /// 规则：同一分钟内创建的任务视为同一批次
+  List<DownloadBatchRecord> _aggregateDownloadTasks(List<DownloadTaskRecord> tasks) {
+    if (tasks.isEmpty) return [];
+
+    // 按创建时间排序（降序）
+    final sortedTasks = List<DownloadTaskRecord>.from(tasks)
+      ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+
+    final batches = <DownloadBatchRecord>[];
+    List<DownloadTaskRecord> currentBatch = [];
+    int? currentBatchMinute;
+
+    for (final task in sortedTasks) {
+      // 获取任务创建时间的分钟数（用于聚合）
+      final taskMinute = task.createdAt ~/ 60000; // 转换为分钟
+
+      if (currentBatchMinute == null || taskMinute == currentBatchMinute) {
+        // 同一分钟，加入当前批次
+        currentBatch.add(task);
+        currentBatchMinute = taskMinute;
+      } else {
+        // 不同分钟，保存当前批次，开始新批次
+        if (currentBatch.isNotEmpty) {
+          batches.add(DownloadBatchRecord.fromTasks(currentBatch));
+        }
+        currentBatch = [task];
+        currentBatchMinute = taskMinute;
+      }
+    }
+
+    // 保存最后一个批次
+    if (currentBatch.isNotEmpty) {
+      batches.add(DownloadBatchRecord.fromTasks(currentBatch));
+    }
+
+    return batches;
   }
 
   /// 取消同步任务
@@ -102,10 +152,10 @@ class _UploadRecordsPageState extends State<UploadRecordsPage>
         status: UploadTaskStatus.canceled,
       );
 
-      // 刷新列表
       await _loadUploadTasks();
 
       if (mounted) {
+        setState(() {});
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('已取消上传')),
         );
@@ -120,7 +170,7 @@ class _UploadRecordsPageState extends State<UploadRecordsPage>
     }
   }
 
-  /// 删除任务记录
+  /// 删除上传任务记录
   Future<void> _deleteUploadTask(UploadTaskRecord task) async {
     try {
       await _taskManager.deleteTaskForKey(
@@ -129,10 +179,10 @@ class _UploadRecordsPageState extends State<UploadRecordsPage>
         groupId: task.groupId,
       );
 
-      // 刷新列表
       await _loadUploadTasks();
 
       if (mounted) {
+        setState(() {});
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('已删除记录')),
         );
@@ -147,19 +197,47 @@ class _UploadRecordsPageState extends State<UploadRecordsPage>
     }
   }
 
+  /// ✅ 新增：删除下载批次记录
+  Future<void> _deleteDownloadBatch(DownloadBatchRecord batch) async {
+    try {
+      final userId = MyInstance().user?.user?.id ?? 0;
+      final groupId = MyInstance().group?.groupId ?? 0;
+
+      // 删除批次中的所有任务
+      for (final task in batch.tasks) {
+        await _downloadDbHelper.deleteTask(
+          taskId: task.taskId,
+          userId: userId,
+          groupId: groupId,
+        );
+      }
+
+      await _loadDownloadTasks();
+
+      if (mounted) {
+        setState(() {});
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('已删除记录')),
+        );
+      }
+    } catch (e) {
+      print('删除下载批次失败: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('删除失败: $e')),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.white,
       body: Column(
         children: [
-          // 顶部标题栏
           _buildTitleBar(),
-
-          // Tab栏
           _buildTabBar(),
-
-          // 内容区域
           Expanded(
             child: TabBarView(
               controller: _tabController,
@@ -186,7 +264,6 @@ class _UploadRecordsPageState extends State<UploadRecordsPage>
       ),
       child: Row(
         children: [
-          // 左侧：返回按钮和标题（可拖拽区域）
           Expanded(
             child: GestureDetector(
               onPanStart: (_) => windowManager.startDragging(),
@@ -202,14 +279,12 @@ class _UploadRecordsPageState extends State<UploadRecordsPage>
                 padding: const EdgeInsets.symmetric(horizontal: 16),
                 child: Row(
                   children: [
-                    // 返回按钮
                     IconButton(
                       icon: const Icon(Icons.arrow_back, size: 24),
                       onPressed: () => Navigator.pop(context),
                       tooltip: '返回',
                     ),
                     const SizedBox(width: 8),
-                    // 标题
                     const Text(
                       '传输记录',
                       style: TextStyle(
@@ -222,12 +297,9 @@ class _UploadRecordsPageState extends State<UploadRecordsPage>
               ),
             ),
           ),
-
-          // 右侧：工具按钮和窗口控制
           Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              // 关闭按钮
               _WindowButton(
                 icon: Icons.close,
                 isClose: true,
@@ -253,7 +325,6 @@ class _UploadRecordsPageState extends State<UploadRecordsPage>
       ),
       child: Row(
         children: [
-          // 左对齐的 Tab 按钮组
           Container(
             decoration: BoxDecoration(
               color: const Color(0xFFF5F5F5),
@@ -262,6 +333,8 @@ class _UploadRecordsPageState extends State<UploadRecordsPage>
             child: TabBar(
               controller: _tabController,
               isScrollable: true,
+              tabAlignment: TabAlignment.start,  // 🆕 添加这行
+              padding: EdgeInsets.zero,
               labelColor: Colors.black,
               unselectedLabelColor: Colors.grey,
               indicatorSize: TabBarIndicatorSize.tab,
@@ -290,32 +363,24 @@ class _UploadRecordsPageState extends State<UploadRecordsPage>
     );
   }
 
-  /// 构建上传（同步）Tab
+  /// 构建上传Tab
   Widget _buildUploadTab() {
     if (_isLoading) {
-      return const Center(
-        child: CircularProgressIndicator(),
-      );
+      return const Center(child: CircularProgressIndicator());
     }
 
     if (_uploadTasks.isEmpty) {
       return const Center(
         child: Text(
           '暂无上传记录',
-          style: TextStyle(
-            fontSize: 16,
-            color: Colors.grey,
-          ),
+          style: TextStyle(fontSize: 16, color: Colors.grey),
         ),
       );
     }
 
     return Column(
       children: [
-        // 表头
-        _buildTableHeader(),
-
-        // 任务列表
+        _buildTableHeader(isUpload: true),
         Expanded(
           child: ListView.builder(
             padding: EdgeInsets.zero,
@@ -325,332 +390,45 @@ class _UploadRecordsPageState extends State<UploadRecordsPage>
             },
           ),
         ),
-
-        // 底部分页信息
-        _buildPaginationFooter(),
+        _buildPaginationFooter(_uploadTasks.length),
       ],
     );
   }
 
-  /// 构建下载Tab
+  /// ✅ 修改：构建下载Tab（按批次显示）
   Widget _buildDownloadTab() {
     if (_isLoading) {
-      return const Center(
-        child: CircularProgressIndicator(),
-      );
+      return const Center(child: CircularProgressIndicator());
     }
 
-    if (_downloadTasks.isEmpty) {
+    if (_downloadBatches.isEmpty) {
       return const Center(
         child: Text(
           '暂无下载记录',
-          style: TextStyle(
-            fontSize: 16,
-            color: Colors.grey,
-          ),
+          style: TextStyle(fontSize: 16, color: Colors.grey),
         ),
       );
     }
 
     return Column(
       children: [
-        // 表头
-        _buildDownloadTableHeader(),
-
-        // 任务列表
+        _buildTableHeader(isUpload: false),
         Expanded(
           child: ListView.builder(
             padding: EdgeInsets.zero,
-            itemCount: _downloadTasks.length,
+            itemCount: _downloadBatches.length,
             itemBuilder: (context, index) {
-              return _buildDownloadTaskItem(_downloadTasks[index], index);
+              return _buildDownloadBatchItem(_downloadBatches[index], index);
             },
           ),
         ),
-
-        // 底部分页信息
-        _buildDownloadPaginationFooter(),
+        _buildPaginationFooter(_downloadBatches.length),
       ],
     );
   }
 
-  /// 构建下载表头
-  Widget _buildDownloadTableHeader() {
-    return Container(
-      height: 48,
-      padding: const EdgeInsets.symmetric(horizontal: 20),
-      decoration: BoxDecoration(
-        color: const Color(0xFFF9F9F9),
-        border: Border(
-          bottom: BorderSide(color: Colors.grey.shade300),
-        ),
-      ),
-      child: Row(
-        children: [
-          _buildHeaderCell('文件名', flex: 3),
-          _buildHeaderCell('大小', flex: 2),
-          _buildHeaderCell('进度', flex: 2),
-          _buildHeaderCell('状态', flex: 2),
-          _buildHeaderCell('操作', flex: 2),
-        ],
-      ),
-    );
-  }
-
-  /// 构建下载任务项
-  Widget _buildDownloadTaskItem(DownloadTaskRecord task, int index) {
-    // 奇偶行不同背景色
-    final isEvenRow = index % 2 == 0;
-
-    return Container(
-      height: 56,
-      padding: const EdgeInsets.symmetric(horizontal: 20),
-      decoration: BoxDecoration(
-        color: isEvenRow ? Colors.white : const Color(0xFFFAFAFA),
-        border: Border(
-          bottom: BorderSide(color: Colors.grey.shade200),
-        ),
-      ),
-      child: Row(
-        children: [
-          // 文件名
-          Expanded(
-            flex: 3,
-            child: Row(
-              children: [
-                // 文件类型图标
-                Icon(
-                  task.fileType == 'V' ? Icons.videocam : Icons.image,
-                  size: 20,
-                  color: task.fileType == 'V' ? Colors.blue : Colors.orange,
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    task.fileName,
-                    style: const TextStyle(fontSize: 14),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-              ],
-            ),
-          ),
-
-          // 大小
-          Expanded(
-            flex: 2,
-            child: Text(
-              _formatFileSize(task.fileSize),
-              style: const TextStyle(fontSize: 14),
-            ),
-          ),
-
-          // 进度
-          Expanded(
-            flex: 2,
-            child: _buildProgressWidget(task),
-          ),
-
-          // 状态
-          Expanded(
-            flex: 2,
-            child: _buildDownloadStatusWidget(task.status),
-          ),
-
-          // 操作
-          Expanded(
-            flex: 2,
-            child: _buildDownloadActionButtons(task),
-          ),
-        ],
-      ),
-    );
-  }
-
-  /// 构建进度显示
-  Widget _buildProgressWidget(DownloadTaskRecord task) {
-    if (task.status == DownloadTaskStatus.completed) {
-      return const Text(
-        '100%',
-        style: TextStyle(fontSize: 14, color: Colors.green),
-      );
-    }
-
-    if (task.status == DownloadTaskStatus.downloading) {
-      final progress = (task.progress * 100).toStringAsFixed(1);
-      return Row(
-        children: [
-          Expanded(
-            child: LinearProgressIndicator(
-              value: task.progress,
-              backgroundColor: Colors.grey.shade200,
-              valueColor: const AlwaysStoppedAnimation<Color>(Colors.orange),
-            ),
-          ),
-          const SizedBox(width: 8),
-          Text(
-            '$progress%',
-            style: const TextStyle(fontSize: 12, color: Colors.grey),
-          ),
-        ],
-      );
-    }
-
-    return Text(
-      '${(task.progress * 100).toStringAsFixed(0)}%',
-      style: const TextStyle(fontSize: 14, color: Colors.grey),
-    );
-  }
-
-  /// 构建下载状态显示
-  Widget _buildDownloadStatusWidget(DownloadTaskStatus status) {
-    String text;
-    Color color;
-
-    switch (status) {
-      case DownloadTaskStatus.pending:
-        text = '等待中';
-        color = Colors.grey;
-        break;
-      case DownloadTaskStatus.downloading:
-        text = '下载中';
-        color = Colors.orange;
-        break;
-      case DownloadTaskStatus.paused:
-        text = '已暂停';
-        color = Colors.blue;
-        break;
-      case DownloadTaskStatus.completed:
-        text = '已完成';
-        color = Colors.green;
-        break;
-      case DownloadTaskStatus.failed:
-        text = '失败';
-        color = Colors.red;
-        break;
-      case DownloadTaskStatus.canceled:
-        text = '已取消';
-        color = Colors.grey;
-        break;
-    }
-
-    return Text(
-      text,
-      style: TextStyle(fontSize: 14, color: color),
-    );
-  }
-
-  /// 构建下载操作按钮
-  Widget _buildDownloadActionButtons(DownloadTaskRecord task) {
-    return Row(
-      children: [
-        // 删除按钮
-        TextButton(
-          onPressed: () => _showDeleteDownloadConfirmDialog(task),
-          child: const Text(
-            '删除',
-            style: TextStyle(fontSize: 13, color: Colors.red),
-          ),
-        ),
-      ],
-    );
-  }
-
-  /// 显示删除下载记录确认对话框
-  void _showDeleteDownloadConfirmDialog(DownloadTaskRecord task) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('确认删除'),
-        content: Text('确定要删除 "${task.fileName}" 的下载记录吗？'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('取消'),
-          ),
-          TextButton(
-            onPressed: () {
-              Navigator.pop(context);
-              _deleteDownloadTask(task);
-            },
-            child: const Text('删除', style: TextStyle(color: Colors.red)),
-          ),
-        ],
-      ),
-    );
-  }
-
-  /// 删除下载任务记录
-  Future<void> _deleteDownloadTask(DownloadTaskRecord task) async {
-    try {
-      await _downloadDbHelper.deleteTask(
-        taskId: task.taskId,
-        userId: task.userId,
-        groupId: task.groupId,
-      );
-
-      // 刷新列表
-      await _loadAllTasks();
-      setState(() {});
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('已删除记录')),
-        );
-      }
-    } catch (e) {
-      print('删除下载任务失败: $e');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('删除失败: $e')),
-        );
-      }
-    }
-  }
-
-  /// 格式化文件大小
-  String _formatFileSize(int bytes) {
-    if (bytes < 1024) {
-      return '${bytes}B';
-    } else if (bytes < 1024 * 1024) {
-      return '${(bytes / 1024).toStringAsFixed(1)}KB';
-    } else if (bytes < 1024 * 1024 * 1024) {
-      return '${(bytes / (1024 * 1024)).toStringAsFixed(1)}MB';
-    } else {
-      return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(2)}GB';
-    }
-  }
-
-  /// 构建下载分页信息
-  Widget _buildDownloadPaginationFooter() {
-    final totalCount = _downloadTasks.length;
-
-    return Container(
-      height: 48,
-      padding: const EdgeInsets.symmetric(horizontal: 20),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        border: Border(
-          top: BorderSide(color: Colors.grey.shade200),
-        ),
-      ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.end,
-        children: [
-          Text(
-            '共 $totalCount 条记录',
-            style: TextStyle(
-              fontSize: 13,
-              color: Colors.grey.shade600,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  /// 构建表头
-  Widget _buildTableHeader() {
+  /// ✅ 统一的表头构建
+  Widget _buildTableHeader({required bool isUpload}) {
     return Container(
       height: 48,
       padding: const EdgeInsets.symmetric(horizontal: 20),
@@ -689,12 +467,8 @@ class _UploadRecordsPageState extends State<UploadRecordsPage>
 
   /// 构建上传任务项
   Widget _buildUploadTaskItem(UploadTaskRecord task, int index) {
-    final dateTime =
-    DateTime.fromMillisecondsSinceEpoch(task.createdAt);
-    final formattedDate =
-    DateFormat('yyyy.M.d HH:mm:ss').format(dateTime);
-
-    // 奇偶行不同背景色
+    final dateTime = DateTime.fromMillisecondsSinceEpoch(task.createdAt);
+    final formattedDate = DateFormat('yyyy.M.d HH:mm:ss').format(dateTime);
     final isEvenRow = index % 2 == 0;
 
     return Container(
@@ -711,48 +485,82 @@ class _UploadRecordsPageState extends State<UploadRecordsPage>
           // 时间
           Expanded(
             flex: 3,
-            child: Text(
-              formattedDate,
-              style: const TextStyle(fontSize: 14),
-            ),
+            child: Text(formattedDate, style: const TextStyle(fontSize: 14)),
           ),
-
           // 数量
           Expanded(
             flex: 2,
-            child: Text(
-              '${task.fileCount}',
-              style: const TextStyle(fontSize: 14),
-            ),
+            child: Text('${task.fileCount}', style: const TextStyle(fontSize: 14)),
           ),
-
           // 大小
           Expanded(
             flex: 2,
-            child: Text(
-              task.formattedSize,
-              style: const TextStyle(fontSize: 14),
-            ),
+            child: Text(task.formattedSize, style: const TextStyle(fontSize: 14)),
           ),
-
           // 状态
           Expanded(
             flex: 2,
-            child: _buildStatusWidget(task.status),
+            child: _buildUploadStatusWidget(task.status),
           ),
-
           // 操作
           Expanded(
             flex: 2,
-            child: _buildActionButtons(task),
+            child: _buildUploadActionButtons(task),
           ),
         ],
       ),
     );
   }
 
-  /// 构建状态显示组件
-  Widget _buildStatusWidget(UploadTaskStatus status) {
+  /// ✅ 新增：构建下载批次项（与上传样式一致）
+  Widget _buildDownloadBatchItem(DownloadBatchRecord batch, int index) {
+    final dateTime = DateTime.fromMillisecondsSinceEpoch(batch.createdAt);
+    final formattedDate = DateFormat('yyyy.M.d HH:mm:ss').format(dateTime);
+    final isEvenRow = index % 2 == 0;
+
+    return Container(
+      height: 56,
+      padding: const EdgeInsets.symmetric(horizontal: 20),
+      decoration: BoxDecoration(
+        color: isEvenRow ? Colors.white : const Color(0xFFFAFAFA),
+        border: Border(
+          bottom: BorderSide(color: Colors.grey.shade200),
+        ),
+      ),
+      child: Row(
+        children: [
+          // 时间
+          Expanded(
+            flex: 3,
+            child: Text(formattedDate, style: const TextStyle(fontSize: 14)),
+          ),
+          // 数量
+          Expanded(
+            flex: 2,
+            child: Text('${batch.fileCount}', style: const TextStyle(fontSize: 14)),
+          ),
+          // 大小
+          Expanded(
+            flex: 2,
+            child: Text(batch.formattedSize, style: const TextStyle(fontSize: 14)),
+          ),
+          // 状态
+          Expanded(
+            flex: 2,
+            child: _buildDownloadBatchStatusWidget(batch),
+          ),
+          // 操作
+          Expanded(
+            flex: 2,
+            child: _buildDownloadBatchActionButtons(batch),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 构建上传状态显示
+  Widget _buildUploadStatusWidget(UploadTaskStatus status) {
     String text;
     Color color;
 
@@ -779,51 +587,85 @@ class _UploadRecordsPageState extends State<UploadRecordsPage>
         break;
     }
 
-    return Text(
-      text,
-      style: TextStyle(
-        fontSize: 14,
-        color: color,
-      ),
-    );
+    return Text(text, style: TextStyle(fontSize: 14, color: color));
   }
 
-  /// 构建操作按钮
-  Widget _buildActionButtons(UploadTaskRecord task) {
+  /// ✅ 新增：构建下载批次状态显示
+  Widget _buildDownloadBatchStatusWidget(DownloadBatchRecord batch) {
+    String text;
+    Color color;
+
+    switch (batch.status) {
+      case DownloadBatchStatus.pending:
+        text = '待下载';
+        color = Colors.grey;
+        break;
+      case DownloadBatchStatus.downloading:
+        text = '正在下载';
+        color = Colors.orange;
+        break;
+      case DownloadBatchStatus.completed:
+        text = '已完成';
+        color = Colors.black;
+        break;
+      case DownloadBatchStatus.partialCompleted:
+        text = '部分完成 (${batch.completedCount}/${batch.fileCount})';
+        color = Colors.orange;
+        break;
+      case DownloadBatchStatus.failed:
+        text = '失败';
+        color = Colors.red;
+        break;
+      case DownloadBatchStatus.canceled:
+        text = '已取消';
+        color = Colors.grey;
+        break;
+    }
+
+    return Text(text, style: TextStyle(fontSize: 14, color: color));
+  }
+
+  /// 构建上传操作按钮
+  Widget _buildUploadActionButtons(UploadTaskRecord task) {
     return Row(
       children: [
-        // 取消同步按钮（仅在上传中时显示）
         if (task.status == UploadTaskStatus.uploading)
           TextButton(
             onPressed: () => _cancelUploadTask(task),
             child: const Text(
               '取消上传',
-              style: TextStyle(
-                fontSize: 13,
-                color: Colors.grey,
-              ),
+              style: TextStyle(fontSize: 13, color: Colors.grey),
             ),
           ),
-
         const SizedBox(width: 8),
-
-        // 删除按钮
         TextButton(
-          onPressed: () => _showDeleteConfirmDialog(task),
+          onPressed: () => _showDeleteUploadConfirmDialog(task),
           child: const Text(
             '删除',
-            style: TextStyle(
-              fontSize: 13,
-              color: Colors.red,
-            ),
+            style: TextStyle(fontSize: 13, color: Colors.red),
           ),
         ),
       ],
     );
   }
 
-  /// 显示删除确认对话框
-  void _showDeleteConfirmDialog(UploadTaskRecord task) {
+  /// ✅ 新增：构建下载批次操作按钮
+  Widget _buildDownloadBatchActionButtons(DownloadBatchRecord batch) {
+    return Row(
+      children: [
+        TextButton(
+          onPressed: () => _showDeleteDownloadBatchConfirmDialog(batch),
+          child: const Text(
+            '删除',
+            style: TextStyle(fontSize: 13, color: Colors.red),
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// 显示删除上传记录确认对话框
+  void _showDeleteUploadConfirmDialog(UploadTaskRecord task) {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -839,10 +681,31 @@ class _UploadRecordsPageState extends State<UploadRecordsPage>
               Navigator.pop(context);
               _deleteUploadTask(task);
             },
-            child: const Text(
-              '删除',
-              style: TextStyle(color: Colors.red),
-            ),
+            child: const Text('删除', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// ✅ 新增：显示删除下载批次确认对话框
+  void _showDeleteDownloadBatchConfirmDialog(DownloadBatchRecord batch) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('确认删除'),
+        content: Text('确定要删除这 ${batch.fileCount} 个文件的下载记录吗？'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+              _deleteDownloadBatch(batch);
+            },
+            child: const Text('删除', style: TextStyle(color: Colors.red)),
           ),
         ],
       ),
@@ -850,9 +713,7 @@ class _UploadRecordsPageState extends State<UploadRecordsPage>
   }
 
   /// 构建分页信息
-  Widget _buildPaginationFooter() {
-    final totalCount = _uploadTasks.length;
-
+  Widget _buildPaginationFooter(int totalCount) {
     return Container(
       height: 48,
       padding: const EdgeInsets.symmetric(horizontal: 20),
@@ -867,18 +728,135 @@ class _UploadRecordsPageState extends State<UploadRecordsPage>
         children: [
           Text(
             '共 $totalCount 条记录',
-            style: TextStyle(
-              fontSize: 13,
-              color: Colors.grey.shade600,
-            ),
+            style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
           ),
         ],
       ),
     );
   }
+
+  /// 格式化文件大小
+  String _formatFileSize(int bytes) {
+    if (bytes < 1024) {
+      return '${bytes}B';
+    } else if (bytes < 1024 * 1024) {
+      return '${(bytes / 1024).toStringAsFixed(1)}KB';
+    } else if (bytes < 1024 * 1024 * 1024) {
+      return '${(bytes / (1024 * 1024)).toStringAsFixed(1)}MB';
+    } else {
+      return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(2)}GB';
+    }
+  }
 }
 
-/// 窗口控制按钮
+
+// ============================================================
+// ✅ 新增：下载批次状态枚举
+// ============================================================
+enum DownloadBatchStatus {
+  pending,         // 待下载
+  downloading,     // 下载中
+  completed,       // 已完成
+  partialCompleted,// 部分完成
+  failed,          // 失败
+  canceled,        // 已取消
+}
+
+
+// ============================================================
+// ✅ 新增：下载批次记录模型
+// ============================================================
+class DownloadBatchRecord {
+  final List<DownloadTaskRecord> tasks;
+  final int createdAt;
+  final int fileCount;
+  final int totalSize;
+  final int completedCount;
+  final int failedCount;
+
+  DownloadBatchRecord({
+    required this.tasks,
+    required this.createdAt,
+    required this.fileCount,
+    required this.totalSize,
+    required this.completedCount,
+    required this.failedCount,
+  });
+
+  /// 从任务列表创建批次记录
+  factory DownloadBatchRecord.fromTasks(List<DownloadTaskRecord> tasks) {
+    if (tasks.isEmpty) {
+      return DownloadBatchRecord(
+        tasks: [],
+        createdAt: 0,
+        fileCount: 0,
+        totalSize: 0,
+        completedCount: 0,
+        failedCount: 0,
+      );
+    }
+
+    final completedCount = tasks.where((t) =>
+    t.status == DownloadTaskStatus.completed).length;
+    final failedCount = tasks.where((t) =>
+    t.status == DownloadTaskStatus.failed).length;
+    final totalSize = tasks.fold<int>(0, (sum, t) => sum + t.fileSize);
+
+    return DownloadBatchRecord(
+      tasks: tasks,
+      createdAt: tasks.first.createdAt, // 使用第一个任务的创建时间
+      fileCount: tasks.length,
+      totalSize: totalSize,
+      completedCount: completedCount,
+      failedCount: failedCount,
+    );
+  }
+
+  /// 计算批次状态
+  DownloadBatchStatus get status {
+    if (tasks.isEmpty) return DownloadBatchStatus.pending;
+
+    final hasDownloading = tasks.any((t) =>
+    t.status == DownloadTaskStatus.downloading);
+    final hasPending = tasks.any((t) =>
+    t.status == DownloadTaskStatus.pending);
+    final allCompleted = tasks.every((t) =>
+    t.status == DownloadTaskStatus.completed);
+    final allFailed = tasks.every((t) =>
+    t.status == DownloadTaskStatus.failed);
+    final allCanceled = tasks.every((t) =>
+    t.status == DownloadTaskStatus.canceled);
+    final hasCompleted = tasks.any((t) =>
+    t.status == DownloadTaskStatus.completed);
+
+    if (allCompleted) return DownloadBatchStatus.completed;
+    if (allFailed) return DownloadBatchStatus.failed;
+    if (allCanceled) return DownloadBatchStatus.canceled;
+    if (hasDownloading) return DownloadBatchStatus.downloading;
+    if (hasPending) return DownloadBatchStatus.pending;
+    if (hasCompleted) return DownloadBatchStatus.partialCompleted;
+
+    return DownloadBatchStatus.failed;
+  }
+
+  /// 格式化文件大小
+  String get formattedSize {
+    if (totalSize < 1024) {
+      return '${totalSize}B';
+    } else if (totalSize < 1024 * 1024) {
+      return '${(totalSize / 1024).toStringAsFixed(1)}KB';
+    } else if (totalSize < 1024 * 1024 * 1024) {
+      return '${(totalSize / (1024 * 1024)).toStringAsFixed(1)}MB';
+    } else {
+      return '${(totalSize / (1024 * 1024 * 1024)).toStringAsFixed(2)}GB';
+    }
+  }
+}
+
+
+// ============================================================
+// 窗口控制按钮
+// ============================================================
 class _WindowButton extends StatefulWidget {
   final IconData icon;
   final VoidCallback onPressed;

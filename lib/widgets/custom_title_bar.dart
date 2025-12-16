@@ -69,7 +69,8 @@ class _CustomTitleBarState extends State<CustomTitleBar> {
   void initState() {
     super.initState();
     _checkMaximized();
-
+    _currentIP = AppConfig.usedIP;
+    _isPrimaryIP = AppConfig.usedIP.contains("127.0.0.1");
     // P2P 状态
     _p2pStatus = MyNetworkProvider().getCurrentP2pStatus();
     debugPrint('CustomTitleBar 初始化 P2P 状态: $_p2pStatus');

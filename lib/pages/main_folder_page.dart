@@ -11,12 +11,10 @@ import '../widgets/empty_state.dart';
 import '../models/folder_info.dart';
 import '../user/models/group.dart';
 import '../services/folder_manager.dart';
-import '../album/manager/local_folder_upload_manager.dart';
 import '../user/my_instance.dart';
 import '../widgets/upload_bottom_bar.dart';
 import 'local_album/controllers/upload_coordinator.dart';
 import 'local_album/pages/folder_detail_page.dart';
-import '../services/global_upload_service.dart';
 // MARK: - 辅助模型和静态方法 (用于在后台隔离区运行)
 
 /// 用于返回上传分析结果的模型

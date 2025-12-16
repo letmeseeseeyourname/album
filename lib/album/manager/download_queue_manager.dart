@@ -1,6 +1,7 @@
 // download_queue_manager.dart (增强版 - 添加多轮重试队列机制)
 import 'dart:async';
 import 'dart:io';
+import 'package:ablumwin/utils/snack_bar_helper.dart';
 import 'package:flutter/material.dart';
 import 'package:dio/dio.dart';
 import 'package:path/path.dart' as p;
@@ -12,7 +13,7 @@ import '../../../eventbus/event_bus.dart';
 import '../../../eventbus/download_events.dart'; // 新增：导入下载事件
 import '../../pages/remote_album/components/album_bottom_bar.dart';
 import '../database/download_task_db_helper.dart';
-
+import 'package:ablumwin/main.dart';
 
 /// 下载队列管理器（增强版 - 多轮重试队列机制）
 class DownloadQueueManager extends ChangeNotifier {
@@ -268,7 +269,7 @@ class DownloadQueueManager extends ChangeNotifier {
       debugPrint('错误：用户ID或群组ID为空');
       return;
     }
-
+    // GlobalSnackBar.showInfo('addDownloadTasks~',duration: const Duration(seconds: 1));
     // 确保使用最新的下载路径
     final currentDownloadPath = await MyInstance().getDownloadPath();
     if (currentDownloadPath != _downloadPath) {
@@ -335,7 +336,7 @@ class DownloadQueueManager extends ChangeNotifier {
       newTasks.add(task);
       _downloadTasks.add(task);
     }
-
+    // GlobalSnackBar.showInfo('创建任务记录 ',duration: const Duration(seconds: 1));
     debugPrint('任务统计: 新增=${newTasks.length}, 跳过=${skippedCount}, 无效=${invalidCount}');
 
     if (newTasks.isNotEmpty) {
@@ -372,7 +373,7 @@ class DownloadQueueManager extends ChangeNotifier {
   Future<void> startDownload(String taskId) async {
     final taskIndex = _downloadTasks.indexWhere((t) => t.taskId == taskId);
     if (taskIndex == -1) return;
-
+    // GlobalSnackBar.showInfo('startDownload : $taskIndex ',duration: const Duration(seconds: 1));
     final task = _downloadTasks[taskIndex];
 
     // 检查是否已在下载
@@ -422,12 +423,42 @@ class DownloadQueueManager extends ChangeNotifier {
         downloadedSize = await saveFile.length();
       }
 
+      // 🆕 检查文件是否已完全下载，如果是则生成新文件名重新下载（避免 416 错误）
+      String actualSavePath = task.savePath!;
+      if (downloadedSize >= task.fileSize && task.fileSize > 0) {
+        debugPrint('文件已存在且完整，生成新文件名重新下载: ${task.fileName}');
+
+        // 生成新文件名: fileName(n).ext
+        actualSavePath = _generateUniqueFilePath(task.savePath!);
+        downloadedSize = 0; // 重置已下载大小，从头开始下载
+
+        debugPrint('新保存路径: $actualSavePath');
+
+        // 更新任务的保存路径
+        final index = _downloadTasks.indexWhere((t) => t.taskId == taskId);
+        if (index != -1) {
+          _downloadTasks[index] = _downloadTasks[index].copyWith(
+            savePath: actualSavePath,
+            updatedAt: DateTime.now().millisecondsSinceEpoch,
+          );
+          notifyListeners();
+        }
+
+        // 更新数据库中的保存路径
+        await _dbHelper.updateSavePath(
+          taskId: taskId,
+          userId: _currentUserId!,
+          groupId: _currentGroupId!,
+          savePath: actualSavePath,
+        );
+      }
+
       // 开始下载
       debugPrint('开始下载: ${task.fileName} (已下载: $downloadedSize/${task.fileSize})');
 
       await _dio.download(
         task.downloadUrl,
-        task.savePath,
+        actualSavePath,
         cancelToken: cancelToken,
         deleteOnError: false,
         options: Options(
@@ -989,6 +1020,28 @@ class DownloadQueueManager extends ChangeNotifier {
   String get retryStatusMessage {
     if (!_isRetrying) return '';
     return '重试第 $_currentRetryRound/$_maxRetryRounds 轮，剩余 ${_failedQueue.length} 个任务...';
+  }
+
+  /// 🆕 生成唯一文件路径，避免覆盖已存在的文件
+  /// 例如: /path/to/file.jpg -> /path/to/file(1).jpg -> /path/to/file(2).jpg
+  String _generateUniqueFilePath(String originalPath) {
+    final file = File(originalPath);
+    if (!file.existsSync()) {
+      return originalPath;
+    }
+
+    final directory = file.parent.path;
+    final fileName = p.basenameWithoutExtension(originalPath);
+    final extension = p.extension(originalPath);
+
+    int counter = 1;
+    String newPath;
+    do {
+      newPath = p.join(directory, '$fileName($counter)$extension');
+      counter++;
+    } while (File(newPath).existsSync());
+
+    return newPath;
   }
 
   @override

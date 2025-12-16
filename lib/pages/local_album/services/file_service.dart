@@ -12,12 +12,12 @@ class FileService {
 
   /// 支持的图片扩展名
   static const Set<String> _imageExtensions = {
-    'jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'heic', 'heif'
+    'bmp', 'gif', 'jpg', 'jpeg', 'png', 'webp', 'wbmp', 'heic'
   };
 
   /// 支持的视频扩展名
   static const Set<String> _videoExtensions = {
-    'mp4', 'mov', 'avi', 'mkv', 'wmv', 'flv', 'webm', 'm4v', '3gp'
+    'mp4', 'mov', 'avi', '3gp', 'mkv', '3gp2'
   };
 
   /// 加载指定路径下的文件列表

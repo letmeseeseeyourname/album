@@ -47,7 +47,7 @@ class UploadBottomBar extends StatelessWidget {
   /// 是否正在上传
   final bool isUploading;
 
-  /// 上传进度（可为空）
+  /// 上传进度（可为空，支持聚合进度）
   final LocalUploadProgress? uploadProgress;
 
   /// 上传按钮点击回调
@@ -66,6 +66,9 @@ class UploadBottomBar extends StatelessWidget {
   /// 上传中按钮文字（可自定义）
   final String? uploadingButtonText;
 
+  /// 活跃任务数量（用于显示多任务信息）
+  final int activeTaskCount;
+
   const UploadBottomBar({
     super.key,
     required this.selectedCount,
@@ -80,6 +83,7 @@ class UploadBottomBar extends StatelessWidget {
     this.showSelectionInfo = true,
     this.uploadButtonText,
     this.uploadingButtonText,
+    this.activeTaskCount = 1,
   });
 
   @override
@@ -148,8 +152,28 @@ class UploadBottomBar extends StatelessWidget {
     );
   }
 
-  /// 构建上传进度区域
+  /// 构建上传进度区域（支持聚合进度显示）
   Widget _buildUploadProgress(LocalUploadProgress progress) {
+    // 构建状态文本
+    String statusText;
+    if (activeTaskCount > 1) {
+      // 多任务模式：显示任务数和失败数
+      statusText = '${progress.uploadedFiles}/${progress.totalFiles} 文件 · '
+          '$activeTaskCount个任务并行';
+      if (progress.failedFiles > 0) {
+        statusText += ' · ${progress.failedFiles}个失败';
+      }
+    } else {
+      // 单任务模式：显示当前文件名
+      statusText = '${progress.uploadedFiles}/${progress.totalFiles}';
+      if (progress.currentFileName != null && progress.currentFileName!.isNotEmpty) {
+        statusText += ' · ${progress.currentFileName}';
+      }
+      if (progress.failedFiles > 0) {
+        statusText += ' · ${progress.failedFiles}个失败';
+      }
+    }
+
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -160,7 +184,9 @@ class UploadBottomBar extends StatelessWidget {
               child: LinearProgressIndicator(
                 value: progress.progress,
                 backgroundColor: Colors.grey.shade200,
-                valueColor: const AlwaysStoppedAnimation<Color>(Colors.orange),
+                valueColor: AlwaysStoppedAnimation<Color>(
+                  progress.failedFiles > 0 ? Colors.orange.shade700 : Colors.orange,
+                ),
               ),
             ),
             const SizedBox(width: 10),
@@ -168,12 +194,30 @@ class UploadBottomBar extends StatelessWidget {
               '${(progress.progress * 100).toStringAsFixed(0)}%',
               style: const TextStyle(fontSize: 12),
             ),
+            // 多任务时显示任务数徽章
+            if (activeTaskCount > 1) ...[
+              const SizedBox(width: 6),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: Colors.blue.shade100,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Text(
+                  '×$activeTaskCount',
+                  style: TextStyle(
+                    fontSize: 10,
+                    color: Colors.blue.shade700,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ],
           ],
         ),
         const SizedBox(height: 4),
         Text(
-          '${progress.uploadedFiles}/${progress.totalFiles} · '
-              '${progress.currentFileName ?? ""}',
+          statusText,
           style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
           maxLines: 1,
           overflow: TextOverflow.ellipsis,

@@ -47,6 +47,12 @@ class UploadCoordinator extends ChangeNotifier {
   // 活跃的上传任务列表
   final List<UploadTaskContext> _activeTasks = [];
 
+  // ✅ 已完成任务的累计统计（用于聚合进度显示）
+  int _completedTaskCount = 0;
+  int _completedTotalFiles = 0;
+  int _completedUploadedFiles = 0;
+  int _completedFailedFiles = 0;
+
   // 私有构造函数
   UploadCoordinator._internal(this._internalFileService);
 
@@ -70,6 +76,61 @@ class UploadCoordinator extends ChangeNotifier {
 
   /// 活跃任务数量
   int get activeTaskCount => _activeTasks.length;
+
+  /// 总任务数量（活跃 + 已完成，用于 UI 显示）
+  int get totalTaskCount => _activeTasks.length + _completedTaskCount;
+
+  /// 获取聚合进度（合并所有任务的进度，包括已完成的任务）
+  LocalUploadProgress? get aggregatedProgress {
+    // 没有活跃任务且没有已完成任务时返回 null
+    if (_activeTasks.isEmpty && _completedTaskCount == 0) return null;
+
+    // 聚合：已完成任务 + 活跃任务
+    int totalFiles = _completedTotalFiles;
+    int uploadedFiles = _completedUploadedFiles;
+    int failedFiles = _completedFailedFiles;
+    String? currentFileName;
+
+    for (final task in _activeTasks) {
+      final progress = task.progress;
+      if (progress != null) {
+        totalFiles += progress.totalFiles;
+        uploadedFiles += progress.uploadedFiles;
+        failedFiles += progress.failedFiles;
+        // 取第一个正在上传的文件名
+        if (currentFileName == null && progress.currentFileName != null) {
+          currentFileName = progress.currentFileName;
+        }
+      }
+    }
+
+    // 计算总任务数
+    final totalTaskCount = _completedTaskCount + _activeTasks.length;
+
+    // 所有任务都完成了
+    if (_activeTasks.isEmpty) {
+      return LocalUploadProgress(
+        totalFiles: totalFiles,
+        uploadedFiles: uploadedFiles,
+        failedFiles: failedFiles,
+        currentFileName: null,
+        statusMessage: '全部完成',
+      );
+    }
+
+    // 只有一个活跃任务且没有已完成任务时，直接返回该任务进度
+    if (_activeTasks.length == 1 && _completedTaskCount == 0) {
+      return _activeTasks.first.progress;
+    }
+
+    return LocalUploadProgress(
+      totalFiles: totalFiles,
+      uploadedFiles: uploadedFiles,
+      failedFiles: failedFiles,
+      currentFileName: currentFileName,
+      statusMessage: '$totalTaskCount个任务并行上传中...',
+    );
+  }
 
   /// 准备上传文件列表
   Future<UploadPrepareResult> prepareUpload(List<FileItem> selectedItems) async {
@@ -144,6 +205,15 @@ class UploadCoordinator extends ChangeNotifier {
           notifyListeners();
         },
         onComplete: (success, message) {
+          // ✅ 累计已完成任务的统计数据
+          final finalProgress = taskContext.progress;
+          if (finalProgress != null) {
+            _completedTaskCount++;
+            _completedTotalFiles += finalProgress.totalFiles;
+            _completedUploadedFiles += finalProgress.uploadedFiles;
+            _completedFailedFiles += finalProgress.failedFiles;
+          }
+
           // 从活跃任务中移除
           _activeTasks.remove(taskContext);
           notifyListeners();
@@ -151,16 +221,49 @@ class UploadCoordinator extends ChangeNotifier {
           // 回调通知
           onMessage(message, isError: !success);
           onComplete();
+
+          // ✅ 所有任务完成后，延迟清理累计数据（让UI有时间显示最终状态）
+          if (_activeTasks.isEmpty) {
+            Future.delayed(const Duration(seconds: 3), () {
+              _resetCompletedStats();
+              notifyListeners();
+            });
+          }
         },
       );
     } catch (e) {
+      // ✅ 异常时也要累计统计数据
+      final finalProgress = taskContext.progress;
+      if (finalProgress != null) {
+        _completedTaskCount++;
+        _completedTotalFiles += finalProgress.totalFiles;
+        _completedUploadedFiles += finalProgress.uploadedFiles;
+        _completedFailedFiles += finalProgress.failedFiles;
+      }
+
       // 异常时也要清理任务
       _activeTasks.remove(taskContext);
       notifyListeners();
 
       onMessage('上传失败: $e', isError: true);
       onComplete();
+
+      // ✅ 所有任务完成后，延迟清理累计数据
+      if (_activeTasks.isEmpty) {
+        Future.delayed(const Duration(seconds: 3), () {
+          _resetCompletedStats();
+          notifyListeners();
+        });
+      }
     }
+  }
+
+  /// 重置已完成任务的累计统计
+  void _resetCompletedStats() {
+    _completedTaskCount = 0;
+    _completedTotalFiles = 0;
+    _completedUploadedFiles = 0;
+    _completedFailedFiles = 0;
   }
 
   /// 获取所有活跃任务的进度信息 (供高级 UI 使用)
@@ -174,6 +277,7 @@ class UploadCoordinator extends ChangeNotifier {
       task.uploadManager.cancelUpload();
     }
     _activeTasks.clear();
+    _resetCompletedStats();  // ✅ 取消时也清理累计数据
     notifyListeners();
   }
 
@@ -210,8 +314,11 @@ mixin UploadCoordinatorMixin<T extends StatefulWidget> on State<T> {
   /// 是否正在上传
   bool get isUploading => _uploadCoordinator.isUploading;
 
-  /// 当前上传进度
-  LocalUploadProgress? get uploadProgress => _uploadCoordinator.uploadProgress;
+  /// 当前上传进度（聚合所有任务）
+  LocalUploadProgress? get uploadProgress => _uploadCoordinator.aggregatedProgress;
+
+  /// 总任务数量（活跃 + 已完成）
+  int get activeTaskCount => _uploadCoordinator.totalTaskCount;
 
   /// 上传协调器实例（用于调用上传方法）
   UploadCoordinator get uploadCoordinator => _uploadCoordinator;

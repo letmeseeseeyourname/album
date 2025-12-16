@@ -26,6 +26,7 @@ import '../models/file_detail_model.dart';
 import '../models/file_upload_model.dart';
 import '../models/local_file_item.dart';
 import '../provider/album_provider.dart';
+import 'package:media_kit/media_kit.dart';
 
 /// 文件类型枚举
 enum LocalFileType { image, video, unknown }
@@ -1213,91 +1214,50 @@ class LocalFolderUploadManager extends ChangeNotifier {
   /// 获取视频元数据（duration、width、height）
   Future<VideoMetadata> _getVideoMetadata(String videoPath) async {
     try {
-      // 尝试使用 ffprobe 获取视频信息
-      final result = await Process.run(
-        'ffprobe',
-        [
-          '-v', 'quiet',
-          '-print_format', 'json',
-          '-show_format',
-          '-show_streams',
-          videoPath,
-        ],
-        runInShell: true,
-      );
+      final player = Player();
+      final completer = Completer<VideoMetadata>();
 
-      if (result.exitCode == 0) {
-        final jsonOutput = result.stdout.toString();
-        final data = json.decode(jsonOutput) as Map<String, dynamic>;
+      // 监听媒体打开事件
+      StreamSubscription? subscription;
+      subscription = player.stream.duration.listen((duration) {
+        if (duration > Duration.zero && !completer.isCompleted) {
+          // 获取视频轨道信息
+          final videoTrack = player.state.tracks.video.firstOrNull;
+          int width = 0;
+          int height = 0;
 
-        // 获取视频流信息
-        final streams = data['streams'] as List<dynamic>?;
-        if (streams != null) {
-          for (var stream in streams) {
-            if (stream['codec_type'] == 'video') {
-              final width = stream['width'] as int? ?? 0;
-              final height = stream['height'] as int? ?? 0;
-
-              // 获取时长（秒）
-              int duration = 0;
-              if (stream['duration'] != null) {
-                duration = double.parse(stream['duration'].toString()).toInt();
-              } else if (data['format'] != null &&
-                  data['format']['duration'] != null) {
-                duration =
-                    double.parse(data['format']['duration'].toString()).toInt();
-              }
-
-              return VideoMetadata(
-                duration: duration,
-                width: width,
-                height: height,
-              );
-            }
+          if (videoTrack != null) {
+            width = videoTrack.w ?? 0;
+            height = videoTrack.h ?? 0;
           }
+
+          completer.complete(VideoMetadata(
+            duration: duration.inSeconds,
+            width: width,
+            height: height,
+          ));
+          subscription?.cancel();
+          player.dispose();
         }
-      }
+      });
+
+      // 设置超时
+      Future.delayed(const Duration(seconds: 10), () {
+        if (!completer.isCompleted) {
+          completer.complete(VideoMetadata(duration: 0, width: 0, height: 0));
+          subscription?.cancel();
+          player.dispose();
+        }
+      });
+
+      await player.open(Media(videoPath), play: false);
+
+      return await completer.future;
     } catch (e) {
-      LogUtil.log("Failed to get video metadata using ffprobe: $e");
+      LogUtil.log("Failed to get video metadata: $e");
+      return VideoMetadata(duration: 0, width: 0, height: 0);
     }
-
-    // 如果 ffprobe 失败，尝试使用文件属性估算
-    try {
-      final file = File(videoPath);
-      final size = await file.length();
-
-      // 根据文件大小估算分辨率（粗略估计）
-      int width = 1280;
-      int height = 720;
-
-      if (size < 10 * 1024 * 1024) { // < 10MB
-        width = 640;
-        height = 480;
-      } else if (size < 50 * 1024 * 1024) { // < 50MB
-        width = 1280;
-        height = 720;
-      } else { // >= 50MB
-        width = 1920;
-        height = 1080;
-      }
-
-      // 估算时长（假设平均码率 2Mbps）
-      final estimatedDuration = (size / (2 * 1024 * 1024 / 8)).toInt();
-
-      LogUtil.log("Using estimated video metadata for: $videoPath");
-      return VideoMetadata(
-        duration: estimatedDuration,
-        width: width,
-        height: height,
-      );
-    } catch (e) {
-      LogUtil.log("Error estimating video metadata: $e");
-    }
-
-    // 返回默认值
-    return VideoMetadata(duration: 0, width: 0, height: 0);
   }
-
   /// 获取图片尺寸
   Future<ImageDimensions> _getImageDimensions(String imagePath) async {
     try {

@@ -7,6 +7,10 @@ import 'pages/home_page.dart';
 import 'user/my_instance.dart';
 import 'package:media_kit/media_kit.dart';
 
+// 1. 定义一个 GlobalKey，用于全局访问 ScaffoldMessenger
+final GlobalKey<ScaffoldMessengerState> snackBarKey =
+GlobalKey<ScaffoldMessengerState>();
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   MediaKit.ensureInitialized();

@@ -42,6 +42,20 @@ class AlbumProvider extends ChangeNotifier {
     return responseModel;
   }
 
+  ///"isFileDel":"Y:不保留数据 N：保留数据"
+  Future<ResponseModel<bool>> delSyncTask(int taskId) async{
+    String url = "${AppConfig.hostUrl()}/nass/ps/storage/delSyncTask";
+    ResponseModel<bool> responseModel = await requestAndConvertResponseModel(
+      url,
+      formData: {
+        "taskId": taskId,
+        "isFileDel":'N',
+      },
+      netMethod: NetMethod.post,
+    );
+    return responseModel;
+  }
+
   //nass/ps/storage/createSyncTask
   Future<ResponseModel<FileUploadResponseModel>> createSyncTask(
     List<FileUploadModel> fileList,
