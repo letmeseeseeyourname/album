@@ -6,6 +6,7 @@ import '../../user/models/login_response_model.dart';
 import '../../user/models/my_all_groups_model.dart';
 import '../../user/models/p6device_info_model.dart';
 import '../../user/models/qr_code_model.dart';
+import '../../user/models/recycle_resource_model.dart';
 import '../../user/models/resource_list_model.dart';
 import '../../user/models/upgrade_info_model.dart';
 import '../../user/models/user.dart';
@@ -30,6 +31,8 @@ class ModelFactory {
     switch (type) {
       case "ResourceListModel":
         return ResourceListModel.fromJson(json) as T;
+      case "RecycleResourceModel":
+        return RecycleResourceModel.fromJson(json) as T;
       case "LoginResponseModel":
         return LoginResponseModel.fromJson(json) as T;
       case "UserModel":

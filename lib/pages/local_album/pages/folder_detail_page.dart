@@ -1,29 +1,26 @@
 // pages/folder_detail_page.dart (修改版 - 支持文件夹递归统计)
-import 'package:flutter/material.dart';
 import 'package:ablumwin/user/my_instance.dart';
+import 'package:flutter/material.dart';
 
-import '../../../album/manager/local_folder_upload_manager.dart';
-import '../../../services/global_upload_service.dart';
+import '../../../models/file_item.dart';
+import '../../../models/folder_info.dart';
+import '../../../models/media_item.dart';
+import '../../../services/thumbnail_helper.dart';
+import '../../../widgets/custom_title_bar.dart';
+import '../../../widgets/media_viewer_page.dart';
+import '../../../widgets/side_navigation.dart';
 import '../../../widgets/upload_bottom_bar.dart';
 import '../controllers/path_navigation_controller.dart';
 import '../controllers/selection_controller.dart';
 import '../controllers/upload_coordinator.dart';
-import '../../../models/file_item.dart';
-import '../../../models/folder_info.dart';
-import '../../../models/media_item.dart';
 import '../services/file_service.dart';
 import '../services/media_cache_service.dart';
-import '../../../services/thumbnail_helper.dart';
-import '../../../widgets/custom_title_bar.dart';
-import '../widgets/folder_detail_bottom_bar.dart';
 import '../widgets/folder_detail_top_bar.dart';
-import '../widgets/views/file_view_factory.dart';
+import '../widgets/preview_panel.dart';
 import '../widgets/views/equal_height_gallery.dart';
+import '../widgets/views/file_view_factory.dart';
 import '../widgets/views/grid_view.dart';
 import '../widgets/views/list_view.dart';
-import '../../../widgets/media_viewer_page.dart';
-import '../widgets/preview_panel.dart';
-import '../../../widgets/side_navigation.dart';
 
 /// 文件夹详情页面
 ///

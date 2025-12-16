@@ -3,7 +3,9 @@ import 'package:flutter/material.dart';
 import '../../network/constant_sign.dart';
 import '../../network/network_provider.dart';
 import '../../network/response/response_model.dart';
+import '../../user/models/recycle_resource_model.dart';
 import '../../user/models/resource_list_model.dart';
+import '../../user/my_instance.dart';
 import '../models/file_detail_model.dart';
 import '../models/file_upload_model.dart';
 import '../models/file_upload_response_model.dart';
@@ -128,6 +130,22 @@ class AlbumProvider extends ChangeNotifier {
           netMethod: NetMethod.post,
           useCache: false
         );
+
+    return responseModel;
+  }
+
+  ///获取P6回收站列表数据
+  Future<ResponseModel<RecycleResourceModel>> listRecycleFiles(int page) async {
+    // ...existing code...
+    String url = "${AppConfig.hostUrl()}/nass/ps/recycle/listRecycleFiles";
+    ResponseModel<RecycleResourceModel> responseModel =
+    await requestAndConvertResponseModel(url,
+        formData: {
+          "pageIndex": page,
+          "pageSize": myPageSize,
+          "deviceCode": MyInstance().deviceCode,
+        },
+        netMethod: NetMethod.post);
 
     return responseModel;
   }
