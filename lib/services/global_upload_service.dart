@@ -65,11 +65,11 @@ class GlobalUploadService extends ChangeNotifier {
         void Function(LocalUploadProgress)? onProgress,
         required void Function(bool success, String message) onComplete,
       }) async {
-    await _uploadManager.uploadLocalFiles(
-      filePaths,
-      onProgress: onProgress,
-      onComplete: onComplete,
-    );
+    // await _uploadManager.uploadLocalFiles(
+    //   filePaths,
+    //   onProgress: onProgress,
+    //   onComplete: onComplete,
+    // );
   }
 
   /// 取消上传

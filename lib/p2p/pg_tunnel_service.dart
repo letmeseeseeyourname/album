@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:isolate';
 import 'package:ffi/ffi.dart';
 import 'package:flutter/foundation.dart';
+import 'package:semaphore_plus/semaphore_plus.dart';
 import 'pg_tunnel_bindings.dart';
 import 'pg_tunnel_types.dart';
 
@@ -63,7 +64,7 @@ class PgTunnelPeerInfoResult {
 class PgTunnelService {
   static final PgTunnelService _instance = PgTunnelService._internal();
   factory PgTunnelService() => _instance;
-
+  static final _startLock = LocalSemaphore(1);
   final PgTunnelBindings _bindings = PgTunnelBindings();
   final List<TunnelEventListener> _eventListeners = [];
 
@@ -136,88 +137,95 @@ class PgTunnelService {
   /// [localDeviceId] 本地设备ID,例如: "win_device123"
   /// [cfgFilePath] 配置文件路径,如果为空则使用默认路径
   Future<void> start(String localDeviceId, {String? cfgFilePath}) async {
-    if (_isRunning) {
-      debugPrint('Tunnel is already running');
-      return;
-    }
-
-    // 确定配置文件路径
-    String cfgPath = cfgFilePath ?? '';
-    if (cfgPath.isEmpty) {
-      // 尝试多个可能的路径
-      final currentDir = Directory.current.path;
-      final possiblePaths = [
-        'demoTunnel.cfg',
-        '$currentDir\\demoTunnel.cfg',
-        '$currentDir\\assets\\demoTunnel.cfg',
-        '$currentDir\\data\\flutter_assets\\assets\\demoTunnel.cfg',
-        '$currentDir\\build\\windows\\runner\\Debug\\data\\flutter_assets\\assets\\demoTunnel.cfg',
-        '$currentDir\\build\\windows\\runner\\Release\\data\\flutter_assets\\assets\\demoTunnel.cfg',
-        'assets\\demoTunnel.cfg',
-      ];
-
-      debugPrint('Searching for config file in:');
-      for (final path in possiblePaths) {
-        debugPrint('  Checking: $path');
-        if (await File(path).exists()) {
-          cfgPath = path;
-          debugPrint('✓ Found config file at: $cfgPath');
-          break;
-        }
-      }
-
-      if (cfgPath.isEmpty) {
-        debugPrint('❌ Config file not found. Searched in:');
-        for (final path in possiblePaths) {
-          debugPrint('  - $path');
-        }
-        throw Exception(
-            'Config file not found. Please ensure demoTunnel.cfg exists in:\n'
-                '  1. Project root: $currentDir\\demoTunnel.cfg\n'
-                '  2. Assets folder: $currentDir\\assets\\demoTunnel.cfg'
-        );
-      }
-    }
-
-    // 注意：暂时不设置事件回调以避免isolate错误
-    // 在Dart FFI中，从native线程调用Dart回调需要特殊处理
-    // 未来版本可以使用NativeCallable (Dart 3.1+) 来实现
-    debugPrint('⚠️  Event callbacks are disabled to avoid isolate errors');
-
-    // 准备系统信息
-    final sysInfo =
-        '(DevID){$localDeviceId}(MacAddr){}(CpuMHz){0}(MemSize){0}'
-        '(BrwVer){}(OSVer){}(OSSpk){}(OSType){Windows}';
-
-    // 转换为C字符串
-    final cfgFilePtr = cfgPath.toNativeUtf8();
-    final sysInfoPtr = sysInfo.toNativeUtf8();
-
+    await _startLock.acquire();
     try {
-      // 启动隧道（不设置回调以避免isolate错误）
-      final result = _bindings.pgTunnelStart(
-        cfgFilePtr,
-        sysInfoPtr,
-        0,
-        nullptr, // 暂时不设置debug回调
-      );
-
-      if (result != PgTunnelError.ok) {
-        throw Exception(
-            'Failed to start tunnel: ${PgTunnelError.getErrorMessage(result)}');
+      if (_isRunning) {
+        debugPrint('Tunnel is already running');
+        return;
       }
 
-      _isRunning = true;
-      debugPrint('Tunnel started successfully with device ID: $localDeviceId');
+      // 确定配置文件路径
+      String cfgPath = cfgFilePath ?? '';
+      if (cfgPath.isEmpty) {
+        // 尝试多个可能的路径
+        final currentDir = Directory.current.path;
+        final possiblePaths = [
+          'demoTunnel.cfg',
+          '$currentDir\\demoTunnel.cfg',
+          '$currentDir\\assets\\demoTunnel.cfg',
+          '$currentDir\\data\\flutter_assets\\assets\\demoTunnel.cfg',
+          '$currentDir\\build\\windows\\runner\\Debug\\data\\flutter_assets\\assets\\demoTunnel.cfg',
+          '$currentDir\\build\\windows\\runner\\Release\\data\\flutter_assets\\assets\\demoTunnel.cfg',
+          'assets\\demoTunnel.cfg',
+        ];
 
-      // 获取版本信息
-      await _printVersionInfo();
+        debugPrint('Searching for config file in:');
+        for (final path in possiblePaths) {
+          debugPrint('  Checking: $path');
+          if (await File(path).exists()) {
+            cfgPath = path;
+            debugPrint('✓ Found config file at: $cfgPath');
+            break;
+          }
+        }
 
-      // 获取说明信息
-      await _printCommentInfo();
-    } finally {
-      malloc.free(cfgFilePtr);
-      malloc.free(sysInfoPtr);
+        if (cfgPath.isEmpty) {
+          debugPrint('❌ Config file not found. Searched in:');
+          for (final path in possiblePaths) {
+            debugPrint('  - $path');
+          }
+          throw Exception(
+              'Config file not found. Please ensure demoTunnel.cfg exists in:\n'
+                  '  1. Project root: $currentDir\\demoTunnel.cfg\n'
+                  '  2. Assets folder: $currentDir\\assets\\demoTunnel.cfg'
+          );
+        }
+      }
+
+      // 注意：暂时不设置事件回调以避免isolate错误
+      // 在Dart FFI中，从native线程调用Dart回调需要特殊处理
+      // 未来版本可以使用NativeCallable (Dart 3.1+) 来实现
+      debugPrint('⚠️  Event callbacks are disabled to avoid isolate errors');
+
+      // 准备系统信息
+      final sysInfo =
+          '(DevID){$localDeviceId}(MacAddr){}(CpuMHz){0}(MemSize){0}'
+          '(BrwVer){}(OSVer){}(OSSpk){}(OSType){Windows}';
+
+      // 转换为C字符串
+      final cfgFilePtr = cfgPath.toNativeUtf8();
+      final sysInfoPtr = sysInfo.toNativeUtf8();
+
+      try {
+        // 启动隧道（不设置回调以避免isolate错误）
+        final result = _bindings.pgTunnelStart(
+          cfgFilePtr,
+          sysInfoPtr,
+          0,
+          nullptr, // 暂时不设置debug回调
+        );
+
+        if (result != PgTunnelError.ok) {
+          throw Exception(
+              'Failed to start tunnel: ${PgTunnelError.getErrorMessage(
+                  result)}');
+        }
+
+        _isRunning = true;
+        debugPrint(
+            'Tunnel started successfully with device ID: $localDeviceId');
+
+        // 获取版本信息
+        await _printVersionInfo();
+
+        // 获取说明信息
+        await _printCommentInfo();
+      } finally {
+        malloc.free(cfgFilePtr);
+        malloc.free(sysInfoPtr);
+      }
+    }finally{
+      _startLock.release();
     }
   }
 

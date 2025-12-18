@@ -374,10 +374,10 @@ class _FolderDetailPageState extends State<FolderDetailPage> with UploadCoordina
     await uploadCoordinator.startUpload(
       prepareResult.filePaths!,
           (String message, {bool isError = false}) => _showMessage(message, isError: isError),
-          () {
+          (List<String> uploadedMd5s) {
         if (mounted) {
           setState(() {});
-          _refreshFiles();
+          _onUploadComplete(uploadedMd5s);
         }
       },
     );

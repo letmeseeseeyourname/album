@@ -1,5 +1,6 @@
 // controllers/upload_coordinator.dart
 // ============ 全局单例版本 - 支持跨页面上传状态共享 ============
+// ✅ 新增：支持返回上传成功的 MD5 列表，用于更新同步状态缓存
 
 import 'package:flutter/material.dart';
 import '../../../album/manager/local_folder_upload_manager.dart';
@@ -12,6 +13,7 @@ import '../services/file_service.dart';
 /// 1. 单例模式，确保上传状态全局共享
 /// 2. 切换页面后上传进度条仍然显示
 /// 3. 支持多任务并发
+/// 4. ✅ 新增：支持返回上传成功的 MD5 列表
 class UploadCoordinator extends ChangeNotifier {
   // ========== 单例实现 ==========
   static UploadCoordinator? _instance;
@@ -53,6 +55,9 @@ class UploadCoordinator extends ChangeNotifier {
   int _completedUploadedFiles = 0;
   int _completedFailedFiles = 0;
 
+  // ✅ 新增：累计所有任务上传成功的 MD5 列表
+  final List<String> _allUploadedMd5List = [];
+
   // 私有构造函数
   UploadCoordinator._internal(this._internalFileService);
 
@@ -79,6 +84,9 @@ class UploadCoordinator extends ChangeNotifier {
 
   /// 总任务数量（活跃 + 已完成，用于 UI 显示）
   int get totalTaskCount => _activeTasks.length + _completedTaskCount;
+
+  /// ✅ 新增：获取所有上传成功的 MD5 列表
+  List<String> get allUploadedMd5List => List.unmodifiable(_allUploadedMd5List);
 
   /// 获取聚合进度（合并所有任务的进度，包括已完成的任务）
   LocalUploadProgress? get aggregatedProgress {
@@ -178,10 +186,12 @@ class UploadCoordinator extends ChangeNotifier {
   }
 
   /// 开始上传
+  ///
+  /// ✅ 修改：onComplete 回调增加 uploadedMd5s 参数
   Future<void> startUpload(
       List<String> filePaths,
       Function(String message, {bool isError}) onMessage,
-      Function() onComplete,
+      Function(List<String> uploadedMd5s) onComplete,
       ) async {
     // 创建独立的上传管理器实例 (支持多任务并发)
     final uploadManager = LocalFolderUploadManager();
@@ -204,7 +214,7 @@ class UploadCoordinator extends ChangeNotifier {
           taskContext.progress = progress;
           notifyListeners();
         },
-        onComplete: (success, message) {
+        onComplete: (success, message, uploadedMd5s) {
           // ✅ 累计已完成任务的统计数据
           final finalProgress = taskContext.progress;
           if (finalProgress != null) {
@@ -214,13 +224,19 @@ class UploadCoordinator extends ChangeNotifier {
             _completedFailedFiles += finalProgress.failedFiles;
           }
 
+          // ✅ 新增：累计上传成功的 MD5 列表
+          if (uploadedMd5s.isNotEmpty) {
+            _allUploadedMd5List.addAll(uploadedMd5s);
+            taskContext.uploadedMd5s = uploadedMd5s;
+          }
+
           // 从活跃任务中移除
           _activeTasks.remove(taskContext);
           notifyListeners();
 
           // 回调通知
           onMessage(message, isError: !success);
-          onComplete();
+          onComplete(uploadedMd5s);
 
           // ✅ 所有任务完成后，延迟清理累计数据（让UI有时间显示最终状态）
           if (_activeTasks.isEmpty) {
@@ -246,7 +262,7 @@ class UploadCoordinator extends ChangeNotifier {
       notifyListeners();
 
       onMessage('上传失败: $e', isError: true);
-      onComplete();
+      onComplete([]);  // ✅ 异常时返回空列表
 
       // ✅ 所有任务完成后，延迟清理累计数据
       if (_activeTasks.isEmpty) {
@@ -258,12 +274,26 @@ class UploadCoordinator extends ChangeNotifier {
     }
   }
 
+  /// ✅ 兼容旧版本的 startUpload（不需要 MD5 回调）
+  Future<void> startUploadLegacy(
+      List<String> filePaths,
+      Function(String message, {bool isError}) onMessage,
+      Function() onComplete,
+      ) async {
+    await startUpload(
+      filePaths,
+      onMessage,
+          (_) => onComplete(),  // 忽略 MD5 列表
+    );
+  }
+
   /// 重置已完成任务的累计统计
   void _resetCompletedStats() {
     _completedTaskCount = 0;
     _completedTotalFiles = 0;
     _completedUploadedFiles = 0;
     _completedFailedFiles = 0;
+    _allUploadedMd5List.clear();  // ✅ 同时清理 MD5 列表
   }
 
   /// 获取所有活跃任务的进度信息 (供高级 UI 使用)
@@ -348,11 +378,13 @@ class UploadTaskContext {
   final LocalFolderUploadManager uploadManager;
   final List<String> filePaths;
   LocalUploadProgress? progress;
+  List<String> uploadedMd5s;  // ✅ 新增：该任务上传成功的 MD5 列表
 
   UploadTaskContext({
     required this.uploadManager,
     required this.filePaths,
     this.progress,
+    this.uploadedMd5s = const [],  // ✅ 默认空列表
   });
 }
 

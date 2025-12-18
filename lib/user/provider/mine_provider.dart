@@ -76,6 +76,9 @@ class MyNetworkProvider extends ChangeNotifier {
   ResponseModel<MyAllGroupsModel>? groupResp;
   DateTime lastGetAllGroupTime = DateTime.now();
   String currentP2pAccount = ''; // 当前P2P连接的账号
+  // 添加 P2P 连接锁
+  final _p2pLock = LocalSemaphore(1);
+  bool _isP2pConnecting = false;  // 连接中标志
 
   // 🆕 当前 P2P 连接状态（用于同步获取）
   P2pConnectionStatus _currentP2pStatus = P2pConnectionStatus.disconnected;
@@ -508,7 +511,23 @@ class MyNetworkProvider extends ChangeNotifier {
 
   /// 修改后的 _loginP2p 方法
   Future<bool> _loginP2p(String p2pName) async {
+    // 🔧 修复1: 使用信号量保证串行执行
+    await _p2pLock.acquire();
     try {
+      // 🔧 修复2: 双重检查，获取锁后再次验证
+      if (currentP2pAccount == p2pName && _currentP2pStatus == P2pConnectionStatus.connected) {
+        debugPrint("P2P已连接到账号: $p2pName");
+        return true;
+      }
+
+      // 🔧 修复3: 检查是否正在连接中
+      if (_isP2pConnecting) {
+        debugPrint("P2P正在连接中，跳过重复调用");
+        return false;
+      }
+
+      _isP2pConnecting = true;
+
       final p2pService = PgTunnelService();
 
       // 如果当前账号与要连接的账号相同，直接返回成功
@@ -553,10 +572,11 @@ class MyNetworkProvider extends ChangeNotifier {
 
       // 获取设备UUID
       String uuid = await WinHelper.uuid();
-      debugPrint("Starting P2P tunnel with account: $p2pName, uuid: $uuid");
 
+      int nowInMicroseconds = DateTime.now().microsecondsSinceEpoch;
+      debugPrint("Starting P2P tunnel with account: $p2pName, device : $nowInMicroseconds");
       // 启动隧道
-      await p2pService.start(uuid);
+      await p2pService.start(nowInMicroseconds.toString());
 
       // 先更新账号，确保后续清理能正常工作
       currentP2pAccount = p2pName;
@@ -587,6 +607,8 @@ class MyNetworkProvider extends ChangeNotifier {
           ),
         );
 
+        _isP2pConnecting = false;
+        _p2pLock.release();  // 🔧 确保释放锁
         return true;
       } catch (e) {
         // 连接失败时回滚：清理已建立的连接
@@ -631,7 +653,8 @@ class MyNetworkProvider extends ChangeNotifier {
           errorMessage: e.toString(),
         ),
       );
-
+      _isP2pConnecting = false;
+      _p2pLock.release();  // 🔧 确保释放锁
       return false;
     }
   }

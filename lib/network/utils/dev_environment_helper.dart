@@ -1,11 +1,14 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:ablumwin/minio/minio_config.dart';
 import 'package:ablumwin/minio/minio_service.dart';
 import 'package:flutter/cupertino.dart';
 
 import '../../eventbus/event_bus.dart';
+import '../../minio/mc_service.dart';
 import '../constant_sign.dart';
+
 class EnvironmentResetEvent {
   /// 最终使用的 IP 地址
   final String usedIP;
@@ -26,12 +29,11 @@ class DevEnvironmentHelper {
   /// [targetIP2] 目标IP地址2
   /// 如果targetIP1和本机处于同一局域网，且checkServerPorts8080And9000(targetIP1)可用则将AppConfig.usedIP设置为targetIP1
   /// 否则将AppConfig.usedIP设置为targetIP2
-  Future<void> resetEnvironment(
-      String targetIP1, {
-        String targetIP2 = '127.0.0.1',
-        Duration timeout = const Duration(seconds: 5),
-        bool requireBothPorts = true,
-      }) async {
+  Future<void> resetEnvironment(String targetIP1, {
+    String targetIP2 = '127.0.0.1',
+    Duration timeout = const Duration(seconds: 5),
+    bool requireBothPorts = true,
+  }) async {
     debugPrint('========== 开始重置环境 ==========');
     debugPrint('目标IP1: $targetIP1');
     debugPrint('目标IP2: $targetIP2');
@@ -45,7 +47,12 @@ class DevEnvironmentHelper {
       // 不在同一局域网，直接使用targetIP2
       debugPrint('$targetIP1 不在局域网内，使用备用IP: $targetIP2');
       AppConfig.usedIP = targetIP2;
-      MinioService.instance.reInitializeMinio(targetIP2);
+      // MinioService.instance.reInitializeMinio(targetIP2);
+      // McService.instance.reconfigure(
+      //     endpoint: 'http://$targetIP2:9000',
+      //     accessKey: MinioConfig.accessKey,
+      //     secretKey: MinioConfig.secretKey);
+      // await McService.instance.initialize();
     }
 
     // 步骤2: 检测targetIP1的8080和9000端口是否可用
@@ -61,8 +68,10 @@ class DevEnvironmentHelper {
         : serverCheck.isAnyAccessible;
 
     debugPrint('端口检测结果: ${isPortsAvailable ? "可用" : "不可用"}');
-    debugPrint('  - 8080端口: ${serverCheck.is8080Accessible ? "可用" : "不可用"}');
-    debugPrint('  - 9000端口: ${serverCheck.is9000Accessible ? "可用" : "不可用"}');
+    debugPrint(
+        '  - 8080端口: ${serverCheck.is8080Accessible ? "可用" : "不可用"}');
+    debugPrint(
+        '  - 9000端口: ${serverCheck.is9000Accessible ? "可用" : "不可用"}');
 
     if (isPortsAvailable) {
       // 局域网内且端口可用，使用targetIP1
@@ -84,6 +93,11 @@ class DevEnvironmentHelper {
       debugPrint('端口不可用，reason: $reason');
     }
     MinioService.instance.reInitializeMinio(AppConfig.usedIP);
+    McService.instance.reconfigure(
+        endpoint: 'http://${AppConfig.usedIP}:9000',
+        accessKey: MinioConfig.accessKey,
+        secretKey: MinioConfig.secretKey);
+    await McService.instance.initialize();
 
     MCEventBus.fire(EnvironmentResetEvent(
       usedIP: AppConfig.usedIP,
@@ -97,7 +111,8 @@ class DevEnvironmentHelper {
   /// [subnetMask] 子网掩码，默认为 255.255.255.0 (即 /24)
   ///
   /// 返回 true 表示在同一局域网，false 表示不在
-  Future<bool> isLAN(String targetIP, {String subnetMask = '255.255.255.0'}) async {
+  Future<bool> isLAN(String targetIP,
+      {String subnetMask = '255.255.255.0'}) async {
     try {
       // 验证目标IP格式
       if (!_isValidIPv4(targetIP)) {
@@ -130,7 +145,8 @@ class DevEnvironmentHelper {
       // 检查目标IP是否与任一本机IP在同一子网
       for (final localIP in localAddresses) {
         if (_isSameSubnet(localIP, targetIP, subnetMask)) {
-          debugPrint('$targetIP 与本机 $localIP 在同一子网 (掩码: $subnetMask)');
+          debugPrint(
+              '$targetIP 与本机 $localIP 在同一子网 (掩码: $subnetMask)');
           return true;
         }
       }
@@ -292,7 +308,8 @@ class DevEnvironmentHelper {
       }
 
       // 按优先级返回
-      final result = class192Address ?? class10Address ?? class172Address ?? otherAddress;
+      final result = class192Address ?? class10Address ?? class172Address ??
+          otherAddress;
 
       if (result != null) {
         debugPrint('本机IP地址: $result');
@@ -334,7 +351,8 @@ class DevEnvironmentHelper {
   /// 判断目标IP是否可达（通过ping测试）
   ///
   /// 注意: 此方法在某些平台可能不可用
-  Future<bool> isReachable(String targetIP, {Duration timeout = const Duration(seconds: 3)}) async {
+  Future<bool> isReachable(String targetIP,
+      {Duration timeout = const Duration(seconds: 3)}) async {
     try {
       // 尝试建立socket连接来测试可达性
       final socket = await Socket.connect(
@@ -418,12 +436,12 @@ class DevEnvironmentHelper {
   /// [useHead] 是否使用HEAD请求，默认false（使用GET更兼容）
   ///
   /// 返回 [UrlCheckResult] 包含检测结果详情
-  Future<UrlCheckResult> checkUrlAccessible(
-      String url, {
-        Duration timeout = const Duration(seconds: 5),
-        bool useHead = false,
-      }) async {
-    final stopwatch = Stopwatch()..start();
+  Future<UrlCheckResult> checkUrlAccessible(String url, {
+    Duration timeout = const Duration(seconds: 5),
+    bool useHead = false,
+  }) async {
+    final stopwatch = Stopwatch()
+      ..start();
 
     debugPrint('检测URL: $url');
 
@@ -456,21 +474,25 @@ class DevEnvironmentHelper {
         // 包括 4xx 和 5xx，因为这说明服务器是运行的
         final isSuccess = response.statusCode > 0;
 
-        debugPrint('检测结果: HTTP ${response.statusCode}, 耗时: ${stopwatch.elapsedMilliseconds}ms');
+        debugPrint('检测结果: HTTP ${response.statusCode}, 耗时: ${stopwatch
+            .elapsedMilliseconds}ms');
 
         return UrlCheckResult(
           url: url,
           isAccessible: isSuccess,
           statusCode: response.statusCode,
           responseTime: stopwatch.elapsed,
-          message: isSuccess ? '连接成功 (HTTP ${response.statusCode})' : 'HTTP ${response.statusCode}',
+          message: isSuccess
+              ? '连接成功 (HTTP ${response.statusCode})'
+              : 'HTTP ${response.statusCode}',
         );
       } finally {
         client.close();
       }
     } on SocketException catch (e) {
       stopwatch.stop();
-      debugPrint('检测失败 - SocketException: ${e.message}, osError: ${e.osError}');
+      debugPrint(
+          '检测失败 - SocketException: ${e.message}, osError: ${e.osError}');
       return UrlCheckResult(
         url: url,
         isAccessible: false,
@@ -525,12 +547,12 @@ class DevEnvironmentHelper {
   ///
   /// 不发送HTTP请求，仅测试能否建立TCP连接
   /// 这是最基础的检测方式，如果这个都失败，说明网络不通或端口未开放
-  Future<UrlCheckResult> checkTcpConnectivity(
-      String ip,
+  Future<UrlCheckResult> checkTcpConnectivity(String ip,
       int port, {
         Duration timeout = const Duration(seconds: 5),
       }) async {
-    final stopwatch = Stopwatch()..start();
+    final stopwatch = Stopwatch()
+      ..start();
     final url = '$ip:$port';
 
     debugPrint('检测TCP连接: $url');
@@ -594,8 +616,7 @@ class DevEnvironmentHelper {
   /// [timeout] 超时时间
   ///
   /// 返回每个端口的检测结果
-  Future<Map<int, UrlCheckResult>> checkPortsAccessible(
-      String ip,
+  Future<Map<int, UrlCheckResult>> checkPortsAccessible(String ip,
       List<int> ports, {
         String scheme = 'http',
         Duration timeout = const Duration(seconds: 5),
@@ -622,11 +643,10 @@ class DevEnvironmentHelper {
   /// [useTcpCheck] 是否使用TCP检测（更可靠），默认true
   ///
   /// 返回包含两个端口检测结果的 [ServerCheckResult]
-  Future<ServerCheckResult> checkServerPorts8080And9000(
-      String targetIP, {
-        Duration timeout = const Duration(seconds: 5),
-        bool useTcpCheck = true,
-      }) async {
+  Future<ServerCheckResult> checkServerPorts8080And9000(String targetIP, {
+    Duration timeout = const Duration(seconds: 5),
+    bool useTcpCheck = true,
+  }) async {
     const port8080 = 8080;
     const port9000 = 9000;
 
@@ -656,8 +676,12 @@ class DevEnvironmentHelper {
     }
 
     debugPrint('---------- 检测结果 ----------');
-    debugPrint('端口 $port8080: ${result8080.isAccessible ? "✓ 可用" : "✗ 不可用"} - ${result8080.message}');
-    debugPrint('端口 $port9000: ${result9000.isAccessible ? "✓ 可用" : "✗ 不可用"} - ${result9000.message}');
+    debugPrint('端口 $port8080: ${result8080.isAccessible
+        ? "✓ 可用"
+        : "✗ 不可用"} - ${result8080.message}');
+    debugPrint('端口 $port9000: ${result9000.isAccessible
+        ? "✓ 可用"
+        : "✗ 不可用"} - ${result9000.message}');
     debugPrint('==============================');
 
     return ServerCheckResult(
@@ -670,10 +694,9 @@ class DevEnvironmentHelper {
   /// 完整的服务器诊断（用于调试）
   ///
   /// 同时进行TCP和HTTP检测，输出详细诊断信息
-  Future<ServerDiagnosticResult> diagnoseServer(
-      String targetIP, {
-        Duration timeout = const Duration(seconds: 5),
-      }) async {
+  Future<ServerDiagnosticResult> diagnoseServer(String targetIP, {
+    Duration timeout = const Duration(seconds: 5),
+  }) async {
     debugPrint('');
     debugPrint('╔══════════════════════════════════════════╗');
     debugPrint('║       服务器诊断: $targetIP');
@@ -691,18 +714,32 @@ class DevEnvironmentHelper {
     // 2. TCP连接检测
     debugPrint('');
     debugPrint('【2. TCP端口检测】');
-    final tcp8080 = await checkTcpConnectivity(targetIP, 8080, timeout: timeout);
-    final tcp9000 = await checkTcpConnectivity(targetIP, 9000, timeout: timeout);
-    debugPrint('TCP 8080: ${tcp8080.isAccessible ? "✓ 开放" : "✗ 关闭"} (${tcp8080.responseTime.inMilliseconds}ms) - ${tcp8080.message}');
-    debugPrint('TCP 9000: ${tcp9000.isAccessible ? "✓ 开放" : "✗ 关闭"} (${tcp9000.responseTime.inMilliseconds}ms) - ${tcp9000.message}');
+    final tcp8080 = await checkTcpConnectivity(
+        targetIP, 8080, timeout: timeout);
+    final tcp9000 = await checkTcpConnectivity(
+        targetIP, 9000, timeout: timeout);
+    debugPrint(
+        'TCP 8080: ${tcp8080.isAccessible ? "✓ 开放" : "✗ 关闭"} (${tcp8080
+            .responseTime.inMilliseconds}ms) - ${tcp8080.message}');
+    debugPrint(
+        'TCP 9000: ${tcp9000.isAccessible ? "✓ 开放" : "✗ 关闭"} (${tcp9000
+            .responseTime.inMilliseconds}ms) - ${tcp9000.message}');
 
     // 3. HTTP检测
     debugPrint('');
     debugPrint('【3. HTTP服务检测】');
-    final http8080 = await checkUrlAccessible('http://$targetIP:8080', timeout: timeout);
-    final http9000 = await checkUrlAccessible('http://$targetIP:9000', timeout: timeout);
-    debugPrint('HTTP 8080: ${http8080.isAccessible ? "✓ 可用" : "✗ 不可用"} (HTTP ${http8080.statusCode ?? "N/A"}) - ${http8080.message}');
-    debugPrint('HTTP 9000: ${http9000.isAccessible ? "✓ 可用" : "✗ 不可用"} (HTTP ${http9000.statusCode ?? "N/A"}) - ${http9000.message}');
+    final http8080 = await checkUrlAccessible(
+        'http://$targetIP:8080', timeout: timeout);
+    final http9000 = await checkUrlAccessible(
+        'http://$targetIP:9000', timeout: timeout);
+    debugPrint('HTTP 8080: ${http8080.isAccessible
+        ? "✓ 可用"
+        : "✗ 不可用"} (HTTP ${http8080.statusCode ?? "N/A"}) - ${http8080
+        .message}');
+    debugPrint('HTTP 9000: ${http9000.isAccessible
+        ? "✓ 可用"
+        : "✗ 不可用"} (HTTP ${http9000.statusCode ?? "N/A"}) - ${http9000
+        .message}');
 
     // 4. 诊断结论
     debugPrint('');
@@ -744,8 +781,7 @@ class DevEnvironmentHelper {
   /// [ip] 服务器IP
   /// [ports] 要检测的端口列表
   /// [timeout] 超时时间
-  Future<List<UrlCheckResult>> checkServerPorts(
-      String ip,
+  Future<List<UrlCheckResult>> checkServerPorts(String ip,
       List<int> ports, {
         Duration timeout = const Duration(seconds: 5),
       }) async {
@@ -759,12 +795,12 @@ class DevEnvironmentHelper {
   /// 检测TCP端口是否开放（不发送HTTP请求）
   ///
   /// 比HTTP检测更快，仅测试端口是否可连接
-  Future<PortCheckResult> checkPortOpen(
-      String ip,
+  Future<PortCheckResult> checkPortOpen(String ip,
       int port, {
         Duration timeout = const Duration(seconds: 3),
       }) async {
-    final stopwatch = Stopwatch()..start();
+    final stopwatch = Stopwatch()
+      ..start();
 
     try {
       final socket = await Socket.connect(
@@ -814,8 +850,7 @@ class DevEnvironmentHelper {
   }
 
   /// 批量检测多个TCP端口是否开放
-  Future<List<PortCheckResult>> checkMultiplePortsOpen(
-      String ip,
+  Future<List<PortCheckResult>> checkMultiplePortsOpen(String ip,
       List<int> ports, {
         Duration timeout = const Duration(seconds: 3),
       }) async {
@@ -912,8 +947,10 @@ class ServerCheckResult {
   String toString() {
     return 'ServerCheckResult(\n'
         '  ip: $ip,\n'
-        '  port 8080: ${is8080Accessible ? "✓" : "✗"} ${port8080Result.message},\n'
-        '  port 9000: ${is9000Accessible ? "✓" : "✗"} ${port9000Result.message}\n'
+        '  port 8080: ${is8080Accessible ? "✓" : "✗"} ${port8080Result
+        .message},\n'
+        '  port 9000: ${is9000Accessible ? "✓" : "✗"} ${port9000Result
+        .message}\n'
         ')';
   }
 }

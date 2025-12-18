@@ -81,6 +81,7 @@ dependencies:
 
   # 可选：可见性检测（用于懒加载）
   visibility_detector: ^0.4.0
+  tray_manager: ^0.5.2
 
 dev_dependencies:
   flutter_test:
@@ -114,6 +115,7 @@ flutter:
     - assets/data/
     - assets/ThumbnailGenerator.exe
     - assets/demoTunnel.cfg
+    - assets/mc.exe
 
 
   # An image asset can refer to one or more resolution-specific "variants", see

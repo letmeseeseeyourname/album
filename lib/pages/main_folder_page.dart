@@ -424,7 +424,7 @@ class _MainFolderPageState extends State<MainFolderPage> with UploadCoordinatorM
           (message, {isError = false}) {
         _showMessage(message, isError: isError);
       },
-          () {
+          (List<String> uploadedMd5s) {
         // 完成回调
         if (mounted && !isUploading) {
           setState(() {

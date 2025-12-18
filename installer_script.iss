@@ -5,7 +5,7 @@
 #define MyAppVersion "1.0.7"
 #define MyAppPublisher "joykee"
 #define MyAppURL "https://www.joykee.com"
-#define MyAppExeName "ablumwin.exe"
+#define MyAppExeName "AIAlbum.exe"
 ; 修改为你的 Flutter 项目构建输出目录
 #define MyAppBuildDir "build\windows\x64\runner\Release"
 

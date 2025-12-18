@@ -5,6 +5,8 @@ import 'package:flutter/material.dart';
 import '../eventbus/event_bus.dart';
 import '../eventbus/upgrade_events.dart'; // 🆕 新增
 import '../manager/upgrade_manager.dart'; // 🆕 新增
+import '../minio/mc_service.dart';
+import '../minio/minio_config.dart';
 import '../minio/minio_service.dart';
 import '../pages/remote_album/pages/album_library_page.dart';
 import '../user/models/group.dart';
@@ -58,6 +60,7 @@ class _HomePageState extends State<HomePage> {
   void initState() {
     super.initState();
     UploadCoordinator.initialize(FileService());
+    _initMC();
     _p6loginSubscription = MCEventBus.on<P6loginEvent>().listen((event) {//
       if (mounted) {
         _p6loginAction();
@@ -86,6 +89,17 @@ class _HomePageState extends State<HomePage> {
         _checkUpgrade();
       }
     });
+  }
+
+  _initMC() async {
+    final minioMC =McConfig.configure(
+      alias: 'myminio',
+      endpoint: 'http://127.0.0.1:9000',
+      accessKey: MinioConfig.accessKey,
+      secretKey:MinioConfig.secretKey,
+    );
+    // 2️⃣ 初始化
+    await McService.instance.initialize();
   }
 
   @override

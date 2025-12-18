@@ -1,10 +1,13 @@
 // services/minio_service.dart
-// Minio 对象存储服务（改进版 - 支持实时上传进度）
+// Minio 对象存储服务（改进版 - 支持实时上传进度、取消上传、大文件优化）
 
+import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
+import 'package:flutter/cupertino.dart';
 import 'package:minio/io.dart';
 import 'package:minio/minio.dart';
+import '../album/database/upload_task_db_helper.dart';
 import 'minio_config.dart';
 
 /// 上传进度回调类型
@@ -12,9 +15,115 @@ import 'minio_config.dart';
 /// [total] 总字节数
 typedef UploadProgressCallback = void Function(int sent, int total);
 
+/// ============================================================
+/// 取消令牌
+/// ============================================================
+class CancelToken {
+  bool _isCancelled = false;
+  String? _reason;
+
+  bool get isCancelled => _isCancelled;
+  String? get reason => _reason;
+
+  void cancel([String? reason]) {
+    _isCancelled = true;
+    _reason = reason ?? '用户取消';
+  }
+
+  void reset() {
+    _isCancelled = false;
+    _reason = null;
+  }
+}
+
+/// 上传取消异常
+class UploadCancelledException implements Exception {
+  final String message;
+  UploadCancelledException([String? message]) : message = message ?? '上传已取消';
+
+  @override
+  String toString() => 'UploadCancelledException: $message';
+}
+
+/// ============================================================
+/// 上传任务管理
+/// ============================================================
+
+class UploadTask {
+  final String taskId;
+  final String bucket;
+  final String objectName;
+  final String filePath;
+  final CancelToken cancelToken;
+  final DateTime startTime;
+
+  int uploadedBytes = 0;
+  int totalBytes = 0;
+  UploadTaskStatus status = UploadTaskStatus.pending;
+
+  UploadTask({
+    required this.taskId,
+    required this.bucket,
+    required this.objectName,
+    required this.filePath,
+    required this.cancelToken,
+  }) : startTime = DateTime.now();
+
+  double get progress => totalBytes > 0 ? uploadedBytes / totalBytes : 0;
+}
+
+/// ============================================================
+/// 未完成上传信息
+/// ============================================================
+class IncompleteUploadInfo {
+  final String bucket;
+  final String objectName;
+  final String uploadId;
+  final DateTime? initiated;
+  final int size;
+
+  IncompleteUploadInfo({
+    required this.bucket,
+    required this.objectName,
+    required this.uploadId,
+    this.initiated,
+    required this.size,
+  });
+
+  String get readableSize {
+    if (size < 1024) return '$size B';
+    if (size < 1024 * 1024) return '${(size / 1024).toStringAsFixed(2)} KB';
+    if (size < 1024 * 1024 * 1024) return '${(size / (1024 * 1024)).toStringAsFixed(2)} MB';
+    return '${(size / (1024 * 1024 * 1024)).toStringAsFixed(2)} GB';
+  }
+
+  @override
+  String toString() => 'IncompleteUpload(object: $objectName, size: $readableSize, initiated: $initiated)';
+}
+
+/// ============================================================
+/// MinioService 主类
+/// ============================================================
 class MinioService {
   static MinioService? _instance;
   late Minio _minio;
+
+  // ✅ 上传任务管理
+  final Map<String, UploadTask> _uploadTasks = {};
+  final Map<String, CancelToken> _cancelTokens = {};
+
+  // ============================================================
+  // 大文件上传配置
+  // ============================================================
+
+  /// 分片大小：5MB（minio包最小分片要求）
+  static const int chunkSize = 5 * 1024 * 1024;
+
+  /// 单次读取缓冲区大小：64KB（控制内存使用）
+  static const int readBufferSize = 64 * 1024;
+
+  /// 进度回调节流间隔（毫秒）
+  static const int progressThrottleMs = 100;
 
   // 单例模式
   static MinioService get instance {
@@ -51,6 +160,176 @@ class MinioService {
     print('Minio initialized manually: $host:${MinioConfig.port}');
   }
 
+  // ============================================================
+  // ✅ 上传任务管理 API
+  // ============================================================
+
+  /// 获取所有上传任务
+  List<UploadTask> get allUploadTasks => _uploadTasks.values.toList();
+
+  /// 获取正在进行的上传任务
+  List<UploadTask> get activeUploadTasks => _uploadTasks.values
+      .where((task) => task.status == UploadTaskStatus.uploading)
+      .toList();
+
+  /// 获取指定任务
+  UploadTask? getTask(String taskId) => _uploadTasks[taskId];
+
+  /// 生成唯一任务ID
+  String generateTaskId() => 'upload_${DateTime.now().millisecondsSinceEpoch}_${_uploadTasks.length}';
+
+  /// 清理已完成/已取消/失败的任务记录
+  void clearCompletedTasks() {
+    _uploadTasks.removeWhere((_, task) =>
+    task.status == UploadTaskStatus.success ||
+        task.status == UploadTaskStatus.canceled ||
+        task.status == UploadTaskStatus.failed);
+    _cancelTokens.removeWhere((id, _) => !_uploadTasks.containsKey(id));
+  }
+
+  // ============================================================
+  // ✅ 取消上传 API
+  // ============================================================
+
+  /// 取消指定上传任务
+  /// [taskId] 任务ID
+  /// [cleanupServer] 是否清理服务器上的未完成分片，默认true
+  Future<bool> cancelUpload(String taskId, {bool cleanupServer = true}) async {
+    final token = _cancelTokens[taskId];
+    final task = _uploadTasks[taskId];
+
+    if (token == null || task == null) {
+      print('[MinioService] 任务不存在: $taskId');
+      return false;
+    }
+
+    // 标记取消
+    token.cancel('用户取消上传');
+    task.status = UploadTaskStatus.canceled;
+
+    print('[MinioService] 已取消任务: $taskId');
+
+    // 清理服务器上的未完成分片
+    if (cleanupServer) {
+      try {
+        await removeIncompleteUpload(task.bucket, task.objectName);
+        print('[MinioService] 已清理服务器未完成分片: ${task.objectName}');
+      } catch (e) {
+        print('[MinioService] 清理未完成分片失败: $e');
+      }
+    }
+
+    return true;
+  }
+
+  /// 取消所有上传任务
+  Future<int> cancelAllUploads({bool cleanupServer = true}) async {
+    int cancelledCount = 0;
+    final taskIds = _cancelTokens.keys.toList();
+
+    for (final taskId in taskIds) {
+      if (await cancelUpload(taskId, cleanupServer: cleanupServer)) {
+        cancelledCount++;
+      }
+    }
+
+    print('[MinioService] 已取消 $cancelledCount 个上传任务');
+    return cancelledCount;
+  }
+
+  /// 取消指定 bucket 下的所有上传任务
+  Future<int> cancelBucketUploads(String bucket, {bool cleanupServer = true}) async {
+    int cancelledCount = 0;
+    final tasksToCancel = _uploadTasks.entries
+        .where((e) => e.value.bucket == bucket && e.value.status == UploadTaskStatus.uploading)
+        .map((e) => e.key)
+        .toList();
+
+    for (final taskId in tasksToCancel) {
+      if (await cancelUpload(taskId, cleanupServer: cleanupServer)) {
+        cancelledCount++;
+      }
+    }
+
+    return cancelledCount;
+  }
+
+  // ============================================================
+  // ✅ 未完成分片上传管理 API
+  // ============================================================
+
+  /// 移除指定对象的未完成分片上传
+  Future<void> removeIncompleteUpload(String bucket, String object) async {
+    try {
+      await _minio.removeIncompleteUpload(bucket, object);
+      print('[MinioService] 已移除未完成上传: $bucket/$object');
+    } catch (e) {
+      print('[MinioService] 移除未完成上传失败: $e');
+    }
+  }
+
+  /// 列出 bucket 中所有未完成的上传
+  Stream<IncompleteUploadInfo> listIncompleteUploads(
+      String bucket, {
+        String prefix = '',
+        bool recursive = false,
+      }) async* {
+    try {
+      await for (final upload in _minio.listIncompleteUploads(bucket, prefix, recursive)) {
+        yield IncompleteUploadInfo(
+          bucket: bucket,
+          objectName: upload.upload?.key ?? '',
+          uploadId: upload.upload?.uploadId ?? '',
+          initiated: upload.upload?.initiated,
+          size: upload.size ?? 0,
+        );
+      }
+    } catch (e) {
+      print('[MinioService] 列出未完成上传失败: $e');
+    }
+  }
+
+  /// 清理 bucket 中所有未完成的上传
+  /// [prefix] 对象名前缀过滤
+  /// [olderThan] 只清理早于指定时间的上传
+  Future<int> cleanupIncompleteUploads(
+      String bucket, {
+        String prefix = '',
+        Duration? olderThan,
+      }) async {
+    int cleanedCount = 0;
+    final now = DateTime.now();
+
+    try {
+      await for (final upload in listIncompleteUploads(bucket, prefix: prefix, recursive: true)) {
+        // 检查时间过滤
+        if (olderThan != null && upload.initiated != null) {
+          final age = now.difference(upload.initiated!);
+          if (age < olderThan) {
+            continue; // 跳过较新的上传
+          }
+        }
+
+        try {
+          await removeIncompleteUpload(bucket, upload.objectName);
+          cleanedCount++;
+          print('[MinioService] 已清理: ${upload.objectName}');
+        } catch (e) {
+          print('[MinioService] 清理失败: ${upload.objectName}, 错误: $e');
+        }
+      }
+    } catch (e) {
+      print('[MinioService] 清理未完成上传出错: $e');
+    }
+
+    print('[MinioService] 共清理 $cleanedCount 个未完成上传');
+    return cleanedCount;
+  }
+
+  // ============================================================
+  // 存储桶操作
+  // ============================================================
+
   /// 创建存储桶
   Future<bool> createBucket(String bucketName) async {
     try {
@@ -78,25 +357,49 @@ class MinioService {
     }
   }
 
-  /// ============================================================
-  /// ✅ 新增：带进度回调的文件上传方法
-  /// ============================================================
+  // ============================================================
+  // ✅ 核心改进：带进度回调的文件上传（使用 minio 原生进度回调）
+  // ============================================================
+
+  /// 带进度回调的文件上传方法
   /// [bucketName] 存储桶名称
   /// [objectName] 对象名称（存储在 Minio 中的文件名）
   /// [filePath] 本地文件路径
   /// [onProgress] 进度回调，实时报告已上传字节数
+  /// [taskId] 任务ID（可选，用于取消上传）
+  /// [cancelToken] 取消令牌（可选）
   Future<UploadResult> uploadFileWithProgress(
       String bucketName,
       String objectName,
       String filePath, {
         UploadProgressCallback? onProgress,
+        String? taskId,
+        CancelToken? cancelToken,
       }) async {
+    // 生成或使用传入的任务ID和取消令牌
+    final effectiveTaskId = taskId ?? generateTaskId();
+    final effectiveCancelToken = cancelToken ?? CancelToken();
+
+    // 创建任务记录
+    final task = UploadTask(
+      taskId: effectiveTaskId,
+      bucket: bucketName,
+      objectName: objectName,
+      filePath: filePath,
+      cancelToken: effectiveCancelToken,
+    );
+
+    _uploadTasks[effectiveTaskId] = task;
+    _cancelTokens[effectiveTaskId] = effectiveCancelToken;
+
     try {
       final file = File(filePath);
       if (!await file.exists()) {
+        task.status = UploadTaskStatus.failed;
         return UploadResult(
           success: false,
           message: '文件不存在: $filePath',
+          taskId: effectiveTaskId,
         );
       }
 
@@ -105,26 +408,49 @@ class MinioService {
 
       // 获取文件大小
       final fileSize = await file.length();
+      task.totalBytes = fileSize;
+      task.status = UploadTaskStatus.uploading;
 
-      // ✅ 创建带进度追踪的 Stream（转换为 Uint8List）
-      int uploadedBytes = 0;
-      final fileStream = file.openRead().map((chunk) {
-        uploadedBytes += chunk.length;
-        // 调用进度回调
-        onProgress?.call(uploadedBytes, fileSize);
-        // 转换为 Uint8List 以满足 minio 包的类型要求
-        return Uint8List.fromList(chunk);
-      });
+      debugPrint('[MinioService] 开始上传: $objectName, 大小: ${_formatSize(fileSize)}');
 
-      // 使用 putObject 上传（支持 Stream）
+      // ✅ 创建可取消的文件流
+      final fileStream = _createCancellableFileStream(
+        file: file,
+        cancelToken: effectiveCancelToken,
+      );
+
+      // ✅ 进度回调节流控制
+      int lastProgressTime = 0;
+
+      // ✅ 使用 minio 原生的 onProgress 回调（这是真实的上传进度！）
       await _minio.putObject(
         bucketName,
         objectName,
         fileStream,
         size: fileSize,
+        chunkSize: chunkSize,
+        onProgress: (uploadedBytes) {
+          // 检查是否取消
+          if (effectiveCancelToken.isCancelled) {
+            throw UploadCancelledException(effectiveCancelToken.reason);
+          }
+
+          task.uploadedBytes = uploadedBytes;
+
+          // ✅ 节流：限制进度回调频率
+          final now = DateTime.now().millisecondsSinceEpoch;
+          if (now - lastProgressTime >= progressThrottleMs || uploadedBytes >= fileSize) {
+            onProgress?.call(uploadedBytes, fileSize);
+            lastProgressTime = now;
+          }
+        },
       );
 
+      // 标记完成
+      task.status = UploadTaskStatus.success;
       final url = MinioConfig.getFileUrl(bucketName, objectName);
+
+      print('[MinioService] 上传完成: $objectName');
 
       return UploadResult(
         success: true,
@@ -132,74 +458,179 @@ class MinioService {
         url: url,
         objectName: objectName,
         size: fileSize,
+        taskId: effectiveTaskId,
       );
-    } catch (e) {
-      print('上传文件失败: $e');
+
+    } on UploadCancelledException catch (e) {
+      // 上传被取消
+      task.status = UploadTaskStatus.canceled;
+      print('[MinioService] 上传已取消: ${e.message}');
+
+      // 清理服务器上的未完成分片
+      try {
+        await removeIncompleteUpload(bucketName, objectName);
+      } catch (_) {}
+
+      return UploadResult(
+        success: false,
+        message: e.message,
+        taskId: effectiveTaskId,
+        isCancelled: true,
+      );
+
+    } catch (e, stackTrace) {
+      // 其他错误
+      task.status = UploadTaskStatus.failed;
+      print('[MinioService] 上传失败: $e');
+      print('[MinioService] Stack trace: $stackTrace');
+
       return UploadResult(
         success: false,
         message: '上传失败: ${e.toString()}',
+        taskId: effectiveTaskId,
       );
     }
   }
 
+  /// ✅ 创建可取消的文件流（简化版，不做进度追踪）
+  Stream<Uint8List> _createCancellableFileStream({
+    required File file,
+    required CancelToken cancelToken,
+  }) {
+    final controller = StreamController<Uint8List>();
+
+    () async {
+      RandomAccessFile? raf;
+      try {
+        raf = await file.open(mode: FileMode.read);
+        final buffer = Uint8List(readBufferSize);
+
+        while (true) {
+          // 检查取消
+          if (cancelToken.isCancelled) {
+            controller.addError(UploadCancelledException(cancelToken.reason));
+            break;
+          }
+
+          // 读取数据
+          final bytesRead = await raf.readInto(buffer);
+          if (bytesRead == 0) break;
+
+          // 发送数据
+          final chunk = bytesRead == buffer.length
+              ? Uint8List.fromList(buffer)
+              : Uint8List.fromList(buffer.sublist(0, bytesRead));
+
+          controller.add(chunk);
+
+          // 让出事件循环执行权
+          await Future.delayed(Duration.zero);
+        }
+
+        await controller.close();
+
+      } catch (e) {
+        controller.addError(e);
+        await controller.close();
+      } finally {
+        await raf?.close();
+    }
+    }();
+
+    return controller.stream;
+  }
+
   /// 上传文件（从文件路径）- 原方法保持兼容
-  /// [bucketName] 存储桶名称
-  /// [objectName] 对象名称（存储在 Minio 中的文件名）
-  /// [filePath] 本地文件路径
   Future<UploadResult> uploadFile(
       String bucketName,
       String objectName,
       String filePath,
       ) async {
-    // ✅ 内部调用带进度的版本，但不传回调
     return uploadFileWithProgress(bucketName, objectName, filePath);
   }
 
-  /// ============================================================
-  /// ✅ 新增：带进度回调的字节数据上传方法
-  /// ============================================================
+  // ============================================================
+  // ✅ 带进度回调的字节数据上传方法
+  // ============================================================
   Future<UploadResult> uploadBytesWithProgress(
       String bucketName,
       String objectName,
       Uint8List data, {
         String? contentType,
         UploadProgressCallback? onProgress,
+        String? taskId,
+        CancelToken? cancelToken,
       }) async {
+    final effectiveTaskId = taskId ?? generateTaskId();
+    final effectiveCancelToken = cancelToken ?? CancelToken();
+
+    final task = UploadTask(
+      taskId: effectiveTaskId,
+      bucket: bucketName,
+      objectName: objectName,
+      filePath: '',
+      cancelToken: effectiveCancelToken,
+    );
+
+    _uploadTasks[effectiveTaskId] = task;
+    _cancelTokens[effectiveTaskId] = effectiveCancelToken;
+
     try {
       // 确保存储桶存在
       await createBucket(bucketName);
 
       final totalSize = data.length;
+      task.totalBytes = totalSize;
+      task.status = UploadTaskStatus.uploading;
 
-      // 准备 metadata（如果有 contentType）
-      final metadata = contentType != null
-          ? {'Content-Type': contentType}
-          : null;
+      // 准备 metadata
+      final metadata = contentType != null ? {'Content-Type': contentType} : null;
 
-      // ✅ 创建带进度追踪的 Stream
-      // 将数据分块发送以支持进度回调
-      const chunkSize = 64 * 1024; // 64KB 分块
-      int uploadedBytes = 0;
+      // ✅ 创建可取消的数据流
+      Stream<Uint8List> createCancellableStream() async* {
+        for (int i = 0; i < data.length; i += readBufferSize) {
+          // 检查取消
+          if (effectiveCancelToken.isCancelled) {
+            throw UploadCancelledException(effectiveCancelToken.reason);
+          }
 
-      Stream<Uint8List> createProgressStream() async* {
-        for (int i = 0; i < data.length; i += chunkSize) {
-          final end = (i + chunkSize > data.length) ? data.length : i + chunkSize;
-          final chunk = data.sublist(i, end);
-          uploadedBytes += chunk.length;
-          onProgress?.call(uploadedBytes, totalSize);
-          yield Uint8List.fromList(chunk);
+          final end = (i + readBufferSize > data.length) ? data.length : i + readBufferSize;
+          yield Uint8List.fromList(data.sublist(i, end));
+
+          // 让出事件循环执行权
+          await Future.delayed(Duration.zero);
         }
       }
 
-      // 上传字节数据
+      // ✅ 进度回调节流控制
+      int lastProgressTime = 0;
+
+      // ✅ 使用 minio 原生的 onProgress 回调
       await _minio.putObject(
         bucketName,
         objectName,
-        createProgressStream(),
+        createCancellableStream(),
         size: totalSize,
         metadata: metadata,
+        chunkSize: chunkSize,
+        onProgress: (uploadedBytes) {
+          // 检查是否取消
+          if (effectiveCancelToken.isCancelled) {
+            throw UploadCancelledException(effectiveCancelToken.reason);
+          }
+
+          task.uploadedBytes = uploadedBytes;
+
+          // 节流进度回调
+          final now = DateTime.now().millisecondsSinceEpoch;
+          if (now - lastProgressTime >= progressThrottleMs || uploadedBytes >= totalSize) {
+            onProgress?.call(uploadedBytes, totalSize);
+            lastProgressTime = now;
+          }
+        },
       );
 
+      task.status = UploadTaskStatus.success;
       final url = MinioConfig.getFileUrl(bucketName, objectName);
 
       return UploadResult(
@@ -208,12 +639,30 @@ class MinioService {
         url: url,
         objectName: objectName,
         size: totalSize,
+        taskId: effectiveTaskId,
       );
+
+    } on UploadCancelledException catch (e) {
+      task.status = UploadTaskStatus.canceled;
+
+      try {
+        await removeIncompleteUpload(bucketName, objectName);
+      } catch (_) {}
+
+      return UploadResult(
+        success: false,
+        message: e.message,
+        taskId: effectiveTaskId,
+        isCancelled: true,
+      );
+
     } catch (e) {
-      print('上传文件失败: $e');
+      task.status = UploadTaskStatus.failed;
+
       return UploadResult(
         success: false,
         message: '上传失败: ${e.toString()}',
+        taskId: effectiveTaskId,
       );
     }
   }
@@ -232,6 +681,10 @@ class MinioService {
       contentType: contentType,
     );
   }
+
+  // ============================================================
+  // 下载方法
+  // ============================================================
 
   /// 下载文件
   Future<DownloadResult> downloadFile(
@@ -275,6 +728,10 @@ class MinioService {
     }
   }
 
+  // ============================================================
+  // 删除方法
+  // ============================================================
+
   /// 删除文件
   Future<bool> deleteFile(String bucketName, String objectName) async {
     try {
@@ -297,6 +754,10 @@ class MinioService {
     }
     return successCount;
   }
+
+  // ============================================================
+  // 其他方法
+  // ============================================================
 
   /// 获取文件的预签名 URL（用于临时访问）
   Future<String?> getPresignedUrl(
@@ -337,15 +798,32 @@ class MinioService {
       return false;
     }
   }
+
+  // ============================================================
+  // 工具方法
+  // ============================================================
+
+  String _formatSize(int bytes) {
+    if (bytes < 1024) return '$bytes B';
+    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(2)} KB';
+    if (bytes < 1024 * 1024 * 1024) return '${(bytes / (1024 * 1024)).toStringAsFixed(2)} MB';
+    return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(2)} GB';
+  }
 }
 
-// 上传结果类
+// ============================================================
+// 数据模型
+// ============================================================
+
+/// 上传结果类
 class UploadResult {
   final bool success;
   final String message;
   final String? url;
   final String? objectName;
   final int? size;
+  final String? taskId;
+  final bool isCancelled;
 
   UploadResult({
     required this.success,
@@ -353,10 +831,17 @@ class UploadResult {
     this.url,
     this.objectName,
     this.size,
+    this.taskId,
+    this.isCancelled = false,
   });
+
+  @override
+  String toString() {
+    return 'UploadResult(success: $success, message: $message, taskId: $taskId, isCancelled: $isCancelled)';
+  }
 }
 
-// 下载结果类
+/// 下载结果类
 class DownloadResult {
   final bool success;
   final String message;
@@ -371,7 +856,7 @@ class DownloadResult {
   });
 }
 
-// Minio 对象信息
+/// Minio 对象信息
 class MinioObject {
   final String key;
   final int size;
@@ -394,7 +879,7 @@ class MinioObject {
   }
 }
 
-// 对象统计信息
+/// 对象统计信息
 class ObjectStat {
   final int size;
   final String? contentType;

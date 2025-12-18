@@ -160,18 +160,18 @@ class UploadBottomBar extends StatelessWidget {
       // 多任务模式：显示任务数和失败数
       statusText = '${progress.uploadedFiles}/${progress.totalFiles} 文件 · '
           '$activeTaskCount个任务并行';
-      if (progress.failedFiles > 0) {
-        statusText += ' · ${progress.failedFiles}个失败';
-      }
+      // if (progress.failedFiles > 0) {
+      //   statusText += ' · ${progress.failedFiles}个失败';
+      // }
     } else {
       // 单任务模式：显示当前文件名
       statusText = '${progress.uploadedFiles}/${progress.totalFiles}';
       if (progress.currentFileName != null && progress.currentFileName!.isNotEmpty) {
         statusText += ' · ${progress.currentFileName}';
       }
-      if (progress.failedFiles > 0) {
-        statusText += ' · ${progress.failedFiles}个失败';
-      }
+      // if (progress.failedFiles > 0) {
+      //   statusText += ' · ${progress.failedFiles}个失败';
+      // }
     }
 
     return Column(
