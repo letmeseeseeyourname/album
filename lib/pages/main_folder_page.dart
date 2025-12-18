@@ -385,38 +385,14 @@ class _MainFolderPageState extends State<MainFolderPage> with UploadCoordinatorM
     final confirmed = await _showConfirmDialog(finalUploadList);
     if (!confirmed) return;
 
-    // 4. 开始上传
-    // setState(() {
-    //   isUploading = true;
-    // });
-
-    // await _uploadManager.uploadLocalFiles(
-    //   finalUploadList, // 传递实际的文件路径列表
-    //   onProgress: (progress) {
-    //     // 进度在 listener 中自动更新
-    //   },
-    //   onComplete: (success, message) {
-    //     if (mounted) {
-    //       setState(() {
-    //         // 检查_uploadManager是否还有其他任务在运行
-    //         // 只有当所有任务都完成时才设置 isUploading 为 false
-    //         isUploading = _uploadManager.isUploading;
-    //         uploadProgress = _uploadManager.currentProgress;
-    //         // 只有当所有任务都完成且当前任务成功时才清空选择
-    //         if (success && !_uploadManager.isUploading) {
-    //           // 清空选择
-    //           selectedIndices.clear();
-    //           isSelectionMode = false;
-    //           // 清除缓存
-    //           _cachedImageCount = 0;
-    //           _cachedVideoCount = 0;
-    //           _cachedTotalSizeMB = 0.0;
-    //         }
-    //       });
-    //       _showMessage(message, isError: !success);
-    //     }
-    //   },
-    // );
+    // ✅ 新增：用户点击"开始上传"后，立即取消选中
+    setState(() {
+      selectedIndices.clear();
+      isSelectionMode = false;
+      _cachedImageCount = 0;
+      _cachedVideoCount = 0;
+      _cachedTotalSizeMB = 0.0;
+    });
 
     // ✅ 使用 uploadCoordinator（来自 Mixin）
     await uploadCoordinator.startUpload(

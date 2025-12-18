@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import '../album/manager/local_folder_upload_manager.dart';
+import '../album/upload/models/local_upload_progress.dart';
 
 /// 底部栏组件 - 显示选择信息、上传进度和操作按钮
 class BottomActionBar extends StatelessWidget {

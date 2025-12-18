@@ -4,6 +4,8 @@
 
 import 'package:flutter/material.dart';
 import '../album/manager/local_folder_upload_manager.dart';
+import '../album/upload/models/failed_file_record.dart';
+import '../album/upload/models/local_upload_progress.dart';
 
 /// 全局上传状态服务
 ///

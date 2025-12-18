@@ -30,168 +30,15 @@ import '../models/local_file_item.dart';
 import '../provider/album_provider.dart';
 import 'package:media_kit/media_kit.dart';
 
-/// 文件类型枚举
-enum LocalFileType { image, video, unknown }
+import '../upload/config/local_upload_config.dart';
+import '../upload/models/failed_file_record.dart';
+import '../upload/models/local_file_info.dart';
+import '../upload/models/local_upload_progress.dart';
+import '../upload/upload_progress_tracker.dart';
 
 // 1. 新增：进度追踪器类（添加到文件顶部的类定义区域）
 // ============================================================
 
-/// 实时上传进度追踪器
-/// 用于追踪多个并发上传文件的实时进度
-class UploadProgressTracker {
-  /// 已确认完成上传的字节数
-  int _confirmedBytes = 0;
-
-  /// 当前正在上传的各文件的实时进度
-  /// key: 文件唯一标识（如 md5Hash_original, md5Hash_thumbnail）
-  /// value: 当前文件已上传的字节数
-  final Map<String, int> _currentFileProgress = {};
-
-  /// 重置追踪器
-  void reset() {
-    _confirmedBytes = 0;
-    _currentFileProgress.clear();
-  }
-
-  /// 更新单个文件的上传进度（实时调用）
-  void updateFileProgress(String fileKey, int uploadedBytes) {
-    // debugPrint('updateFileProgress: $fileKey, $uploadedBytes');
-    _currentFileProgress[fileKey] = uploadedBytes;
-    _notifySpeedService();
-  }
-
-  /// 标记文件上传完成
-  void confirmFileComplete(String fileKey, int totalFileSize) {
-    debugPrint('confirmFileComplete: $fileKey, $totalFileSize');
-    _confirmedBytes += totalFileSize;
-    _currentFileProgress.remove(fileKey);
-    _notifySpeedService();
-  }
-
-  /// 移除文件进度（上传失败时）
-  void removeFileProgress(String fileKey) {
-    _currentFileProgress.remove(fileKey);
-    _notifySpeedService();
-  }
-
-  /// 计算总已上传字节数
-  int get totalUploadedBytes {
-    int currentProgress = _currentFileProgress.values.fold(0, (a, b) => a + b);
-    return _confirmedBytes + currentProgress;
-  }
-
-  /// 通知速度服务更新
-  void _notifySpeedService() {
-    TransferSpeedService.instance.updateUploadProgress(totalUploadedBytes);
-  }
-}
-
-/// 本地文件信息
-class LocalFileInfo {
-  final String filePath;
-  final String fileName;
-  final LocalFileType fileType;
-  final int fileSize;
-  final DateTime createTime;
-
-  LocalFileInfo({
-    required this.filePath,
-    required this.fileName,
-    required this.fileType,
-    required this.fileSize,
-    required this.createTime,
-  });
-
-  /// 转换为 FileItem（用于数据库存储）
-  FileItem toFileItem(String userId, String deviceCode, String md5Hash) {
-    return FileItem(
-      md5Hash: md5Hash,
-      filePath: filePath,
-      fileName: fileName,
-      fileType: fileType == LocalFileType.image ? "P" : "V",
-      fileSize: fileSize,
-      assetId: md5Hash,
-      status: 0,
-      userId: userId,
-      deviceCode: deviceCode,
-      duration: 0,
-      width: 0,
-      height: 0,
-      lng: 0.0,
-      lat: 0.0,
-      createDate: createTime.millisecondsSinceEpoch.toDouble(),
-    );
-  }
-}
-
-/// 上传进度信息（增强版）
-class LocalUploadProgress {
-  final int totalFiles;
-  final int uploadedFiles;
-  final int failedFiles;
-  final int retryRound;        // 当前重试轮次
-  final int maxRetryRounds;    // 最大重试轮次
-  final String? currentFileName;
-  final String? statusMessage; // 状态消息
-
-  LocalUploadProgress({
-    required this.totalFiles,
-    required this.uploadedFiles,
-    required this.failedFiles,
-    this.retryRound = 0,
-    this.maxRetryRounds = 3,
-    this.currentFileName,
-    this.statusMessage,
-  });
-
-  double get progress => totalFiles > 0 ? uploadedFiles / totalFiles : 0.0;
-
-  bool get isRetrying => retryRound > 0;
-
-  String get displayStatus {
-    if (statusMessage != null) return statusMessage!;
-    if (isRetrying) {
-      return '重试第 $retryRound/$maxRetryRounds 轮，处理失败文件...';
-    }
-    return '上传中...';
-  }
-}
-
-/// 上传配置
-class LocalUploadConfig {
-  static const int maxConcurrentUploads = 5;
-  static const int imageChunkSize = 10;
-  static const int videoChunkSize = 1;
-  static const int maxRetryAttempts = 5;       // 单文件最大重试次数
-  static const int maxRetryRounds = 10;         // 失败队列最大重试轮次
-  static const int retryDelaySeconds = 2;
-  static const int retryRoundDelaySeconds = 5; // 每轮重试前的等待时间
-  static const double reservedStorageGB = 8.0;
-  static const int md5ReadSizeBytes = 1024 * 1024;
-  static const int thumbnailWidth = 300;
-  static const int thumbnailHeight = 300;
-  static const int thumbnailQuality = 35;
-  static const int mediumWidth = 1080;
-  static const int mediumHeight = 1920;
-  static const int mediumQuality = 75;
-}
-
-/// 失败文件记录
-class FailedFileRecord {
-  final LocalFileInfo fileInfo;
-  final String md5Hash;
-  final String? errorMessage;
-  int retryCount;
-
-  FailedFileRecord({
-    required this.fileInfo,
-    required this.md5Hash,
-    this.errorMessage,
-    this.retryCount = 0,
-  });
-
-  MapEntry<LocalFileInfo, String> toEntry() => MapEntry(fileInfo, md5Hash);
-}
 
 /// 本地文件夹上传管理器（增强版 - 带失败队列重试和连接预热）
 class LocalFolderUploadManager extends ChangeNotifier {
@@ -199,6 +46,14 @@ class LocalFolderUploadManager extends ChangeNotifier {
   UploadFileTaskManager taskManager = UploadFileTaskManager.instance;
   AlbumProvider provider = AlbumProvider();
   final minioService = MinioService.instance;
+
+  // ✅ 新增：字节进度追踪
+  int _globalTotalBytes = 0;        // 所有待上传文件的总字节数
+  int _completedBytes = 0;          // 已完成文件的累计字节数
+  int _currentFileTransferred = 0;  // 当前文件已传输字节
+  int _currentFileTotal = 0;        // 当前文件总字节
+  int _currentSpeed = 0;            // 当前传输速度
+  Function(LocalUploadProgress)? _activeProgressCallback;  // 当前进度回调引用
 
   // 🆕 用于预热连接的 Dio 实例
   final Dio _dio = Network.instance.getDio();
@@ -239,6 +94,44 @@ class LocalFolderUploadManager extends ChangeNotifier {
 
   List<FailedFileRecord> get permanentlyFailedFiles =>
       List.unmodifiable(_permanentlyFailedFiles);
+
+  /// ✅ 重置字节进度追踪
+  void _resetBytesTracking(int totalBytes) {
+    _globalTotalBytes = totalBytes;
+    _completedBytes = 0;
+    _currentFileTransferred = 0;
+    _currentFileTotal = 0;
+    _currentSpeed = 0;
+  }
+
+  /// ✅ 从 mc 输出更新字节进度并通知 UI
+  void _updateBytesProgressFromMcOutput(String output) {
+    final info = McOutputParser.parse(output);
+    if (info.total > 0) {
+      _currentFileTransferred = info.transferred;
+      _currentFileTotal = info.total;
+      _currentSpeed = info.speed;
+
+      // 实时更新进度回调
+      if (_currentProgress != null && _activeProgressCallback != null) {
+        final updated = _currentProgress!.copyWithBytesProgress(
+          transferredBytes: info.transferred,
+          totalBytes: info.total,
+          speed: info.speed,
+          globalTransferredBytes: _completedBytes + info.transferred,
+          globalTotalBytes: _globalTotalBytes,
+        );
+        _activeProgressCallback!(updated);
+      }
+    }
+  }
+
+  /// ✅ 标记文件上传完成
+  void _onFileUploadComplete(int fileSize) {
+    _completedBytes += fileSize;
+    _currentFileTransferred = 0;
+    _currentFileTotal = 0;
+  }
 
   /// 取消上传
   void cancelUpload() {
@@ -331,17 +224,20 @@ class LocalFolderUploadManager extends ChangeNotifier {
       uploadedFiles: uploaded,
       failedFiles: failed,
       retryRound: retryRound,
-      maxRetryRounds: LocalUploadConfig.maxRetryRounds,
       currentFileName: fileName,
       statusMessage: statusMessage,
+      // ✅ 包含字节进度
+      transferredBytes: _currentFileTransferred,
+      totalBytes: _currentFileTotal,
+      speed: _currentSpeed,
+      globalTransferredBytes: _completedBytes + _currentFileTransferred,
+      globalTotalBytes: _globalTotalBytes,
     );
-    notifyListeners();
   }
 
   /// 从本地文件列表上传（主入口）
   Future<void> uploadLocalFiles(List<String> localFilePaths, {
     Function(LocalUploadProgress)? onProgress,
-    // Function(bool success, String message)? onComplete,
     Function(bool success, String message, List<String> uploadedMd5s)? onComplete,
   }) async {
     if (_isUploading) {
@@ -467,6 +363,13 @@ class LocalFolderUploadManager extends ChangeNotifier {
         return;
       }
 
+      // ✅ 计算总字节数并初始化追踪
+      final totalUploadBytes = uniqueFiles.fold<int>(
+        0, (sum, entry) => sum + entry.key.fileSize,
+      );
+      _resetBytesTracking(totalUploadBytes);
+      _activeProgressCallback = onProgress;
+
       _updateProgress(
           total: totalFiles, uploaded: uploadedFiles, failed: failedFiles);
       onProgress?.call(_currentProgress!);
@@ -536,6 +439,9 @@ class LocalFolderUploadManager extends ChangeNotifier {
       LogUtil.log("[UploadManager] Error: $e\n$stackTrace");
       onComplete?.call(false, "上传失败：$e",[]);
     } finally {
+      // 在 finally 块中添加:
+      _activeProgressCallback = null;
+      _resetBytesTracking(0);
       _isUploading = false;
       _updateProgress(
         total: totalFiles,
@@ -1001,38 +907,24 @@ class LocalFolderUploadManager extends ChangeNotifier {
       // 1. 上传原始文件
       LogUtil.log("Uploading original file: ${fileInfo.filePath}");
       // ✅ 使用带进度回调的上传方法
-      // var result = await minioService.uploadFileWithProgress(
-      //   bucketName,
-      //   "$uploadPathWithoutBucket/$md5Hash/$fileName",
-      //   file.path,
-      //   onProgress: (sent, total) {
-      //     // ✅ 实时更新上传进度
-      //     _progressTracker.updateFileProgress(originalFileKey, sent);
-      //   },
-      // );
-
       var result = await McService.instance.uploadFileDefault(
         file.path,
         bucketName,
         objectName:"$uploadPathWithoutBucket/$md5Hash/$fileName",
         onOutput: (output) {
-          var transferred =McOutputParser.parseSpeed(output);
-          // _progressTracker.updateFileProgress(originalFileKey, transferred);
           TransferSpeedService.instance.updateUploadSpeedForTaskFromMcOutput(taskId.toString(),output);
-          // debugPrint('${(transferred / total * 100).toStringAsFixed(1)}%');
-          // debugPrint('upload ========> ${transferred}');
+          // ✅ 更新字节进度
+          _updateBytesProgressFromMcOutput(output);
         },
       );
-      // debugPrint('uploadFile buckName: $bucketName, objectName: $uploadPathWithoutBucket/$md5Hash/$fileName');
-
-
+      
       if (!result.success) {
         LogUtil.log("Failed to upload original file");
         return false;
       }
 
-      // ✅ 标记原始文件上传完成
-      // _progressTracker.confirmFileComplete(originalFileKey, fileInfo.fileSize);
+      // ✅ 标记原始文件上传完成，更新累计字节
+      _onFileUploadComplete(fileInfo.fileSize);
 
       // 2. 生成并上传缩略图
       final thumbnailFile = await _createThumbnail(
@@ -1042,27 +934,13 @@ class LocalFolderUploadManager extends ChangeNotifier {
         return false;
       }
 
-      final thumbnailSize = await thumbnailFile.length();
-
       // ✅ 使用带进度回调的上传方法
-      // result = await minioService.uploadFileWithProgress(
-      //   bucketName,
-      //   "$uploadPathWithoutBucket/$md5Hash/thumbnail_$imageFileName",
-      //   thumbnailFile.path,
-      //   onProgress: (sent, total) {
-      //     _progressTracker.updateFileProgress(thumbnailFileKey, sent);
-      //   },
-      // );
-
       result = await McService.instance.uploadFileDefault(
         thumbnailFile.path,
         bucketName,
         objectName:"$uploadPathWithoutBucket/$md5Hash/thumbnail_$imageFileName",
         onOutput: (output) {
-          // _progressTracker.updateFileProgress(originalFileKey, transferred);
-          // debugPrint('${(transferred / total * 100).toStringAsFixed(1)}%');
           TransferSpeedService.instance.updateUploadSpeedForTaskFromMcOutput(taskId.toString(),output);
-          debugPrint('upload ====> ${output}');
         },
       );
 
@@ -1086,23 +964,11 @@ class LocalFolderUploadManager extends ChangeNotifier {
       final mediumSize = await mediumFile.length();
 
       // ✅ 使用带进度回调的上传方法
-      // result = await minioService.uploadFileWithProgress(
-      //   bucketName,
-      //   "$uploadPathWithoutBucket/$md5Hash/show_$imageFileName",
-      //   mediumFile.path,
-      //   onProgress: (sent, total) {
-      //     _progressTracker.updateFileProgress(mediumFileKey, sent);
-      //   },
-      // );
-
       result = await McService.instance.uploadFileDefault(
         mediumFile.path,
         bucketName,
         objectName:"$uploadPathWithoutBucket/$md5Hash/show_$imageFileName",
         onOutput: (output) {
-          // _progressTracker.updateFileProgress(originalFileKey, transferred);
-          // debugPrint('${(transferred / total * 100).toStringAsFixed(1)}%');
-          // debugPrint('upload ====> ${output}');
           TransferSpeedService.instance.updateUploadSpeedForTaskFromMcOutput(taskId.toString(),output);
         },
       );

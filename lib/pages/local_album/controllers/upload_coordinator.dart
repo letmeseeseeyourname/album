@@ -4,6 +4,7 @@
 
 import 'package:flutter/material.dart';
 import '../../../album/manager/local_folder_upload_manager.dart';
+import '../../../album/upload/models/local_upload_progress.dart';
 import '../../../models/file_item.dart';
 import '../services/file_service.dart';
 
@@ -89,6 +90,7 @@ class UploadCoordinator extends ChangeNotifier {
   List<String> get allUploadedMd5List => List.unmodifiable(_allUploadedMd5List);
 
   /// 获取聚合进度（合并所有任务的进度，包括已完成的任务）
+  /// ✅ 修复：支持聚合字节进度
   LocalUploadProgress? get aggregatedProgress {
     // 没有活跃任务且没有已完成任务时返回 null
     if (_activeTasks.isEmpty && _completedTaskCount == 0) return null;
@@ -99,12 +101,23 @@ class UploadCoordinator extends ChangeNotifier {
     int failedFiles = _completedFailedFiles;
     String? currentFileName;
 
+    // ✅ 新增：聚合字节进度
+    int globalTransferredBytes = 0;
+    int globalTotalBytes = 0;
+    int currentSpeed = 0;
+
     for (final task in _activeTasks) {
       final progress = task.progress;
       if (progress != null) {
         totalFiles += progress.totalFiles;
         uploadedFiles += progress.uploadedFiles;
         failedFiles += progress.failedFiles;
+
+        // ✅ 聚合字节进度
+        globalTransferredBytes += progress.globalTransferredBytes;
+        globalTotalBytes += progress.globalTotalBytes;
+        currentSpeed += progress.speed;  // 累加所有任务的速度
+
         // 取第一个正在上传的文件名
         if (currentFileName == null && progress.currentFileName != null) {
           currentFileName = progress.currentFileName;
@@ -123,6 +136,10 @@ class UploadCoordinator extends ChangeNotifier {
         failedFiles: failedFiles,
         currentFileName: null,
         statusMessage: '全部完成',
+        // ✅ 完成时字节进度为 100%
+        globalTransferredBytes: globalTotalBytes,
+        globalTotalBytes: globalTotalBytes,
+        speed: 0,
       );
     }
 
@@ -131,12 +148,17 @@ class UploadCoordinator extends ChangeNotifier {
       return _activeTasks.first.progress;
     }
 
+    // ✅ 多任务时，返回聚合的字节进度
     return LocalUploadProgress(
       totalFiles: totalFiles,
       uploadedFiles: uploadedFiles,
       failedFiles: failedFiles,
       currentFileName: currentFileName,
       statusMessage: '$totalTaskCount个任务并行上传中...',
+      // ✅ 包含聚合的字节进度
+      globalTransferredBytes: globalTransferredBytes,
+      globalTotalBytes: globalTotalBytes,
+      speed: currentSpeed,
     );
   }
 

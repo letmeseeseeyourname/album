@@ -161,36 +161,3 @@ class McProgressInfo {
     return 'McProgressInfo(transferred: $formattedTransferred, total: $formattedTotal, speed: $formattedSpeed, percent: $formattedPercent)';
   }
 }
-
-
-// ============================================================
-// 使用示例
-// ============================================================
-void main() {
-  final output = r'D:\image\pexels-sanaan-3075993.jpg: 192.00 KiB / 2.42 MiB  9.74 KiB/s';
-
-  // 1. 只解析速率（字节/秒）
-  final speed = McOutputParser.parseSpeed(output);
-  print('速率: $speed 字节/秒');  // 9973 字节/秒
-  print('速率: ${McOutputParser.formatSpeed(speed)}');  // 9.74 KiB/s
-
-  // 2. 只获取速率字符串
-  final speedStr = McOutputParser.parseSpeedString(output);
-  print('速率字符串: $speedStr');  // 9.74 KiB/s
-
-  // 3. 解析进度
-  final progress = McOutputParser.parseProgress(output);
-  print('已传输: ${progress['transferred']} 字节');
-  print('总大小: ${progress['total']} 字节');
-
-  // 4. 解析完整信息
-  final info = McOutputParser.parse(output);
-  print(info);  // McProgressInfo(transferred: 192.00 KiB, total: 2.42 MiB, speed: 9.74 KiB/s, percent: 7.7%)
-
-  // 5. 异常输入测试
-  print('\n--- 异常输入测试 ---');
-  print('null 输入: ${McOutputParser.parseSpeed(null)}');  // 0
-  print('空字符串: ${McOutputParser.parseSpeed('0b')}');  // 0
-  print('无效格式: ${McOutputParser.parseSpeed('hello world')}');  // 0
-  print('部分有效: ${McOutputParser.parseSpeed('uploading...')}');  // 0
-}

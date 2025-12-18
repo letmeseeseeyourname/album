@@ -1,33 +1,12 @@
 // widgets/upload_bottom_bar.dart
 // 通用上传底部工具栏组件
-// 用于 MainFolderPage 和 FolderDetailPage
+// ✅ 保留进度条和大小显示，速度显示采用新样式居中
 
 import 'package:flutter/material.dart';
 import '../album/manager/local_folder_upload_manager.dart';
+import '../album/upload/models/local_upload_progress.dart';
 
 /// 通用上传底部工具栏
-///
-/// 特性：
-/// - 上传任务进行中时始终显示（即使切换页面再回来）
-/// - 支持显示选中文件统计
-/// - 支持显示上传进度
-/// - 支持显示设备剩余空间
-/// - 支持统计中状态
-///
-/// 使用示例：
-/// ```dart
-/// UploadBottomBar(
-///   selectedCount: selectedIndices.length,
-///   selectedTotalSizeMB: totalSizeMB,
-///   selectedImageCount: imageCount,
-///   selectedVideoCount: videoCount,
-///   deviceStorageSurplusGB: 128.5,
-///   isUploading: uploadCoordinator.isUploading,
-///   uploadProgress: uploadCoordinator.uploadProgress,
-///   onUploadPressed: _handleSync,
-///   isCountingFiles: isCountingFiles,
-/// )
-/// ```
 class UploadBottomBar extends StatelessWidget {
   /// 选中数量
   final int selectedCount;
@@ -47,7 +26,7 @@ class UploadBottomBar extends StatelessWidget {
   /// 是否正在上传
   final bool isUploading;
 
-  /// 上传进度（可为空，支持聚合进度）
+  /// 上传进度
   final LocalUploadProgress? uploadProgress;
 
   /// 上传按钮点击回调
@@ -57,7 +36,6 @@ class UploadBottomBar extends StatelessWidget {
   final bool isCountingFiles;
 
   /// 是否显示选中信息（默认true）
-  /// 设为 false 时，即使有选中也不显示统计信息（仅显示上传进度）
   final bool showSelectionInfo;
 
   /// 上传按钮文字（可自定义）
@@ -66,8 +44,11 @@ class UploadBottomBar extends StatelessWidget {
   /// 上传中按钮文字（可自定义）
   final String? uploadingButtonText;
 
-  /// 活跃任务数量（用于显示多任务信息）
+  /// 活跃任务数量
   final int activeTaskCount;
+
+  /// 是否使用字节进度（默认 true）
+  final bool useBytesProgress;
 
   const UploadBottomBar({
     super.key,
@@ -84,17 +65,18 @@ class UploadBottomBar extends StatelessWidget {
     this.uploadButtonText,
     this.uploadingButtonText,
     this.activeTaskCount = 1,
+    this.useBytesProgress = true,
   });
 
   @override
   Widget build(BuildContext context) {
-    // ✅ 显示逻辑：有上传任务时始终显示，无选中且无上传时隐藏
+    // 显示逻辑：有上传任务时始终显示，无选中且无上传时隐藏
     if (selectedCount == 0 && !isUploading) {
       return const SizedBox.shrink();
     }
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 20),
+      padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 16),
       decoration: BoxDecoration(
         color: Colors.white,
         border: Border(
@@ -103,17 +85,20 @@ class UploadBottomBar extends StatelessWidget {
       ),
       child: Row(
         children: [
-          // 左侧：选中统计信息（仅在有选中且允许显示时）
-          if (selectedCount > 0 && showSelectionInfo) _buildSelectionInfo(),
+          // 左侧：选中统计信息（非上传时显示）或进度信息（上传时显示）
+          if (selectedCount > 0 && showSelectionInfo && !isUploading)
+            _buildSelectionInfo(),
 
-          // 中间：上传进度（上传中时显示）
-          if (isUploading && uploadProgress != null) ...[
-            if (selectedCount > 0 && showSelectionInfo)
-              const SizedBox(width: 20),
-            Expanded(child: _buildUploadProgress(uploadProgress!)),
-          ],
+          // 上传中时显示进度信息
+          if (isUploading && uploadProgress != null)
+            _buildUploadProgressSection(uploadProgress!),
 
-          const Spacer(),
+          // 中间：速度显示（上传中时居中显示）
+          if (isUploading && uploadProgress != null)
+            Expanded(child: _buildSpeedIndicator(uploadProgress!)),
+
+          // 非上传时的 Spacer
+          if (!isUploading) const Spacer(),
 
           // 右侧：设备空间 + 上传按钮
           _buildRightSection(),
@@ -152,77 +137,136 @@ class UploadBottomBar extends StatelessWidget {
     );
   }
 
-  /// 构建上传进度区域（支持聚合进度显示）
-  Widget _buildUploadProgress(LocalUploadProgress progress) {
-    // 构建状态文本
-    String statusText;
-    if (activeTaskCount > 1) {
-      // 多任务模式：显示任务数和失败数
-      statusText = '${progress.uploadedFiles}/${progress.totalFiles} 文件 · '
-          '$activeTaskCount个任务并行';
-      // if (progress.failedFiles > 0) {
-      //   statusText += ' · ${progress.failedFiles}个失败';
-      // }
-    } else {
-      // 单任务模式：显示当前文件名
-      statusText = '${progress.uploadedFiles}/${progress.totalFiles}';
-      if (progress.currentFileName != null && progress.currentFileName!.isNotEmpty) {
-        statusText += ' · ${progress.currentFileName}';
-      }
-      // if (progress.failedFiles > 0) {
-      //   statusText += ' · ${progress.failedFiles}个失败';
-      // }
-    }
+  /// ✅ 构建上传进度区域（包含进度条、大小、文件数）
+  Widget _buildUploadProgressSection(LocalUploadProgress progress) {
+    // 根据配置选择进度值
+    final double progressValue = useBytesProgress
+        ? progress.bytesProgress
+        : progress.progress;
 
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Expanded(
-              child: LinearProgressIndicator(
-                value: progress.progress,
-                backgroundColor: Colors.grey.shade200,
-                valueColor: AlwaysStoppedAnimation<Color>(
-                  progress.failedFiles > 0 ? Colors.orange.shade700 : Colors.orange,
+    return SizedBox(
+      width: 280,  // 固定宽度
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // 第一行：进度条 + 百分比
+          Row(
+            children: [
+              Expanded(
+                child: LinearProgressIndicator(
+                  value: progressValue.clamp(0.0, 1.0),
+                  backgroundColor: Colors.grey.shade200,
+                  valueColor: AlwaysStoppedAnimation<Color>(
+                    progress.failedFiles > 0 ? Colors.orange.shade700 : Colors.orange,
+                  ),
+                  minHeight: 6,
                 ),
               ),
-            ),
-            const SizedBox(width: 10),
-            Text(
-              '${(progress.progress * 100).toStringAsFixed(0)}%',
-              style: const TextStyle(fontSize: 12),
-            ),
-            // 多任务时显示任务数徽章
-            if (activeTaskCount > 1) ...[
-              const SizedBox(width: 6),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                decoration: BoxDecoration(
-                  color: Colors.blue.shade100,
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Text(
-                  '×$activeTaskCount',
-                  style: TextStyle(
-                    fontSize: 10,
-                    color: Colors.blue.shade700,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
+              const SizedBox(width: 10),
+              Text(
+                '${(progressValue * 100).toStringAsFixed(1)}%',
+                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
               ),
             ],
+          ),
+          const SizedBox(height: 6),
+          // 第二行：已下载大小/总大小 · 文件进度
+          Row(
+            children: [
+              // 大小进度
+              Text(
+                '${progress.formattedTransferred} / ${progress.formattedTotal}',
+                style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+              ),
+              const SizedBox(width: 12),
+              // 文件进度
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade100,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      Icons.insert_drive_file_outlined,
+                      size: 12,
+                      color: Colors.grey.shade600,
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      '${progress.uploadedFiles}/${progress.totalFiles}',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: Colors.grey.shade600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              // 多任务徽章
+              if (activeTaskCount > 1) ...[
+                const SizedBox(width: 6),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: Colors.blue.shade100,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Text(
+                    '×$activeTaskCount',
+                    style: TextStyle(
+                      fontSize: 10,
+                      color: Colors.blue.shade700,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// ✅ 构建速度指示器（居中显示，新样式）
+  Widget _buildSpeedIndicator(LocalUploadProgress progress) {
+    final speed = progress.speed;
+    final formattedSpeed = _formatSpeed(speed);
+
+    return Center(
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        decoration: BoxDecoration(
+          color: Colors.grey.shade50,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: Colors.grey.shade200),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // 上传图标
+            Icon(
+              Icons.upload,
+              size: 18,
+              color: Colors.green.shade600,
+            ),
+            const SizedBox(width: 8),
+            // 速度文字
+            Text(
+              formattedSpeed,
+              style: TextStyle(
+                fontSize: 14,
+                color: Colors.grey.shade800,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
           ],
         ),
-        const SizedBox(height: 4),
-        Text(
-          statusText,
-          style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-        ),
-      ],
+      ),
     );
   }
 
@@ -264,5 +308,18 @@ class UploadBottomBar extends StatelessWidget {
       return '${(sizeMB / 1024).toStringAsFixed(2)}GB';
     }
     return '${sizeMB.toStringAsFixed(2)}MB';
+  }
+
+  /// 格式化速度
+  String _formatSpeed(int bytesPerSecond) {
+    if (bytesPerSecond < 1024) {
+      return '${bytesPerSecond}B/s';
+    } else if (bytesPerSecond < 1024 * 1024) {
+      return '${(bytesPerSecond / 1024).toStringAsFixed(1)}KB/s';
+    } else if (bytesPerSecond < 1024 * 1024 * 1024) {
+      return '${(bytesPerSecond / (1024 * 1024)).toStringAsFixed(2)}MB/s';
+    } else {
+      return '${(bytesPerSecond / (1024 * 1024 * 1024)).toStringAsFixed(2)}GB/s';
+    }
   }
 }

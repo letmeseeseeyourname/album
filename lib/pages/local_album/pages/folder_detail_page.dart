@@ -371,6 +371,11 @@ class _FolderDetailPageState extends State<FolderDetailPage> with UploadCoordina
 
     if (!confirmed) return;
 
+    // ✅ 新增：用户点击"开始上传"后，立即取消选中
+    setState(() {
+      _selectionController.cancelSelection();
+    });
+
     await uploadCoordinator.startUpload(
       prepareResult.filePaths!,
           (String message, {bool isError = false}) => _showMessage(message, isError: isError),
