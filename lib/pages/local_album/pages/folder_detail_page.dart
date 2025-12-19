@@ -7,6 +7,7 @@ import '../../../models/folder_info.dart';
 import '../../../models/media_item.dart';
 import '../../../services/sync_status_service.dart';
 import '../../../services/thumbnail_helper.dart';
+import '../../../user/models/group.dart';
 import '../../../widgets/custom_title_bar.dart';
 import '../../../widgets/media_viewer_page.dart';
 import '../../../widgets/side_navigation.dart';
@@ -36,11 +37,24 @@ class FolderDetailPage extends StatefulWidget {
   final int selectedNavIndex;
   final Function(int)? onNavigationChanged;
 
+  // 🆕 新增参数
+  final List<Group>? groups;
+  final Group? selectedGroup;
+  final Future<void> Function(Group)? onGroupSelected;
+  final int? currentUserId;
+  final bool isGroupsLoading;
+
   const FolderDetailPage({
     super.key,
     required this.folder,
     this.selectedNavIndex = 0,
     this.onNavigationChanged,
+    // 🆕 新增
+    this.groups,
+    this.selectedGroup,
+    this.onGroupSelected,
+    this.currentUserId,
+    this.isGroupsLoading = false,
   });
 
   @override
@@ -499,6 +513,12 @@ class _FolderDetailPageState extends State<FolderDetailPage> with UploadCoordina
                 ? SideNavigation(
               selectedIndex: widget.selectedNavIndex,
               onNavigationChanged: _handleNavigationChanged,
+              // 🆕 传递 group 相关参数
+              groups: widget.groups,
+              selectedGroup: widget.selectedGroup,
+              onGroupSelected: widget.onGroupSelected,
+              currentUserId: widget.currentUserId,
+              isGroupsLoading: widget.isGroupsLoading,
             )
                 : const _StaticSideNavigation(),
 

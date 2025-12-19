@@ -1,6 +1,18 @@
+// ============================================================
+// UploadCoordinator 取消任务统计修复
+// ============================================================
+//
+// 问题：取消任务后，upload_bottom_bar 中的文件个数和总大小没有减去
+// 原因：取消任务时只是从 _activeTasks 中移除，但没有更新聚合进度的统计
+//
+// 解决方案：
+// 1. 取消任务时，从统计中减去该任务的数据
+// 2. 或者直接重新计算聚合进度（更简单可靠）
+// ============================================================
+
+
 // controllers/upload_coordinator.dart
-// ============ 全局单例版本 - 支持跨页面上传状态共享 ============
-// ✅ 新增：支持返回上传成功的 MD5 列表，用于更新同步状态缓存
+// ✅ 修复版：取消任务时正确更新统计
 
 import 'package:flutter/material.dart';
 import '../../../album/manager/local_folder_upload_manager.dart';
@@ -9,24 +21,16 @@ import '../../../models/file_item.dart';
 import '../services/file_service.dart';
 
 /// 上传协调器 - 全局单例
-///
-/// ✅ 改进：
-/// 1. 单例模式，确保上传状态全局共享
-/// 2. 切换页面后上传进度条仍然显示
-/// 3. 支持多任务并发
-/// 4. ✅ 新增：支持返回上传成功的 MD5 列表
 class UploadCoordinator extends ChangeNotifier {
   // ========== 单例实现 ==========
   static UploadCoordinator? _instance;
   static FileService? _fileService;
 
-  /// 初始化单例（应用启动时调用一次）
   static void initialize(FileService fileService) {
     _fileService = fileService;
     _instance ??= UploadCoordinator._internal(fileService);
   }
 
-  /// 获取单例实例
   static UploadCoordinator get instance {
     if (_instance == null) {
       throw StateError(
@@ -36,7 +40,6 @@ class UploadCoordinator extends ChangeNotifier {
     return _instance!;
   }
 
-  /// 便捷方法：获取实例（如果未初始化则使用默认 FileService）
   static UploadCoordinator of([FileService? fileService]) {
     if (_instance == null && fileService != null) {
       initialize(fileService);
@@ -47,23 +50,20 @@ class UploadCoordinator extends ChangeNotifier {
   // ========== 内部实现 ==========
   final FileService _internalFileService;
 
-  // 活跃的上传任务列表
   final List<UploadTaskContext> _activeTasks = [];
 
-  // ✅ 已完成任务的累计统计（用于聚合进度显示）
+  // ✅ 已完成任务的累计统计（不包括被取消的任务）
   int _completedTaskCount = 0;
   int _completedTotalFiles = 0;
   int _completedUploadedFiles = 0;
   int _completedFailedFiles = 0;
+  int _completedTransferredBytes = 0;
+  int _completedTotalBytes = 0;
 
-  // ✅ 新增：累计所有任务上传成功的 MD5 列表
   final List<String> _allUploadedMd5List = [];
 
-  // 私有构造函数
   UploadCoordinator._internal(this._internalFileService);
 
-  /// @deprecated 保留旧构造函数以兼容现有代码，但建议使用单例
-  /// 如果调用此构造函数，会返回单例实例
   factory UploadCoordinator(LocalFolderUploadManager _, FileService fileService) {
     if (_instance == null) {
       initialize(fileService);
@@ -71,39 +71,31 @@ class UploadCoordinator extends ChangeNotifier {
     return _instance!;
   }
 
-  /// 获取是否有上传任务进行中
   bool get isUploading => _activeTasks.isNotEmpty;
 
-  /// 获取当前上传进度 (返回第一个任务的进度作为主进度)
   LocalUploadProgress? get uploadProgress {
     if (_activeTasks.isEmpty) return null;
     return _activeTasks.first.progress;
   }
 
-  /// 活跃任务数量
   int get activeTaskCount => _activeTasks.length;
 
-  /// 总任务数量（活跃 + 已完成，用于 UI 显示）
   int get totalTaskCount => _activeTasks.length + _completedTaskCount;
 
-  /// ✅ 新增：获取所有上传成功的 MD5 列表
   List<String> get allUploadedMd5List => List.unmodifiable(_allUploadedMd5List);
 
-  /// 获取聚合进度（合并所有任务的进度，包括已完成的任务）
-  /// ✅ 修复：支持聚合字节进度
+  /// ✅ 获取聚合进度
+  /// 注意：只统计活跃任务和已完成任务，不包括被取消的任务
   LocalUploadProgress? get aggregatedProgress {
-    // 没有活跃任务且没有已完成任务时返回 null
     if (_activeTasks.isEmpty && _completedTaskCount == 0) return null;
 
-    // 聚合：已完成任务 + 活跃任务
     int totalFiles = _completedTotalFiles;
     int uploadedFiles = _completedUploadedFiles;
     int failedFiles = _completedFailedFiles;
     String? currentFileName;
 
-    // ✅ 新增：聚合字节进度
-    int globalTransferredBytes = 0;
-    int globalTotalBytes = 0;
+    int globalTransferredBytes = _completedTransferredBytes;
+    int globalTotalBytes = _completedTotalBytes;
     int currentSpeed = 0;
 
     for (final task in _activeTasks) {
@@ -113,22 +105,23 @@ class UploadCoordinator extends ChangeNotifier {
         uploadedFiles += progress.uploadedFiles;
         failedFiles += progress.failedFiles;
 
-        // ✅ 聚合字节进度
         globalTransferredBytes += progress.globalTransferredBytes;
         globalTotalBytes += progress.globalTotalBytes;
-        currentSpeed += progress.speed;  // 累加所有任务的速度
+        currentSpeed += progress.speed;
 
-        // 取第一个正在上传的文件名
         if (currentFileName == null && progress.currentFileName != null) {
           currentFileName = progress.currentFileName;
         }
       }
     }
 
-    // 计算总任务数
     final totalTaskCount = _completedTaskCount + _activeTasks.length;
 
-    // 所有任务都完成了
+    // 没有任何任务
+    if (totalFiles == 0 && _activeTasks.isEmpty) {
+      return null;
+    }
+
     if (_activeTasks.isEmpty) {
       return LocalUploadProgress(
         totalFiles: totalFiles,
@@ -136,35 +129,138 @@ class UploadCoordinator extends ChangeNotifier {
         failedFiles: failedFiles,
         currentFileName: null,
         statusMessage: '全部完成',
-        // ✅ 完成时字节进度为 100%
         globalTransferredBytes: globalTotalBytes,
         globalTotalBytes: globalTotalBytes,
         speed: 0,
       );
     }
 
-    // 只有一个活跃任务且没有已完成任务时，直接返回该任务进度
     if (_activeTasks.length == 1 && _completedTaskCount == 0) {
       return _activeTasks.first.progress;
     }
 
-    // ✅ 多任务时，返回聚合的字节进度
     return LocalUploadProgress(
       totalFiles: totalFiles,
       uploadedFiles: uploadedFiles,
       failedFiles: failedFiles,
       currentFileName: currentFileName,
       statusMessage: '$totalTaskCount个任务并行上传中...',
-      // ✅ 包含聚合的字节进度
       globalTransferredBytes: globalTransferredBytes,
       globalTotalBytes: globalTotalBytes,
       speed: currentSpeed,
     );
   }
 
-  /// 准备上传文件列表
+  // ========== 任务查询方法 ==========
+
+  /// 根据数据库 taskId 获取活跃任务
+  UploadTaskContext? getActiveTaskByDbTaskId(int dbTaskId) {
+    for (final task in _activeTasks) {
+      if (task.dbTaskId == dbTaskId) {
+        return task;
+      }
+      // 也检查 uploadManager 中保存的 dbTaskId
+      if (task.uploadManager.currentDbTaskId == dbTaskId) {
+        return task;
+      }
+    }
+    return null;
+  }
+
+  /// 检查指定 dbTaskId 的任务是否正在上传
+  bool isTaskUploading(int dbTaskId) {
+    return getActiveTaskByDbTaskId(dbTaskId) != null;
+  }
+
+  /// 获取所有活跃任务的 dbTaskId 列表
+  List<int> get activeDbTaskIds {
+    final ids = <int>[];
+    for (final task in _activeTasks) {
+      if (task.dbTaskId != null) {
+        ids.add(task.dbTaskId!);
+      } else if (task.uploadManager.currentDbTaskId != null) {
+        ids.add(task.uploadManager.currentDbTaskId!);
+      }
+    }
+    return ids;
+  }
+
+  // ========== ✅ 取消任务方法（修复版）==========
+
+  /// 根据数据库 taskId 取消特定任务
+  /// ✅ 修复：取消后不计入已完成统计，直接从活跃任务移除
+  Future<CancelTaskResult> cancelTaskById(int dbTaskId) async {
+    UploadTaskContext? targetTask;
+    int targetIndex = -1;
+
+    // 查找任务
+    for (int i = 0; i < _activeTasks.length; i++) {
+      final task = _activeTasks[i];
+      if (task.dbTaskId == dbTaskId ||
+          task.uploadManager.currentDbTaskId == dbTaskId) {
+        targetTask = task;
+        targetIndex = i;
+        break;
+      }
+    }
+
+    if (targetTask == null || targetIndex == -1) {
+      return CancelTaskResult(success: false, message: '任务不存在或已完成');
+    }
+
+    // 获取当前进度（用于返回信息）
+    final progress = targetTask.progress;
+    int cancelledFiles = 0;
+    int cancelledBytes = 0;
+
+    if (progress != null) {
+      // 被取消的文件数 = 总数 - 已上传数
+      cancelledFiles = progress.totalFiles - progress.uploadedFiles;
+      // 被取消的字节数 = 总字节 - 已传输字节
+      cancelledBytes = progress.globalTotalBytes - progress.globalTransferredBytes;
+    }
+
+    // ✅ 调用 uploadManager 的取消方法（会终止 McService 进程）
+    await targetTask.uploadManager.cancelUpload();
+
+    // ✅ 从活跃任务中移除（不计入已完成统计）
+    _activeTasks.removeAt(targetIndex);
+
+    // ✅ 立即通知监听器更新 UI
+    notifyListeners();
+
+    // 如果所有任务都完成/取消了，延迟清理累计数据
+    if (_activeTasks.isEmpty) {
+      Future.delayed(const Duration(seconds: 3), () {
+        _resetCompletedStats();
+        notifyListeners();
+      });
+    }
+
+    return CancelTaskResult(
+      success: true,
+      message: '任务已取消',
+      cancelledFiles: cancelledFiles,
+      cancelledBytes: cancelledBytes,
+    );
+  }
+
+  /// 取消所有上传任务
+  Future<void> cancelAllUploads() async {
+    for (final task in _activeTasks) {
+      await task.uploadManager.cancelUpload();
+    }
+
+    // ✅ 清空所有任务和统计
+    _activeTasks.clear();
+    _resetCompletedStats();
+
+    notifyListeners();
+  }
+
+  // ========== 上传方法 ==========
+
   Future<UploadPrepareResult> prepareUpload(List<FileItem> selectedItems) async {
-    // 分离文件和文件夹
     final selectedFiles = selectedItems
         .where((item) => item.type != FileItemType.folder)
         .toList();
@@ -172,13 +268,10 @@ class UploadCoordinator extends ChangeNotifier {
         .where((item) => item.type == FileItemType.folder)
         .toList();
 
-    // 构建最终待上传文件列表
     final List<String> allFilesToUpload = [];
 
-    // 添加单独选中的文件路径
     allFilesToUpload.addAll(selectedFiles.map((item) => item.path));
 
-    // 递归处理选中的文件夹
     if (selectedFolders.isNotEmpty) {
       for (final folder in selectedFolders) {
         final filesInFolder =
@@ -187,14 +280,12 @@ class UploadCoordinator extends ChangeNotifier {
       }
     }
 
-    // 移除重复路径
     final finalUploadList = allFilesToUpload.toSet().toList();
 
     if (finalUploadList.isEmpty) {
       return UploadPrepareResult(success: false, message: '没有可上传的媒体文件');
     }
 
-    // 分析文件
     final analysis =
     await _internalFileService.analyzeFilesForUpload(finalUploadList);
 
@@ -207,24 +298,20 @@ class UploadCoordinator extends ChangeNotifier {
     );
   }
 
-  /// 开始上传
-  ///
-  /// ✅ 修改：onComplete 回调增加 uploadedMd5s 参数
   Future<void> startUpload(
       List<String> filePaths,
       Function(String message, {bool isError}) onMessage,
-      Function(List<String> uploadedMd5s) onComplete,
-      ) async {
-    // 创建独立的上传管理器实例 (支持多任务并发)
+      Function(List<String> uploadedMd5s) onComplete, {
+        int? dbTaskId,
+      }) async {
     final uploadManager = LocalFolderUploadManager();
 
-    // 创建任务上下文
     final taskContext = UploadTaskContext(
       uploadManager: uploadManager,
       filePaths: filePaths,
+      dbTaskId: dbTaskId,
     );
 
-    // 添加到活跃任务列表
     _activeTasks.add(taskContext);
     notifyListeners();
 
@@ -232,35 +319,33 @@ class UploadCoordinator extends ChangeNotifier {
       await uploadManager.uploadLocalFiles(
         filePaths,
         onProgress: (progress) {
-          // 更新任务进度
           taskContext.progress = progress;
           notifyListeners();
         },
         onComplete: (success, message, uploadedMd5s) {
-          // ✅ 累计已完成任务的统计数据
           final finalProgress = taskContext.progress;
-          if (finalProgress != null) {
+
+          // ✅ 只有成功完成的任务才计入已完成统计
+          if (success && finalProgress != null) {
             _completedTaskCount++;
             _completedTotalFiles += finalProgress.totalFiles;
             _completedUploadedFiles += finalProgress.uploadedFiles;
             _completedFailedFiles += finalProgress.failedFiles;
+            _completedTransferredBytes += finalProgress.globalTotalBytes;
+            _completedTotalBytes += finalProgress.globalTotalBytes;
           }
 
-          // ✅ 新增：累计上传成功的 MD5 列表
           if (uploadedMd5s.isNotEmpty) {
             _allUploadedMd5List.addAll(uploadedMd5s);
             taskContext.uploadedMd5s = uploadedMd5s;
           }
 
-          // 从活跃任务中移除
           _activeTasks.remove(taskContext);
           notifyListeners();
 
-          // 回调通知
           onMessage(message, isError: !success);
           onComplete(uploadedMd5s);
 
-          // ✅ 所有任务完成后，延迟清理累计数据（让UI有时间显示最终状态）
           if (_activeTasks.isEmpty) {
             Future.delayed(const Duration(seconds: 3), () {
               _resetCompletedStats();
@@ -270,23 +355,13 @@ class UploadCoordinator extends ChangeNotifier {
         },
       );
     } catch (e) {
-      // ✅ 异常时也要累计统计数据
-      final finalProgress = taskContext.progress;
-      if (finalProgress != null) {
-        _completedTaskCount++;
-        _completedTotalFiles += finalProgress.totalFiles;
-        _completedUploadedFiles += finalProgress.uploadedFiles;
-        _completedFailedFiles += finalProgress.failedFiles;
-      }
-
-      // 异常时也要清理任务
+      // 异常时不计入已完成统计
       _activeTasks.remove(taskContext);
       notifyListeners();
 
       onMessage('上传失败: $e', isError: true);
-      onComplete([]);  // ✅ 异常时返回空列表
+      onComplete([]);
 
-      // ✅ 所有任务完成后，延迟清理累计数据
       if (_activeTasks.isEmpty) {
         Future.delayed(const Duration(seconds: 3), () {
           _resetCompletedStats();
@@ -296,7 +371,6 @@ class UploadCoordinator extends ChangeNotifier {
     }
   }
 
-  /// ✅ 兼容旧版本的 startUpload（不需要 MD5 回调）
   Future<void> startUploadLegacy(
       List<String> filePaths,
       Function(String message, {bool isError}) onMessage,
@@ -305,35 +379,24 @@ class UploadCoordinator extends ChangeNotifier {
     await startUpload(
       filePaths,
       onMessage,
-          (_) => onComplete(),  // 忽略 MD5 列表
+          (_) => onComplete(),
     );
   }
 
-  /// 重置已完成任务的累计统计
   void _resetCompletedStats() {
     _completedTaskCount = 0;
     _completedTotalFiles = 0;
     _completedUploadedFiles = 0;
     _completedFailedFiles = 0;
-    _allUploadedMd5List.clear();  // ✅ 同时清理 MD5 列表
+    _completedTransferredBytes = 0;
+    _completedTotalBytes = 0;
+    _allUploadedMd5List.clear();
   }
 
-  /// 获取所有活跃任务的进度信息 (供高级 UI 使用)
   List<LocalUploadProgress?> getAllTaskProgress() {
     return _activeTasks.map((task) => task.progress).toList();
   }
 
-  /// 取消所有上传任务
-  Future<void> cancelAllUploads() async {
-    for (final task in _activeTasks) {
-      task.uploadManager.cancelUpload();
-    }
-    _activeTasks.clear();
-    _resetCompletedStats();  // ✅ 取消时也清理累计数据
-    notifyListeners();
-  }
-
-  /// 重置单例（仅用于测试）
   @visibleForTesting
   static void reset() {
     _instance?.dispose();
@@ -342,37 +405,33 @@ class UploadCoordinator extends ChangeNotifier {
   }
 }
 
+
+/// 取消任务结果
+class CancelTaskResult {
+  final bool success;
+  final String message;
+  final int cancelledFiles;
+  final int cancelledBytes;
+
+  CancelTaskResult({
+    required this.success,
+    required this.message,
+    this.cancelledFiles = 0,
+    this.cancelledBytes = 0,
+  });
+}
+
+
 /// 上传协调器 Mixin
-///
-/// 为 StatefulWidget 提供便捷的上传状态监听能力。
-/// 使用后自动监听 UploadCoordinator 状态变化并刷新 UI。
-///
-/// 使用方式：
-/// ```dart
-/// class _MyPageState extends State<MyPage> with UploadCoordinatorMixin {
-///   @override
-///   Widget build(BuildContext context) {
-///     return UploadBottomBar(
-///       isUploading: isUploading,        // 来自 Mixin
-///       uploadProgress: uploadProgress,   // 来自 Mixin
-///       // ...
-///     );
-///   }
-/// }
-/// ```
 mixin UploadCoordinatorMixin<T extends StatefulWidget> on State<T> {
   late final UploadCoordinator _uploadCoordinator;
 
-  /// 是否正在上传
   bool get isUploading => _uploadCoordinator.isUploading;
 
-  /// 当前上传进度（聚合所有任务）
   LocalUploadProgress? get uploadProgress => _uploadCoordinator.aggregatedProgress;
 
-  /// 总任务数量（活跃 + 已完成）
   int get activeTaskCount => _uploadCoordinator.totalTaskCount;
 
-  /// 上传协调器实例（用于调用上传方法）
   UploadCoordinator get uploadCoordinator => _uploadCoordinator;
 
   @override
@@ -395,20 +454,24 @@ mixin UploadCoordinatorMixin<T extends StatefulWidget> on State<T> {
   }
 }
 
+
 /// 上传任务上下文
 class UploadTaskContext {
   final LocalFolderUploadManager uploadManager;
   final List<String> filePaths;
+  final int? dbTaskId;
   LocalUploadProgress? progress;
-  List<String> uploadedMd5s;  // ✅ 新增：该任务上传成功的 MD5 列表
+  List<String> uploadedMd5s;
 
   UploadTaskContext({
     required this.uploadManager,
     required this.filePaths,
+    this.dbTaskId,
     this.progress,
-    this.uploadedMd5s = const [],  // ✅ 默认空列表
+    this.uploadedMd5s = const [],
   });
 }
+
 
 /// 上传准备结果
 class UploadPrepareResult {

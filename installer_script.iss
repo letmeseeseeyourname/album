@@ -38,6 +38,8 @@ OutputDir=installer_output
 OutputBaseFilename={#MyAppName}_Setup_{#MyAppVersion}
 ; 设置安装包图标（需要准备一个 .ico 文件）
 ;SetupIconFile=app_icon.ico
+; 设置安装包图标（需要准备一个 .ico 文件）
+SetupIconFile=windows\runner\resources\app_icon.ico
 
 ; 压缩配置
 Compression=lzma
@@ -49,8 +51,8 @@ MinVersion=10.0.17763
 ArchitecturesAllowed=x64
 ArchitecturesInstallIn64BitMode=x64
 
-; 权限（如果需要管理员权限，改为 admin）
-PrivilegesRequired=lowest
+; ✅ 改为 admin 权限（安装 VC++ 运行库需要）
+PrivilegesRequired=admin
 
 ; 安装界面配置
 WizardStyle=modern
@@ -78,6 +80,17 @@ Source: "{#MyAppBuildDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubd
 ; P2P 隧道 DLL 库（位于 windows 目录下）
 Source: "windows\pgDllTunnel.dll"; DestDir: "{app}"; Flags: ignoreversion
 
+; ✅ 新增：MinIO mc.exe 命令行工具（从 assets 目录）
+Source: "assets\mc.exe"; DestDir: "{app}"; Flags: ignoreversion
+
+; ✅ 新增：托盘图标文件
+Source: "windows\runner\resources\app_icon.ico"; DestDir: "{app}"; Flags: ignoreversion
+
+; ✅ 新增：VC++ 运行库安装程序
+; 下载地址: https://aka.ms/vs/17/release/vc_redist.x64.exe
+; 放到项目根目录的 redist 文件夹下
+Source: "redist\vc_redist.x64.exe"; DestDir: "{tmp}"; Flags: ignoreversion deleteafterinstall
+
 [Icons]
 ; 开始菜单图标
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
@@ -88,6 +101,9 @@ Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: de
 Name: "{userappdata}\Microsoft\Internet Explorer\Quick Launch\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: quicklaunchicon
 
 [Run]
+; ✅ 新增：安装 VC++ 运行库（静默安装，仅在需要时）
+Filename: "{tmp}\vc_redist.x64.exe"; Parameters: "/install /quiet /norestart"; StatusMsg: "正在安装 Visual C++ 运行库..."; Flags: waituntilterminated; Check: VCRedistNeedsInstall
+
 ; 安装完成后运行应用程序（可选）
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
 
@@ -99,17 +115,56 @@ Type: filesandordirs; Name: "{app}\*"
 Type: dirifempty; Name: "{app}"
 
 ; ===== 清理应用实际使用的数据目录 =====
-; Roaming 目录: C:\Users\xxx\AppData\Roaming\joykee\亲选相册
-Type: filesandordirs; Name: "{userappdata}\joykee\亲选相册"
+; Roaming 目录: C:\Users\xxx\AppData\Roaming\joykee\AI相册管家
+Type: filesandordirs; Name: "{userappdata}\joykee\AI相册管家"
 Type: dirifempty; Name: "{userappdata}\joykee"
 
-; Local 目录: C:\Users\xxx\AppData\Local\joykee\亲选相册
-Type: filesandordirs; Name: "{localappdata}\joykee\亲选相册"
+; Local 目录: C:\Users\xxx\AppData\Local\joykee\AI相册管家
+Type: filesandordirs; Name: "{localappdata}\joykee\AI相册管家"
 Type: dirifempty; Name: "{localappdata}\joykee"
+
+; ✅ 新增：清理 mc.exe 的配置目录（如果有）
+Type: filesandordirs; Name: "{app}\.mc"
 
 ; 如果还有其他数据目录，请在此添加
 
 [Code]
+// ✅ 新增：检查是否需要安装 VC++ 运行库
+function VCRedistNeedsInstall: Boolean;
+var
+  Version: String;
+begin
+  Result := True;
+
+  // 方法1: 检查注册表
+  if RegQueryStringValue(HKLM, 'SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64', 'Version', Version) then
+  begin
+    Log('检测到 VC++ 运行库版本: ' + Version);
+    if (CompareStr(Version, 'v14.29') >= 0) then
+    begin
+      Result := False;
+      Log('VC++ 运行库版本足够新，无需安装');
+    end;
+  end;
+
+  // 方法2: 检查 DLL 文件是否存在
+  if Result then
+  begin
+    if FileExists(ExpandConstant('{sys}\msvcp140.dll')) and
+       FileExists(ExpandConstant('{sys}\vcruntime140.dll')) and
+       FileExists(ExpandConstant('{sys}\vcruntime140_1.dll')) then
+    begin
+      Result := False;
+      Log('检测到 VC++ 运行库 DLL 文件已存在');
+    end;
+  end;
+
+  if Result then
+    Log('需要安装 VC++ 运行库')
+  else
+    Log('VC++ 运行库已安装，跳过');
+end;
+
 // 自定义安装目录选择页面（可选）
 procedure CurPageChanged(CurPageID: Integer);
 begin
@@ -153,8 +208,8 @@ begin
       DelTree(AppDir, True, True, True);
     end;
 
-    // 清理 Roaming\joykee\亲选相册 目录
-    RoamingDataDir := ExpandConstant('{userappdata}\joykee\亲选相册');
+    // 清理 Roaming\joykee\AI相册管家 目录
+    RoamingDataDir := ExpandConstant('{userappdata}\joykee\AI相册管家');
     if DirExists(RoamingDataDir) then
     begin
       DelTree(RoamingDataDir, True, True, True);
@@ -167,8 +222,8 @@ begin
       RemoveDir(RoamingJoykeeDir);
     end;
 
-    // 清理 Local\joykee\亲选相册 目录
-    LocalDataDir := ExpandConstant('{localappdata}\joykee\亲选相册');
+    // 清理 Local\joykee\AI相册管家 目录
+    LocalDataDir := ExpandConstant('{localappdata}\joykee\AI相册管家');
     if DirExists(LocalDataDir) then
     begin
       DelTree(LocalDataDir, True, True, True);

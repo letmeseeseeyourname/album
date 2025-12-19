@@ -1,16 +1,19 @@
 // pages/upload_records_page.dart
-// 修改版：统一上传和下载记录的显示样式（按批次/任务聚合显示）
+// ✅ 修改版：
+// 1. 监听 UploadCoordinator 实时更新上传状态
+// 2. 取消上传时调用 delSyncTask API 并同步取消实际上传任务
 
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:window_manager/window_manager.dart';
 import '../album/database/upload_task_db_helper.dart';
 import '../album/database/download_task_db_helper.dart';
+import '../album/provider/album_provider.dart';
 import '../user/my_instance.dart';
+// ✅ 新增：导入 UploadCoordinator
+import 'local_album/controllers/upload_coordinator.dart';
 
 /// 传输记录页面
-/// 显示同步和下载任务的历史记录
-/// ✅ 修改：下载记录改为按批次聚合显示，与上传记录样式一致
 class UploadRecordsPage extends StatefulWidget {
   const UploadRecordsPage({super.key});
 
@@ -23,26 +26,48 @@ class _UploadRecordsPageState extends State<UploadRecordsPage>
   late TabController _tabController;
   final UploadFileTaskManager _taskManager = UploadFileTaskManager.instance;
   final DownloadTaskDbHelper _downloadDbHelper = DownloadTaskDbHelper.instance;
+  final AlbumProvider _albumProvider = AlbumProvider();  // ✅ 新增
 
   List<UploadTaskRecord> _uploadTasks = [];
   List<DownloadTaskRecord> _downloadTasks = [];
-
-  // ✅ 新增：下载任务聚合列表
   List<DownloadBatchRecord> _downloadBatches = [];
 
   bool _isLoading = true;
+  bool _isCancelling = false;  // ✅ 新增：取消中状态
+
+  // ✅ 新增：UploadCoordinator 引用
+  late final UploadCoordinator _uploadCoordinator;
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
+
+    // ✅ 监听 UploadCoordinator 状态变化
+    _uploadCoordinator = UploadCoordinator.instance;
+    _uploadCoordinator.addListener(_onUploadStateChanged);
+
     _loadAllTasks();
   }
 
   @override
   void dispose() {
     _tabController.dispose();
+    // ✅ 移除监听
+    _uploadCoordinator.removeListener(_onUploadStateChanged);
     super.dispose();
+  }
+
+  /// ✅ 新增：上传状态变化回调
+  void _onUploadStateChanged() {
+    if (mounted) {
+      // 当上传状态变化时，重新加载任务列表
+      _loadUploadTasks().then((_) {
+        if (mounted) {
+          setState(() {});
+        }
+      });
+    }
   }
 
   /// 加载所有任务（上传和下载）
@@ -81,7 +106,6 @@ class _UploadRecordsPageState extends State<UploadRecordsPage>
   }
 
   /// 加载下载任务列表
-  /// ✅ 修改：加载后按时间聚合为批次
   Future<void> _loadDownloadTasks() async {
     try {
       final userId = MyInstance().user?.user?.id ?? 0;
@@ -91,11 +115,9 @@ class _UploadRecordsPageState extends State<UploadRecordsPage>
         final tasks = await _downloadDbHelper.listTasks(
           userId: userId,
           groupId: groupId,
-          limit: 500, // 增加限制以便聚合
+          limit: 500,
         );
         _downloadTasks = tasks;
-
-        // ✅ 聚合为批次
         _downloadBatches = _aggregateDownloadTasks(tasks);
       }
     } catch (e) {
@@ -103,12 +125,10 @@ class _UploadRecordsPageState extends State<UploadRecordsPage>
     }
   }
 
-  /// ✅ 新增：将下载任务按时间聚合为批次
-  /// 规则：同一分钟内创建的任务视为同一批次
+  /// 将下载任务按时间聚合为批次
   List<DownloadBatchRecord> _aggregateDownloadTasks(List<DownloadTaskRecord> tasks) {
     if (tasks.isEmpty) return [];
 
-    // 按创建时间排序（降序）
     final sortedTasks = List<DownloadTaskRecord>.from(tasks)
       ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
 
@@ -117,15 +137,12 @@ class _UploadRecordsPageState extends State<UploadRecordsPage>
     int? currentBatchMinute;
 
     for (final task in sortedTasks) {
-      // 获取任务创建时间的分钟数（用于聚合）
-      final taskMinute = task.createdAt ~/ 60000; // 转换为分钟
+      final taskMinute = task.createdAt ~/ 60000;
 
       if (currentBatchMinute == null || taskMinute == currentBatchMinute) {
-        // 同一分钟，加入当前批次
         currentBatch.add(task);
         currentBatchMinute = taskMinute;
       } else {
-        // 不同分钟，保存当前批次，开始新批次
         if (currentBatch.isNotEmpty) {
           batches.add(DownloadBatchRecord.fromTasks(currentBatch));
         }
@@ -134,7 +151,6 @@ class _UploadRecordsPageState extends State<UploadRecordsPage>
       }
     }
 
-    // 保存最后一个批次
     if (currentBatch.isNotEmpty) {
       batches.add(DownloadBatchRecord.fromTasks(currentBatch));
     }
@@ -142,9 +158,31 @@ class _UploadRecordsPageState extends State<UploadRecordsPage>
     return batches;
   }
 
-  /// 取消同步任务
+  /// ✅ 修改：取消上传任务
+  /// 1. 调用 delSyncTask API
+  /// 2. 取消实际上传任务
+  /// 3. 更新数据库状态
   Future<void> _cancelUploadTask(UploadTaskRecord task) async {
+    if (_isCancelling) return;
+
+    setState(() {
+      _isCancelling = true;
+    });
+
     try {
+      // 1. ✅ 先取消 UploadCoordinator 中的实际上传任务
+      //    这会调用 McService.cancelTask() 终止上传进程
+      final cancelResult = await _uploadCoordinator.cancelTaskById(task.taskId);
+      debugPrint('[UploadRecords] Cancel result: ${cancelResult.message}');
+
+      // 2. 调用服务端 API 取消同步任务
+      final response = await _albumProvider.revokeSyncTask(task.taskId);
+      if (!response.isSuccess) {
+        debugPrint('[UploadRecords] Server cancel failed: ${response.message}');
+        // 服务端取消失败不影响本地取消
+      }
+
+      // 3. 更新数据库状态
       await _taskManager.updateStatusForKey(
         taskId: task.taskId,
         userId: task.userId,
@@ -152,17 +190,23 @@ class _UploadRecordsPageState extends State<UploadRecordsPage>
         status: UploadTaskStatus.canceled,
       );
 
+      // 4. 重新加载任务列表
       await _loadUploadTasks();
 
       if (mounted) {
-        setState(() {});
+        setState(() {
+          _isCancelling = false;
+        });
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('已取消上传')),
         );
       }
     } catch (e) {
-      print('取消任务失败: $e');
+      debugPrint('[UploadRecords] Cancel error: $e');
       if (mounted) {
+        setState(() {
+          _isCancelling = false;
+        });
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('取消失败: $e')),
         );
@@ -173,6 +217,11 @@ class _UploadRecordsPageState extends State<UploadRecordsPage>
   /// 删除上传任务记录
   Future<void> _deleteUploadTask(UploadTaskRecord task) async {
     try {
+      // 如果任务正在上传中，先取消
+      if (task.status == UploadTaskStatus.uploading) {
+        await _cancelUploadTask(task);
+      }
+
       await _taskManager.deleteTaskForKey(
         taskId: task.taskId,
         userId: task.userId,
@@ -197,13 +246,12 @@ class _UploadRecordsPageState extends State<UploadRecordsPage>
     }
   }
 
-  /// ✅ 新增：删除下载批次记录
+  /// 删除下载批次记录
   Future<void> _deleteDownloadBatch(DownloadBatchRecord batch) async {
     try {
       final userId = MyInstance().user?.user?.id ?? 0;
       final groupId = MyInstance().group?.groupId ?? 0;
 
-      // 删除批次中的所有任务
       for (final task in batch.tasks) {
         await _downloadDbHelper.deleteTask(
           taskId: task.taskId,
@@ -333,7 +381,7 @@ class _UploadRecordsPageState extends State<UploadRecordsPage>
             child: TabBar(
               controller: _tabController,
               isScrollable: true,
-              tabAlignment: TabAlignment.start,  // 🆕 添加这行
+              tabAlignment: TabAlignment.start,
               padding: EdgeInsets.zero,
               labelColor: Colors.black,
               unselectedLabelColor: Colors.grey,
@@ -358,6 +406,12 @@ class _UploadRecordsPageState extends State<UploadRecordsPage>
             ),
           ),
           const Spacer(),
+          // ✅ 新增：刷新按钮
+          IconButton(
+            icon: const Icon(Icons.refresh, size: 20),
+            onPressed: _loadAllTasks,
+            tooltip: '刷新',
+          ),
         ],
       ),
     );
@@ -395,7 +449,7 @@ class _UploadRecordsPageState extends State<UploadRecordsPage>
     );
   }
 
-  /// ✅ 修改：构建下载Tab（按批次显示）
+  /// 构建下载Tab
   Widget _buildDownloadTab() {
     if (_isLoading) {
       return const Center(child: CircularProgressIndicator());
@@ -427,7 +481,7 @@ class _UploadRecordsPageState extends State<UploadRecordsPage>
     );
   }
 
-  /// ✅ 统一的表头构建
+  /// 统一的表头构建
   Widget _buildTableHeader({required bool isUpload}) {
     return Container(
       height: 48,
@@ -500,7 +554,7 @@ class _UploadRecordsPageState extends State<UploadRecordsPage>
           // 状态
           Expanded(
             flex: 2,
-            child: _buildUploadStatusWidget(task.status),
+            child: _buildUploadStatusWidget(task),
           ),
           // 操作
           Expanded(
@@ -512,7 +566,7 @@ class _UploadRecordsPageState extends State<UploadRecordsPage>
     );
   }
 
-  /// ✅ 新增：构建下载批次项（与上传样式一致）
+  /// 构建下载批次项
   Widget _buildDownloadBatchItem(DownloadBatchRecord batch, int index) {
     final dateTime = DateTime.fromMillisecondsSinceEpoch(batch.createdAt);
     final formattedDate = DateFormat('yyyy.M.d HH:mm:ss').format(dateTime);
@@ -559,12 +613,56 @@ class _UploadRecordsPageState extends State<UploadRecordsPage>
     );
   }
 
-  /// 构建上传状态显示
-  Widget _buildUploadStatusWidget(UploadTaskStatus status) {
+  /// ✅ 修改：构建上传状态显示（支持实时进度）
+  Widget _buildUploadStatusWidget(UploadTaskRecord task) {
+    // 检查是否是当前正在上传的任务
+    if (task.status == UploadTaskStatus.uploading) {
+      final activeTask = _uploadCoordinator.getActiveTaskByDbTaskId(task.taskId);
+      if (activeTask != null && activeTask.progress != null) {
+        final progress = activeTask.progress!;
+        return Row(
+          children: [
+            SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(
+                value: progress.bytesProgress,
+                strokeWidth: 2,
+                valueColor: const AlwaysStoppedAnimation<Color>(Colors.orange),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Text(
+              '${(progress.bytesProgress * 100).toStringAsFixed(0)}%',
+              style: const TextStyle(fontSize: 14, color: Colors.orange),
+            ),
+          ],
+        );
+      }
+      // 没有实时进度，显示默认状态
+      return Row(
+        children: [
+          SizedBox(
+            width: 16,
+            height: 16,
+            child: CircularProgressIndicator(
+              strokeWidth: 2,
+              valueColor: AlwaysStoppedAnimation<Color>(Colors.orange.shade300),
+            ),
+          ),
+          const SizedBox(width: 8),
+          const Text(
+            '正在上传',
+            style: TextStyle(fontSize: 14, color: Colors.orange),
+          ),
+        ],
+      );
+    }
+
     String text;
     Color color;
 
-    switch (status) {
+    switch (task.status) {
       case UploadTaskStatus.pending:
         text = '待上传';
         color = Colors.grey;
@@ -590,7 +688,7 @@ class _UploadRecordsPageState extends State<UploadRecordsPage>
     return Text(text, style: TextStyle(fontSize: 14, color: color));
   }
 
-  /// ✅ 新增：构建下载批次状态显示
+  /// 构建下载批次状态显示
   Widget _buildDownloadBatchStatusWidget(DownloadBatchRecord batch) {
     String text;
     Color color;
@@ -625,16 +723,19 @@ class _UploadRecordsPageState extends State<UploadRecordsPage>
     return Text(text, style: TextStyle(fontSize: 14, color: color));
   }
 
-  /// 构建上传操作按钮
+  /// ✅ 修改：构建上传操作按钮
   Widget _buildUploadActionButtons(UploadTaskRecord task) {
     return Row(
       children: [
         if (task.status == UploadTaskStatus.uploading)
           TextButton(
-            onPressed: () => _cancelUploadTask(task),
-            child: const Text(
-              '取消上传',
-              style: TextStyle(fontSize: 13, color: Colors.grey),
+            onPressed: _isCancelling ? null : () => _cancelUploadTask(task),
+            child: Text(
+              _isCancelling ? '取消中...' : '取消上传',
+              style: TextStyle(
+                fontSize: 13,
+                color: _isCancelling ? Colors.grey.shade400 : Colors.grey,
+              ),
             ),
           ),
         const SizedBox(width: 8),
@@ -649,7 +750,7 @@ class _UploadRecordsPageState extends State<UploadRecordsPage>
     );
   }
 
-  /// ✅ 新增：构建下载批次操作按钮
+  /// 构建下载批次操作按钮
   Widget _buildDownloadBatchActionButtons(DownloadBatchRecord batch) {
     return Row(
       children: [
@@ -688,7 +789,7 @@ class _UploadRecordsPageState extends State<UploadRecordsPage>
     );
   }
 
-  /// ✅ 新增：显示删除下载批次确认对话框
+  /// 显示删除下载批次确认对话框
   void _showDeleteDownloadBatchConfirmDialog(DownloadBatchRecord batch) {
     showDialog(
       context: context,
@@ -734,37 +835,24 @@ class _UploadRecordsPageState extends State<UploadRecordsPage>
       ),
     );
   }
-
-  /// 格式化文件大小
-  String _formatFileSize(int bytes) {
-    if (bytes < 1024) {
-      return '${bytes}B';
-    } else if (bytes < 1024 * 1024) {
-      return '${(bytes / 1024).toStringAsFixed(1)}KB';
-    } else if (bytes < 1024 * 1024 * 1024) {
-      return '${(bytes / (1024 * 1024)).toStringAsFixed(1)}MB';
-    } else {
-      return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(2)}GB';
-    }
-  }
 }
 
 
 // ============================================================
-// ✅ 新增：下载批次状态枚举
+// 下载批次状态枚举
 // ============================================================
 enum DownloadBatchStatus {
-  pending,         // 待下载
-  downloading,     // 下载中
-  completed,       // 已完成
-  partialCompleted,// 部分完成
-  failed,          // 失败
-  canceled,        // 已取消
+  pending,
+  downloading,
+  completed,
+  partialCompleted,
+  failed,
+  canceled,
 }
 
 
 // ============================================================
-// ✅ 新增：下载批次记录模型
+// 下载批次记录模型
 // ============================================================
 class DownloadBatchRecord {
   final List<DownloadTaskRecord> tasks;
@@ -783,7 +871,6 @@ class DownloadBatchRecord {
     required this.failedCount,
   });
 
-  /// 从任务列表创建批次记录
   factory DownloadBatchRecord.fromTasks(List<DownloadTaskRecord> tasks) {
     if (tasks.isEmpty) {
       return DownloadBatchRecord(
@@ -804,7 +891,7 @@ class DownloadBatchRecord {
 
     return DownloadBatchRecord(
       tasks: tasks,
-      createdAt: tasks.first.createdAt, // 使用第一个任务的创建时间
+      createdAt: tasks.first.createdAt,
       fileCount: tasks.length,
       totalSize: totalSize,
       completedCount: completedCount,
@@ -812,7 +899,6 @@ class DownloadBatchRecord {
     );
   }
 
-  /// 计算批次状态
   DownloadBatchStatus get status {
     if (tasks.isEmpty) return DownloadBatchStatus.pending;
 
@@ -839,7 +925,6 @@ class DownloadBatchRecord {
     return DownloadBatchStatus.failed;
   }
 
-  /// 格式化文件大小
   String get formattedSize {
     if (totalSize < 1024) {
       return '${totalSize}B';

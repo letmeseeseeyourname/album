@@ -512,9 +512,9 @@ class McService {
 
       final duration = DateTime.now().difference(startTime);
 
-      print('[McService] exitCode: $exitCode');
-      print('[McService] 完整 stdout: ${stdoutBuffer.toString()}');
-      print('[McService] 完整 stderr: ${stderrBuffer.toString()}');
+      // print('[McService] exitCode: $exitCode');
+      // print('[McService] 完整 stdout: ${stdoutBuffer.toString()}');
+      // print('[McService] 完整 stderr: ${stderrBuffer.toString()}');
 
       if (exitCode == 0) {
         task.status = McTaskStatus.completed;

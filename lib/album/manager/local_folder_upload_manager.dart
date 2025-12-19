@@ -62,6 +62,13 @@ class LocalFolderUploadManager extends ChangeNotifier {
   bool _isUploading = false;
   bool _isCancelled = false;
 
+  /// ✅ 新增：当前数据库任务ID（用于关联 McService 任务）
+  int? _currentDbTaskId;
+  /// ✅ 新增：当前正在执行的 McService 任务ID
+  String? _currentMcTaskId;
+  /// ✅ 新增：获取数据库任务ID
+  int? get currentDbTaskId => _currentDbTaskId;
+
   // 失败文件队列
   final List<FailedFileRecord> _failedQueue = [];
 
@@ -94,6 +101,11 @@ class LocalFolderUploadManager extends ChangeNotifier {
 
   List<FailedFileRecord> get permanentlyFailedFiles =>
       List.unmodifiable(_permanentlyFailedFiles);
+
+  /// ✅ 新增：设置数据库任务ID
+  void setDbTaskId(int taskId) {
+    _currentDbTaskId = taskId;
+  }
 
   /// ✅ 重置字节进度追踪
   void _resetBytesTracking(int totalBytes) {
@@ -133,10 +145,23 @@ class LocalFolderUploadManager extends ChangeNotifier {
     _currentFileTotal = 0;
   }
 
-  /// 取消上传
-  void cancelUpload() {
+  /// ✅ 修改：取消上传（同时终止 McService 进程）
+  Future<void> cancelUpload() async {
     _isCancelled = true;
     LogUtil.log('[UploadManager] Upload cancelled by user');
+
+    // ✅ 终止当前正在执行的 McService 任务
+    if (_currentMcTaskId != null) {
+      final cancelled = await McService.instance.cancelTask(_currentMcTaskId!);
+      LogUtil.log('[UploadManager] McService task cancelled: $cancelled');
+    }
+
+    // ✅ 如果有数据库任务ID，也可以用它来取消（备用方案）
+    if (_currentDbTaskId != null) {
+      final taskIdStr = _currentDbTaskId.toString();
+      // 尝试用数据库任务ID取消（如果之前用这个ID注册的话）
+      await McService.instance.cancelTask(taskIdStr);
+    }
   }
 
   /// 🆕 预热 MinIO 连接（唤醒 P2P 隧道）
@@ -440,6 +465,11 @@ class LocalFolderUploadManager extends ChangeNotifier {
       onComplete?.call(false, "上传失败：$e",[]);
     } finally {
       // 在 finally 块中添加:
+
+      // ✅ 清理任务ID
+      _currentMcTaskId = null;
+      _currentDbTaskId = null;
+
       _activeProgressCallback = null;
       _resetBytesTracking(0);
       _isUploading = false;
@@ -663,6 +693,9 @@ class LocalFolderUploadManager extends ChangeNotifier {
 
     try {
       final response = await provider.createSyncTask(uploadList);
+      final taskId = response.model?.taskId ?? 0;
+      // ✅ 保存数据库任务ID
+      _currentDbTaskId = taskId;
 
       if (!response.isSuccess) {
         LogUtil.log(
@@ -680,7 +713,6 @@ class LocalFolderUploadManager extends ChangeNotifier {
 
       final uploadPath = _removeFirstAndLastSlash(
           response.model?.uploadPath ?? "");
-      final taskId = response.model?.taskId ?? 0;
 
       final chunkFileCount = chunk.length;
       final chunkTotalSize = chunk.fold<int>(
@@ -906,19 +938,25 @@ class LocalFolderUploadManager extends ChangeNotifier {
 
       // 1. 上传原始文件
       LogUtil.log("Uploading original file: ${fileInfo.filePath}");
+
+      // ✅ 使用数据库 taskId 作为 McService 的任务ID
+      final mcTaskId = '${taskId}_original_$md5Hash';
+      _currentMcTaskId = mcTaskId;  // ✅ 保存当前任务ID
+
       // ✅ 使用带进度回调的上传方法
       var result = await McService.instance.uploadFileDefault(
         file.path,
         bucketName,
         objectName:"$uploadPathWithoutBucket/$md5Hash/$fileName",
+        taskId: mcTaskId,
         onOutput: (output) {
-          TransferSpeedService.instance.updateUploadSpeedForTaskFromMcOutput(taskId.toString(),output);
+          // TransferSpeedService.instance.updateUploadSpeedForTaskFromMcOutput(taskId.toString(),output);
           // ✅ 更新字节进度
           _updateBytesProgressFromMcOutput(output);
         },
       );
       
-      if (!result.success) {
+      if (!result.success||_isCancelled) {
         LogUtil.log("Failed to upload original file");
         return false;
       }
@@ -934,21 +972,23 @@ class LocalFolderUploadManager extends ChangeNotifier {
         return false;
       }
 
+
       // ✅ 使用带进度回调的上传方法
       result = await McService.instance.uploadFileDefault(
         thumbnailFile.path,
         bucketName,
         objectName:"$uploadPathWithoutBucket/$md5Hash/thumbnail_$imageFileName",
+        taskId: mcTaskId,  // ✅ 传入任务ID
         onOutput: (output) {
-          TransferSpeedService.instance.updateUploadSpeedForTaskFromMcOutput(taskId.toString(),output);
+          // TransferSpeedService.instance.updateUploadSpeedForTaskFromMcOutput(taskId.toString(),output);
         },
       );
 
       await _cleanupFile(thumbnailFile);
 
-      if (!result.success) {
+      if (!result.success|| _isCancelled) {
         LogUtil.log("Failed to upload thumbnail");
-        _progressTracker.removeFileProgress(thumbnailFileKey);
+      //  _progressTracker.removeFileProgress(thumbnailFileKey);
         return false;
       }
       // ✅ 标记缩略图上传完成
@@ -961,23 +1001,23 @@ class LocalFolderUploadManager extends ChangeNotifier {
         LogUtil.log("Failed to create medium file");
         return false;
       }
-      final mediumSize = await mediumFile.length();
 
       // ✅ 使用带进度回调的上传方法
       result = await McService.instance.uploadFileDefault(
         mediumFile.path,
         bucketName,
         objectName:"$uploadPathWithoutBucket/$md5Hash/show_$imageFileName",
+        taskId: mcTaskId,  // ✅ 传入任务ID
         onOutput: (output) {
-          TransferSpeedService.instance.updateUploadSpeedForTaskFromMcOutput(taskId.toString(),output);
+          // TransferSpeedService.instance.updateUploadSpeedForTaskFromMcOutput(taskId.toString(),output);
         },
       );
 
       await _cleanupFile(mediumFile);
 
-      if (!result.success) {
+      if (!result.success|| _isCancelled) {
         LogUtil.log("Failed to upload medium file");
-        _progressTracker.removeFileProgress(mediumFileKey);
+        // _progressTracker.removeFileProgress(mediumFileKey);
         return false;
       }
 
