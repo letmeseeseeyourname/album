@@ -248,13 +248,23 @@ class UploadCoordinator extends ChangeNotifier {
 
   /// 取消所有上传任务
   Future<void> cancelAllUploads() async {
-    for (final task in _activeTasks) {
-      await task.uploadManager.cancelUpload();
+    debugPrint('[UploadCoordinator] 取消所有上传任务，共 ${_activeTasks.length} 个');
+
+    // 复制列表，避免遍历时修改
+    final tasksToCancel = List<UploadTaskContext>.from(_activeTasks);
+
+    for (final task in tasksToCancel) {
+      try {
+        await task.uploadManager.cancelUpload();
+      } catch (e) {
+        debugPrint('[UploadCoordinator] 取消任务失败: $e');
+      }
     }
 
-    // ✅ 清空所有任务和统计
+    // 清空所有任务和统计
     _activeTasks.clear();
     _resetCompletedStats();
+    _allUploadedMd5List.clear();
 
     notifyListeners();
   }
@@ -403,7 +413,20 @@ class UploadCoordinator extends ChangeNotifier {
 
   @visibleForTesting
   static void reset() {
-    _instance?.dispose();
+    if (_instance != null) {
+      // 先取消所有任务
+      _instance!.cancelAllUploads();
+
+      // 清理内部状态
+      _instance!._activeTasks.clear();
+      _instance!._resetCompletedStats();
+      _instance!._allUploadedMd5List.clear();
+
+      // 移除所有监听器
+      _instance!.dispose();
+    }
+
+    // 重置单例
     _instance = null;
     _fileService = null;
   }

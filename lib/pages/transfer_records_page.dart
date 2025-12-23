@@ -1,4 +1,4 @@
-// pages/upload_records_page.dart
+// pages/transfer_records_page.dart
 // ✅ 修改版：
 // 1. 监听 UploadCoordinator 实时更新上传状态
 // 2. 取消上传时调用 delSyncTask API 并同步取消实际上传任务
@@ -10,18 +10,17 @@ import '../album/database/upload_task_db_helper.dart';
 import '../album/database/download_task_db_helper.dart';
 import '../album/provider/album_provider.dart';
 import '../user/my_instance.dart';
-// ✅ 新增：导入 UploadCoordinator
 import 'local_album/controllers/upload_coordinator.dart';
 
 /// 传输记录页面
-class UploadRecordsPage extends StatefulWidget {
-  const UploadRecordsPage({super.key});
+class TransferRecordsPage extends StatefulWidget {
+  const TransferRecordsPage({super.key});
 
   @override
-  State<UploadRecordsPage> createState() => _UploadRecordsPageState();
+  State<TransferRecordsPage> createState() => _TransferRecordsPageState();
 }
 
-class _UploadRecordsPageState extends State<UploadRecordsPage>
+class _TransferRecordsPageState extends State<TransferRecordsPage>
     with SingleTickerProviderStateMixin {
   late TabController _tabController;
   final UploadFileTaskManager _taskManager = UploadFileTaskManager.instance;

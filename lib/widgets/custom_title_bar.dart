@@ -11,7 +11,7 @@ import '../manager/upgrade_manager.dart'; // 🆕 新增
 import '../network/constant_sign.dart';
 import '../network/utils/dev_environment_helper.dart';
 import '../pages/settings_page.dart';
-import '../pages/upload_records_page.dart';
+import '../pages/transfer_records_page.dart';
 import '../pages/user_info_page.dart';
 import '../services/transfer_speed_service.dart';
 import '../user/provider/mine_provider.dart';
@@ -195,7 +195,7 @@ class _CustomTitleBarState extends State<CustomTitleBar> {
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (context) => const UploadRecordsPage(),
+        builder: (context) => const TransferRecordsPage(),
       ),
     );
   }

@@ -7,7 +7,9 @@ import 'package:path_provider/path_provider.dart';
 import 'dart:io';
 import '../album/database/database_helper.dart';
 import '../album/database/upload_task_db_helper.dart';
+import '../album/provider/album_provider.dart';
 import '../services/folder_manager.dart';
+import 'local_album/controllers/upload_coordinator.dart';
 import 'login_page.dart';
 
 class UserInfoPage extends StatefulWidget {
@@ -68,21 +70,19 @@ class _UserInfoPageState extends State<UserInfoPage> {
     );
   }
 
-  // 获取用户信息
+  // ✅ 修改：获取用户信息（按设计图调整字段）
   Map<String, String> _getUserInfo() {
     final user = MyInstance().user?.user;
     final group = MyInstance().group;
     final deviceInfo = MyInstance().p6deviceInfoModel;
 
     return {
-      '用户名': user?.nickName ?? '未知',
+      '昵称': user?.nickName ?? '未知',
       '手机号': user?.mobile ?? '未知',
-      '用户ID': user?.id?.toString() ?? '未知',
+      '当前家庭': group?.groupName ?? '未选择',
       '当前设备': MyInstance().deviceCode.isNotEmpty
           ? MyInstance().deviceCode
           : '未绑定',
-      '当前群组': group?.groupName ?? '未选择',
-      '群组ID': group?.groupId?.toString() ?? '未知',
       '存储空间': deviceInfo != null
           ? '${_formatBytes(deviceInfo.ttlUsed?.toInt() ?? 0)} / ${_formatBytes(deviceInfo.ttlAll?.toInt() ?? 0)}'
           : '未知',
@@ -102,30 +102,126 @@ class _UserInfoPageState extends State<UserInfoPage> {
     }
   }
 
-  // 显示退出登录确认对话框
+  // ✅ 修改：显示退出登录确认对话框（按设计图样式）
   void _showLogoutConfirmDialog() {
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('确认退出'),
-        content: const Text('是否确认退出登录？\n\n退出后将清除所有本地数据，包括：\n• 用户信息\n• 文件记录\n• 上传/下载任务\n• 文件夹列表\n• 缓存数据\n• P2P连接'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('取消'),
+      barrierDismissible: false,
+      builder: (context) => Dialog(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Container(
+          width: 380,
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // 标题
+              const Center(
+                child: Text(
+                  '退出登录',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 20),
+
+              // 提示内容
+              const Text(
+                '退出后，将清除所有本地数据，包括：',
+                style: TextStyle(fontSize: 14, color: Colors.black87),
+              ),
+              const SizedBox(height: 12),
+
+              // 列表项
+              _buildListItem('1. 用户信息'),
+              _buildListItem('2. 文件记录'),
+              _buildListItem('3. 上传/下载任务'),
+              _buildListItem('4. 文件夹列表'),
+              _buildListItem('5. 缓存数据'),
+
+              const SizedBox(height: 20),
+
+              // 确认文字
+              const Text(
+                '确定要退出登录？',
+                style: TextStyle(fontSize: 14, color: Colors.black87),
+              ),
+
+              const SizedBox(height: 24),
+
+              // 按钮行
+              Row(
+                children: [
+                  // 取消按钮
+                  Expanded(
+                    child: TextButton(
+                      onPressed: () => Navigator.pop(context),
+                      style: TextButton.styleFrom(
+                        backgroundColor: Colors.grey.shade200,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                      child: const Text(
+                        '取消',
+                        style: TextStyle(
+                          fontSize: 15,
+                          color: Colors.black87,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 16),
+                  // 确定按钮
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: () {
+                        Navigator.pop(context);
+                        _handleLogout();
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF2C2C2C),
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                      child: const Text(
+                        '确定',
+                        style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
           ),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.pop(context);
-              _handleLogout();
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.red,
-              foregroundColor: Colors.white,
-            ),
-            child: const Text('确认退出'),
-          ),
-        ],
+        ),
+      ),
+    );
+  }
+
+  // ✅ 构建列表项
+  Widget _buildListItem(String text) {
+    return Padding(
+      padding: const EdgeInsets.only(left: 8, bottom: 6),
+      child: Text(
+        text,
+        style: TextStyle(
+          fontSize: 14,
+          color: Colors.grey.shade700,
+        ),
       ),
     );
   }
@@ -137,25 +233,31 @@ class _UserInfoPageState extends State<UserInfoPage> {
     });
 
     try {
-      // 🆕 0. 断开P2P连接（优先执行）
+      // 0. 取消所有正在进行的上传任务（优先执行）
+      await _cancelAllUploads();
+
+      // 1. 断开P2P连接（优先执行）
       await _disconnectP2pConnection();
 
-      // 1. 调用登出接口
+      // 2. 调用登出接口
       await LoginService.logout();
 
-      // 2. 清除数据库数据
+      // 3. 清除数据库数据
       await _clearDatabaseData();
 
-      // 3. 清除文件夹列表
+      // 4. 清除文件夹列表
       await _clearFolderData();
 
-      // 4. 清除网络缓存
+      // 5. 清除网络缓存
       await _clearNetworkCache();
 
-      // 5. 清除 MyInstance 中的数据
+      // 6. 清除 MyInstance 中的数据
       await _clearMyInstanceData();
 
-      // 6. 显示成功提示
+      // 7. 清除上传任务记录
+      await _clearUploadTasks();
+
+      // 8. 显示成功提示
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -165,7 +267,7 @@ class _UserInfoPageState extends State<UserInfoPage> {
         );
       }
 
-      // 7. 延迟后跳转到登录页
+      // 9. 延迟后跳转到登录页
       await Future.delayed(const Duration(milliseconds: 500));
 
       if (mounted) {
@@ -194,7 +296,7 @@ class _UserInfoPageState extends State<UserInfoPage> {
     }
   }
 
-  // 🆕 断开P2P连接
+  // 断开P2P连接
   Future<void> _disconnectP2pConnection() async {
     try {
       debugPrint('🔌 开始断开P2P连接...');
@@ -206,7 +308,6 @@ class _UserInfoPageState extends State<UserInfoPage> {
       }
     } catch (e) {
       debugPrint('❌ 断开P2P连接异常: $e');
-      // 不抛出异常，继续执行后续清理操作
     }
   }
 
@@ -215,10 +316,7 @@ class _UserInfoPageState extends State<UserInfoPage> {
     try {
       final dbHelper = DatabaseHelper.instance;
       final db = await dbHelper.database;
-
-      // 清空 files 表
       await db.delete('files');
-
       debugPrint('✅ 数据库文件记录已清除');
     } catch (e) {
       debugPrint('❌ 清除数据库失败: $e');
@@ -229,13 +327,8 @@ class _UserInfoPageState extends State<UserInfoPage> {
   Future<void> _clearFolderData() async {
     try {
       final folderManager = FolderManager();
-
-      // 清空本地文件夹列表
       await folderManager.clearLocalFolders();
-
-      // 清空云端文件夹列表
       await folderManager.clearCloudFolders();
-
       debugPrint('✅ 文件夹列表已清除');
     } catch (e) {
       debugPrint('❌ 清除文件夹列表失败: $e');
@@ -245,12 +338,9 @@ class _UserInfoPageState extends State<UserInfoPage> {
   // 清除网络缓存
   Future<void> _clearNetworkCache() async {
     try {
-      // 获取缓存目录
       final dir = await getApplicationDocumentsDirectory();
       final cacheDir = Directory('${dir.path}/diocache');
-
       if (await cacheDir.exists()) {
-        // 删除缓存目录
         await cacheDir.delete(recursive: true);
         debugPrint('✅ 网络缓存已清除');
       }
@@ -259,28 +349,81 @@ class _UserInfoPageState extends State<UserInfoPage> {
     }
   }
 
-  // 清除上传任务数据
-  Future<void> _clearUploadTasks() async {
+  // 取消所有正在进行的上传任务
+  Future<void> _cancelAllUploads() async {
     try {
-      final taskManager = UploadFileTaskManager.instance;
+      debugPrint('⏹️ 开始取消所有上传任务...');
+
       final userId = MyInstance().user?.user?.id ?? 0;
       final groupId = MyInstance().group?.groupId ?? 0;
+      final taskManager = UploadFileTaskManager.instance;
+      final albumProvider = AlbumProvider();
 
-      if (userId > 0 && groupId > 0) {
-        await taskManager.deleteByUserGroup(userId, groupId);
-        debugPrint('✅ 上传任务已清除');
+      try {
+        final coordinator = UploadCoordinator.instance;
+
+        if (coordinator.isUploading) {
+          debugPrint('📤 发现 ${coordinator.activeTaskCount} 个正在进行的上传任务');
+
+          final activeTaskIds = coordinator.activeDbTaskIds;
+          await coordinator.cancelAllUploads();
+          debugPrint('✅ 内存中的上传任务已取消');
+
+          for (final taskId in activeTaskIds) {
+            try {
+              debugPrint('📡 调用 revokeSyncTask: taskId=$taskId');
+              final response = await albumProvider.revokeSyncTask(taskId);
+              debugPrint('📡 Server revoke result: ${response.message}');
+            } catch (e) {
+              debugPrint('⚠️ revokeSyncTask 失败 (taskId=$taskId): $e');
+            }
+
+            if (userId > 0 && groupId > 0) {
+              try {
+                await taskManager.updateStatusForKey(
+                  taskId: taskId,
+                  userId: userId,
+                  groupId: groupId,
+                  status: UploadTaskStatus.canceled,
+                );
+                debugPrint('✅ 数据库状态已更新: taskId=$taskId -> canceled');
+              } catch (e) {
+                debugPrint('⚠️ 更新数据库状态失败 (taskId=$taskId): $e');
+              }
+            }
+          }
+
+          debugPrint('✅ 所有上传任务已取消并更新状态');
+        } else {
+          debugPrint('ℹ️ 没有正在进行的上传任务');
+        }
+      } catch (e) {
+        debugPrint('ℹ️ UploadCoordinator 未初始化，跳过取消上传: $e');
       }
     } catch (e) {
-      debugPrint('❌ 清除上传任务失败: $e');
+      debugPrint('❌ 取消上传任务失败: $e');
+    }
+  }
+
+  // 只重置内存状态，不删除数据库记录
+  Future<void> _clearUploadTasks() async {
+    try {
+      try {
+        UploadCoordinator.reset();
+        debugPrint('✅ UploadCoordinator 已重置');
+      } catch (e) {
+        debugPrint('ℹ️ UploadCoordinator 重置跳过: $e');
+      }
+      debugPrint('✅ 上传任务状态已清理（保留数据库记录）');
+    } catch (e) {
+      debugPrint('❌ 清理上传任务状态失败: $e');
     }
   }
 
   // 清除 MyInstance 数据
   Future<void> _clearMyInstanceData() async {
     try {
-      // 执行 MyNetworkProvider 的 doLogout
       await MyInstance().mineProvider.doLogout();
-
       debugPrint('✅ 用户数据已清除');
     } catch (e) {
       debugPrint('❌ 清除用户数据失败: $e');
@@ -291,123 +434,143 @@ class _UserInfoPageState extends State<UserInfoPage> {
   Widget build(BuildContext context) {
     final userInfo = _getUserInfo();
 
-    return Dialog(
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
-      ),
-      child: Container(
-        width: 500,
-        constraints: const BoxConstraints(maxHeight: 700),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            // 标题栏
-            Container(
-              padding: const EdgeInsets.all(20),
-              decoration: BoxDecoration(
-                color: Colors.orange.shade50,
-                borderRadius: const BorderRadius.only(
-                  topLeft: Radius.circular(16),
-                  topRight: Radius.circular(16),
-                ),
-              ),
-              child: Row(
-                children: [
-                  const Text(
-                    '个人信息',
-                    style: TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const Spacer(),
-                  IconButton(
-                    icon: const Icon(Icons.close),
-                    onPressed: () => Navigator.pop(context),
-                  ),
-                ],
-              ),
-            ),
-
-            // 内容区域
-            Flexible(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.all(24),
-                child: Column(
+    // ✅ 使用 PopScope 阻止 loading 时关闭弹窗
+    return PopScope(
+      canPop: !_isLoggingOut,  // loading 时不允许关闭
+      child: Dialog(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Container(
+          width: 380,
+          constraints: const BoxConstraints(maxHeight: 600),
+          decoration: const BoxDecoration(
+            color: Colors.white,  // ✅ 纯白色背景
+            borderRadius: BorderRadius.all(Radius.circular(16)),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // 标题栏
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+                child: Row(
                   children: [
-                    // 用户头像
-                    _buildAvatar(),
-                    const SizedBox(height: 24),
-
-                    // 用户信息列表
-                    ...userInfo.entries.map((entry) => Padding(
-                      padding: const EdgeInsets.only(bottom: 16),
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          SizedBox(
-                            width: 100,
-                            child: Text(
-                              entry.key,
-                              style: TextStyle(
-                                fontSize: 14,
-                                color: Colors.grey.shade600,
-                                fontWeight: FontWeight.w500,
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 16),
-                          Expanded(
-                            child: Text(
-                              entry.value,
-                              style: const TextStyle(
-                                fontSize: 14,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    )),
-
-                    const SizedBox(height: 24),
-
-                    // 退出登录按钮
-                    SizedBox(
-                      width: double.infinity,
-                      child: ElevatedButton(
-                        onPressed: _isLoggingOut ? null : _showLogoutConfirmDialog,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.red,
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(vertical: 16),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                        ),
-                        child: _isLoggingOut
-                            ? const SizedBox(
-                          width: 20,
-                          height: 20,
-                          child: CircularProgressIndicator(
-                            color: Colors.white,
-                            strokeWidth: 2,
-                          ),
-                        )
-                            : const Text(
-                          '退出登录',
-                          style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
+                    const Text(
+                      '个人信息',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
                       ),
                     ),
+                    const Spacer(),
+                    // loading时隐藏关闭按钮
+                    if (!_isLoggingOut)
+                      IconButton(
+                        icon: const Icon(Icons.close, size: 22),
+                        onPressed: () => Navigator.pop(context),
+                        splashRadius: 20,
+                      )
+                    else
+                      const SizedBox(width: 48),
                   ],
                 ),
               ),
-            ),
-          ],
+
+              // 内容区域
+              Flexible(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.fromLTRB(24, 20, 24, 24),
+                  child: Column(
+                    children: [
+                      // 用户头像
+                      _buildAvatar(),
+                      const SizedBox(height: 28),
+
+                      // 用户信息列表
+                      ...userInfo.entries.map((entry) => Padding(
+                        padding: const EdgeInsets.only(bottom: 18),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            SizedBox(
+                              width: 80,
+                              child: Text(
+                                entry.key,
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  color: Colors.grey.shade500,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 24),
+                            Expanded(
+                              child: Text(
+                                entry.value,
+                                style: const TextStyle(
+                                  fontSize: 14,
+                                  color: Colors.black87,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      )),
+
+                      const SizedBox(height: 16),
+
+                      // ✅ 退出登录按钮（使用 #F5F5F5）
+                      SizedBox(
+                        width: double.infinity,
+                        height: 45,  // ✅ 直接设置高度
+                        child: TextButton(
+                          onPressed: _isLoggingOut ? null : _showLogoutConfirmDialog,
+                          style: TextButton.styleFrom(
+                            backgroundColor: const Color(0xFFF5F5F5),  // ✅ #F5F5F5
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                          ),
+                          child: _isLoggingOut
+                              ? Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(
+                                  color: Colors.red,
+                                  strokeWidth: 2,
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              Text(
+                                '正在退出...',
+                                style: TextStyle(
+                                  fontSize: 15,
+                                  color: Colors.red.shade400,
+                                ),
+                              ),
+                            ],
+                          )
+                              : const Text(
+                            '退出登录',
+                            style: TextStyle(
+                              fontSize: 15,
+                              color: Colors.red,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
