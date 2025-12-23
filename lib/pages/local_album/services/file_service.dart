@@ -13,15 +13,21 @@ class FileService {
   final DatabaseHelper _dbHelper = DatabaseHelper.instance;
   final SyncStatusService _syncService = SyncStatusService.instance;
   /// 支持的图片扩展名
-  static const Set<String> _imageExtensions = {
+  static const Set<String> imageExtensions = {
     'bmp', 'gif', 'jpg', 'jpeg', 'png', 'webp', 'wbmp', 'heic'
   };
 
   /// 支持的视频扩展名
-  static const Set<String> _videoExtensions = {
+  static const Set<String> videoExtensions = {
     'mp4', 'mov', 'avi', '3gp', 'mkv', '3gp2'
+    ,'vob', 'webm', 'm4v', 'mpeg', 'm2ts', 'ts', 'flv', 'f4v','mpg' // Videos
   };
 
+  static const mediaExtensions = [
+    'bmp', 'gif', 'jpg', 'jpeg', 'png', 'webp', 'wbmp', 'heic', // Images
+    'mp4', 'mov', 'avi', '3gp', 'mkv', '3gp2'
+    ,'vob', 'webm', 'm4v', 'mpeg', 'm2ts', 'ts', 'flv', 'f4v','mpg' // Videos
+  ];
   /// 加载指定路径下的文件列表
   ///
   /// ✅ 会查询数据库获取每个文件的上传状态
@@ -193,9 +199,9 @@ class FileService {
 
   /// 根据扩展名判断文件类型
   FileItemType _getFileType(String extension) {
-    if (_imageExtensions.contains(extension)) {
+    if (imageExtensions.contains(extension)) {
       return FileItemType.image;
-    } else if (_videoExtensions.contains(extension)) {
+    } else if (videoExtensions.contains(extension)) {
       return FileItemType.video;
     }
     return FileItemType.folder; // 其他类型暂时返回 folder，实际不会显示
@@ -213,7 +219,7 @@ class FileService {
     await for (final entity in directory.list(recursive: true)) {
       if (entity is File) {
         final extension = p.extension(entity.path).toLowerCase().replaceFirst('.', '');
-        if (_imageExtensions.contains(extension) || _videoExtensions.contains(extension)) {
+        if (imageExtensions.contains(extension) || videoExtensions.contains(extension)) {
           paths.add(entity.path);
         }
       }
@@ -236,10 +242,10 @@ class FileService {
     await for (final entity in directory.list(recursive: true)) {
       if (entity is File) {
         final extension = p.extension(entity.path).toLowerCase().replaceFirst('.', '');
-        if (_imageExtensions.contains(extension)) {
+        if (imageExtensions.contains(extension)) {
           imageCount++;
           totalSize += await entity.length();
-        } else if (_videoExtensions.contains(extension)) {
+        } else if (videoExtensions.contains(extension)) {
           videoCount++;
           totalSize += await entity.length();
         }
@@ -266,7 +272,7 @@ class FileService {
     await for (final entity in directory.list(recursive: true)) {
       if (entity is File) {
         final extension = p.extension(entity.path).toLowerCase().replaceFirst('.', '');
-        if (_imageExtensions.contains(extension) || _videoExtensions.contains(extension)) {
+        if (imageExtensions.contains(extension) || videoExtensions.contains(extension)) {
           paths.add(entity.path);
         }
       }
@@ -289,10 +295,10 @@ class FileService {
       final extension = p.extension(filePath).toLowerCase().replaceFirst('.', '');
       final fileSize = await file.length();
 
-      if (_imageExtensions.contains(extension)) {
+      if (imageExtensions.contains(extension)) {
         imageCount++;
         totalBytes += fileSize;
-      } else if (_videoExtensions.contains(extension)) {
+      } else if (videoExtensions.contains(extension)) {
         videoCount++;
         totalBytes += fileSize;
       }

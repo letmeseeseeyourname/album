@@ -2,6 +2,7 @@
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import '../../../models/file_item.dart';
+import '../services/file_service.dart';
 
 /// 文件夹统计结果
 class FolderStats {
@@ -34,8 +35,6 @@ Future<FolderStats> _computeFolderStats(String folderPath) async {
   int videoCount = 0;
   int totalBytes = 0;
 
-  const imageExtensions = ['bmp', 'gif', 'jpg', 'jpeg', 'png', 'webp', 'wbmp', 'heic'];
-  const videoExtensions = ['mp4', 'mov', 'avi', '3gp', 'mkv', '3gp2'];
 
   try {
     final directory = Directory(folderPath);
@@ -48,10 +47,10 @@ Future<FolderStats> _computeFolderStats(String folderPath) async {
         final ext = entity.path.split('.').last.toLowerCase();
         try {
           final stat = await entity.stat();
-          if (imageExtensions.contains(ext)) {
+          if (FileService.imageExtensions.contains(ext)) {
             imageCount++;
             totalBytes += stat.size;
-          } else if (videoExtensions.contains(ext)) {
+          } else if (FileService.videoExtensions.contains(ext)) {
             videoCount++;
             totalBytes += stat.size;
           }

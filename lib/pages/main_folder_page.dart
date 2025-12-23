@@ -1,4 +1,5 @@
 // pages/main_folder_page.dart (添加 hasUpdate 参数)
+import 'package:ablumwin/pages/local_album/services/file_service.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
@@ -32,18 +33,13 @@ Future<List<String>> _getAllMediaFilesRecursive(String path) async {
   final directory = Directory(path);
   if (!await directory.exists()) return mediaPaths;
 
-  // 预定义媒体文件扩展名
-  const mediaExtensions = [
-    'bmp', 'gif', 'jpg', 'jpeg', 'png', 'webp', 'wbmp', 'heic', // Images
-    'mp4', 'mov', 'avi', '3gp', 'mkv', '3gp2' // Videos
-  ];
 
   try {
     // 递归遍历
     await for (var entity in directory.list(recursive: true)) {
       if (entity is File) {
         final ext = entity.path.split('.').last.toLowerCase();
-        if (mediaExtensions.contains(ext)) {
+        if (FileService.mediaExtensions.contains(ext)) {
           mediaPaths.add(entity.path);
         }
       }
@@ -63,8 +59,7 @@ Future<UploadAnalysisResult> _analyzeFilesForUpload(
   int videoCount = 0;
   int totalBytes = 0;
 
-  const imageExtensions = ['bmp', 'gif', 'jpg', 'jpeg', 'png', 'webp', 'wbmp', 'heic'];
-  const videoExtensions = ['mp4', 'mov', 'avi', '3gp', 'mkv', '3gp2'];
+
 
   for (final path in filePaths) {
     try {
@@ -74,10 +69,10 @@ Future<UploadAnalysisResult> _analyzeFilesForUpload(
       if (stat.type == FileSystemEntityType.file) {
         final ext = path.split('.').last.toLowerCase();
 
-        if (imageExtensions.contains(ext)) {
+        if (FileService.imageExtensions.contains(ext)) {
           imageCount++;
           totalBytes += stat.size;
-        } else if (videoExtensions.contains(ext)) {
+        } else if (FileService.videoExtensions.contains(ext)) {
           videoCount++;
           totalBytes += stat.size;
         }
@@ -203,9 +198,9 @@ class _MainFolderPageState extends State<MainFolderPage> with UploadCoordinatorM
           await for (var entity in directory.list()) {
             if (entity is File) {
               final ext = entity.path.split('.').last.toLowerCase();
-              if (['bmp', 'gif', 'jpg', 'jpeg', 'png', 'webp', 'wbmp', 'heic'].contains(ext)) {
+              if (FileService.imageExtensions.contains(ext)) {
                 imageCount++;
-              } else if (['mp4', 'mov', 'avi', '3gp', 'mkv', '3gp2'].contains(ext)) {
+              } else if (FileService.videoExtensions.contains(ext)) {
                 videoCount++;
               }
             }

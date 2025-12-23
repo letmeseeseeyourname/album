@@ -2,6 +2,8 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import '../../../album/database/download_task_db_helper.dart';
+import '../../../album/manager/download_queue_manager.dart';
 import '../../../eventbus/event_bus.dart';
 import '../../../eventbus/p2p_events.dart';
 import '../../../eventbus/download_events.dart'; // 新增：导入下载事件
@@ -55,7 +57,8 @@ class _AlbumLibraryPageState extends State<AlbumLibraryPage> {
   // 管理器
   final SelectionManager _selectionManager = SelectionManager();
   final AlbumDataManager _dataManager = AlbumDataManager();
-
+  // ✅ 新增：下载管理器引用
+  final DownloadQueueManager _downloadManager = DownloadQueueManager.instance;
   // 滚动控制
   final ScrollController _scrollController = ScrollController();
 
@@ -346,20 +349,34 @@ class _AlbumLibraryPageState extends State<AlbumLibraryPage> {
   }
 
   // 构建底部栏（根据选中状态显示/隐藏，带动画效果）
+  // ✅ 修改：构建底部栏（根据选中状态或下载状态显示/隐藏）
   Widget _buildBottomBar() {
     return AnimatedBuilder(
-      animation: _selectionManager,
+      animation: Listenable.merge([
+        _selectionManager,
+        _downloadManager,  // ✅ 同时监听下载管理器
+      ]),
       builder: (context, child) {
         final hasSelection = _selectionManager.hasSelection;
+
+        // ✅ 检查是否有未完成的下载任务
+        final hasActiveDownloads = _downloadManager.downloadTasks.any(
+              (t) => t.status == DownloadTaskStatus.downloading ||
+              t.status == DownloadTaskStatus.pending ||
+              t.status == DownloadTaskStatus.paused,
+        );
+
+        // ✅ 显示条件：有选中项 OR 有未完成的下载任务
+        final shouldShow = hasSelection || hasActiveDownloads;
 
         return AnimatedSlide(
           duration: const Duration(milliseconds: 200),
           curve: Curves.easeInOut,
-          offset: hasSelection ? Offset.zero : const Offset(0, 1),
+          offset: shouldShow ? Offset.zero : const Offset(0, 1),
           child: AnimatedOpacity(
             duration: const Duration(milliseconds: 200),
-            opacity: hasSelection ? 1.0 : 0.0,
-            child: hasSelection
+            opacity: shouldShow ? 1.0 : 0.0,
+            child: shouldShow
                 ? AlbumBottomBar(
               userId: widget.currentUserId,
               groupId: widget.selectedGroup?.groupId,

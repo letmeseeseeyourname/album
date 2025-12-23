@@ -554,11 +554,11 @@ class _CustomTitleBarState extends State<CustomTitleBar> {
                                 const Spacer(),
                                 // 🆕 环境IP显示
                                 _buildEnvironmentIPIndicator(),
-                                // 传输速率显示
-                                TransferSpeedIndicator(
-                                  speedService:
-                                  TransferSpeedService.instance,
-                                ),
+                                // // 传输速率显示
+                                // TransferSpeedIndicator(
+                                //   speedService:
+                                //   TransferSpeedService.instance,
+                                // ),
 
                                 const SizedBox(width: 16),
 
