@@ -170,17 +170,23 @@ class _UploadRecordsPageState extends State<UploadRecordsPage>
     });
 
     try {
-      // 1. ✅ 先取消 UploadCoordinator 中的实际上传任务
-      //    这会调用 McService.cancelTask() 终止上传进程
+      // 1. 取消 UploadCoordinator 中的实际上传任务
       final cancelResult = await _uploadCoordinator.cancelTaskById(task.taskId);
       debugPrint('[UploadRecords] Cancel result: ${cancelResult.message}');
 
-      // 2. 调用服务端 API 取消同步任务
-      final response = await _albumProvider.revokeSyncTask(task.taskId);
-      if (!response.isSuccess) {
-        debugPrint('[UploadRecords] Server cancel failed: ${response.message}');
-        // 服务端取消失败不影响本地取消
-      }
+      // 2. ✅ 只有当 Coordinator 中找不到任务时，才调用服务端 API
+      //    因为 LocalFolderUploadManager 可能已经调用过了
+
+        // 任务可能已完成或不在内存中，尝试调用服务端取消
+        try {
+          final response = await _albumProvider.revokeSyncTask(task.taskId);
+          debugPrint('[UploadRecords] Server revoke: ${response.message}');
+        } catch (e) {
+          debugPrint('[UploadRecords] revokeSyncTask error (ignored): $e');
+        }
+
+      // ✅ 如果 cancelResult.success == true，说明任务已被成功取消
+      //    LocalFolderUploadManager 会在结束时处理 revokeSyncTask
 
       // 3. 更新数据库状态
       await _taskManager.updateStatusForKey(
@@ -207,9 +213,8 @@ class _UploadRecordsPageState extends State<UploadRecordsPage>
         setState(() {
           _isCancelling = false;
         });
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('取消失败: $e')),
-        );
+        await _loadUploadTasks();
+        setState(() {});
       }
     }
   }

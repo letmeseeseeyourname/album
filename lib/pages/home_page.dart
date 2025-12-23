@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../eventbus/event_bus.dart';
 import '../eventbus/upgrade_events.dart'; // 🆕 新增
 import '../manager/upgrade_manager.dart'; // 🆕 新增
+import '../minio/configs/mc_config.dart';
 import '../minio/mc_service.dart';
 import '../minio/minio_config.dart';
 import '../minio/minio_service.dart';

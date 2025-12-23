@@ -18,6 +18,14 @@ class ModelFactory {
     var dataType = json?.runtimeType.toString();
     // 直接返回原始类型（int、double、String、bool等）
     if (json == null) return null;
+    // ✅ 特殊处理：如果期望 bool 但收到的不是 bool
+    if (T == bool) {
+      if (json is bool) {
+        return json as T;
+      }
+      // 如果 json 是 Map 或其他类型，返回 null（让调用方根据 code 处理）
+      return null;
+    }
 
     if (T == int ||
         T == double ||

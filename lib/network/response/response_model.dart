@@ -32,13 +32,30 @@ class ResponseModel<T> {
     } catch (e) {
         // debugPrint("message 类型转换错误:${e}");
     }
-   
+
+
     T? model;
     try {
-      model = ModelFactory.generateOBJ<T>(
-          json['data'] ?? <String, dynamic>{});
+      final data = json['data'];
+
+      // ✅ 特殊处理 bool 类型
+      if (T == bool) {
+        if (data is bool) {
+          model = data as T;
+        } else {
+          // data 不是 bool（可能是 null、Map 等），根据 code 判断
+          model = (code == 0 || code == 200) as T;
+        }
+      } else {
+        model = ModelFactory.generateOBJ<T>(data ?? <String, dynamic>{});
+      }
     } catch (e) {
-        debugPrint("data 类型转换错误:${e}");
+      debugPrint("data 类型转换错误:$e");
+
+      // ✅ 如果转换失败且 T 是 bool，使用 code 判断
+      if (T == bool) {
+        model = (code == 0 || code == 200) as T;
+      }
     }
     return ResponseModel(code: code, message: message, model: model);
   }

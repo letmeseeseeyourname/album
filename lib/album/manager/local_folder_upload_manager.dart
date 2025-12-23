@@ -322,7 +322,7 @@ class LocalFolderUploadManager extends ChangeNotifier {
       }
 
       if (_isCancelled) {
-        onComplete?.call(false, "上传已取消",[]);
+        onComplete?.call(false, "",[]);//上传已取消
         return;
       }
 
@@ -449,6 +449,12 @@ class LocalFolderUploadManager extends ChangeNotifier {
         uploadedFiles = retryResult['uploaded'] as int;
         failedFiles = retryResult['failed'] as int;
       }
+      // ✅ 修复：在生成完成消息之前检查取消状态
+      if (_isCancelled) {
+        LogUtil.log("[UploadManager] Upload was cancelled, skipping completion message");
+        onComplete?.call(false, "", []);
+        return;  // 直接返回，不执行后面的完成消息逻辑
+      }
 
       // 7. 生成最终结果
       final finalMessage = _generateCompletionMessage(
@@ -462,7 +468,12 @@ class LocalFolderUploadManager extends ChangeNotifier {
       );
     } catch (e, stackTrace) {
       LogUtil.log("[UploadManager] Error: $e\n$stackTrace");
-      onComplete?.call(false, "上传失败：$e",[]);
+      // ✅ 修改：异常时也检查取消状态
+      if (_isCancelled) {
+        onComplete?.call(false, "", []);
+      } else {
+        onComplete?.call(false, "上传失败：$e", []);
+      }
     } finally {
       // 在 finally 块中添加:
 
@@ -473,13 +484,18 @@ class LocalFolderUploadManager extends ChangeNotifier {
       _activeProgressCallback = null;
       _resetBytesTracking(0);
       _isUploading = false;
-      _updateProgress(
-        total: totalFiles,
-        uploaded: uploadedFiles,
-        failed: failedFiles,
-        statusMessage: '上传完成',
-      );
-      onProgress?.call(_currentProgress!);
+
+      // ✅ 修改：取消状态下不更新进度消息
+      if (!_isCancelled) {
+        _updateProgress(
+          total: totalFiles,
+          uploaded: uploadedFiles,
+          failed: failedFiles,
+          statusMessage: '上传完成',
+        );
+        onProgress?.call(_currentProgress!);
+      }
+
       TransferSpeedService.instance.onUploadComplete();
       notifyListeners();
     }
@@ -802,6 +818,16 @@ class LocalFolderUploadManager extends ChangeNotifier {
 
       await sm.acquire();
 
+      // ✅ 获取信号量后再次检查
+      if (_isCancelled) {
+        sm.release();
+        pendingTasks--;
+        if (pendingTasks == 0 && !completer.isCompleted) {
+          completer.complete();
+        }
+        continue;
+      }
+
       final fileInfo = entry.key;
       final md5Hash = entry.value;
 
@@ -820,6 +846,13 @@ class LocalFolderUploadManager extends ChangeNotifier {
       _uploadSingleFile(fileInfo, md5Hash, uploadPath,taskId)
           .then((success) async {
         try {
+          // ✅ 关键：在回调中也检查取消状态
+          if (_isCancelled) {
+            LogUtil.log("[UploadManager] ⏹️ Cancelled: ${fileInfo.fileName}");
+            // 取消的文件：不更新失败状态，不加入失败队列
+            return;
+          }
+
           if (success) {
             LogUtil.log("[UploadManager] ✅ Uploaded: ${fileInfo.fileName}");
             uploadedEntries.add(entry);
@@ -829,16 +862,22 @@ class LocalFolderUploadManager extends ChangeNotifier {
             LogUtil.log("[UploadManager] ❌ Failed: ${fileInfo.fileName}");
             await dbHelper.updateStatusByMd5Hash(md5Hash, 3);
             failedFiles++;
-            _addToFailedQueue(
-                fileInfo, md5Hash, 'Upload failed', isRetry: isRetry);
+            // ✅ 只有非取消状态才加入失败队列（双重保险）
+            if (!_isCancelled) {
+              _addToFailedQueue(
+                  fileInfo, md5Hash, 'Upload failed', isRetry: isRetry);
+            }
           }
-
-          _updateProgress(
-            total: totalFiles,
-            uploaded: uploadedFiles,
-            failed: failedFiles,
-            retryRound: retryRound,
-          );
+          // ✅ 取消时不更新进度
+          if (!_isCancelled) {
+            _updateProgress(
+              total: totalFiles,
+              uploaded: uploadedFiles,
+              failed: failedFiles,
+              retryRound: retryRound,
+            );
+            onProgress?.call(_currentProgress!);
+          }
           onProgress?.call(_currentProgress!);
         } finally {
           sm.release();
@@ -854,11 +893,18 @@ class LocalFolderUploadManager extends ChangeNotifier {
       await completer.future;
     }
 
+    // ✅ 取消时：清空失败队列，不调用 revokeSyncTask
+    if (_isCancelled) {
+      LogUtil.log("[UploadManager] Upload cancelled, clearing failed queue");
+      _failedQueue.clear();
+      // 不调用 revokeSyncTask，让 upload_records_page 统一处理
+      return {'uploaded': uploadedFiles, 'failed': 0};
+    }
+
     if (uploadedEntries.isNotEmpty) {
       await _reportUploadedFiles(uploadedEntries, uploadPath, taskId);
     } else {
-      LogUtil.log(
-          "[UploadManager] No files uploaded successfully, revoking task");
+      LogUtil.log("[UploadManager] No files uploaded successfully, revoking task");
       await provider.revokeSyncTask(taskId);
       await taskManager.deleteTask(taskId);
     }
@@ -871,34 +917,43 @@ class LocalFolderUploadManager extends ChangeNotifier {
       String md5Hash,
       String uploadPath,
       int taskId) async {
-    for (int attempt = 0; attempt <
-        LocalUploadConfig.maxRetryAttempts; attempt++) {
-      if (_isCancelled) return false;
+    for (int attempt = 0; attempt < LocalUploadConfig.maxRetryAttempts; attempt++) {
+      // ✅ 每次重试前检查
+      if (_isCancelled) {
+        LogUtil.log("[UploadManager] Upload cancelled before attempt $attempt");
+        return false;
+      }
 
       try {
         if (attempt > 0) {
-          LogUtil.log("[UploadManager] Retry $attempt/${LocalUploadConfig
-              .maxRetryAttempts}: ${fileInfo.fileName}");
-          await Future.delayed(
-              Duration(seconds: LocalUploadConfig.retryDelaySeconds));
+          LogUtil.log("[UploadManager] Retry $attempt/${LocalUploadConfig.maxRetryAttempts}: ${fileInfo.fileName}");
+          await Future.delayed(Duration(seconds: LocalUploadConfig.retryDelaySeconds));
 
-          // 🆕 如果是连接错误导致的重试，先预热连接
+          // ✅ 延迟后再检查
+          if (_isCancelled) return false;
+
           if (!_isConnectionWarmedUp) {
             LogUtil.log('[UploadManager] 重试前预热连接...');
             await _warmUpMinioConnection();
           }
         }
 
-        final success = await _doUpload(fileInfo, md5Hash, uploadPath,taskId);
+        final success = await _doUpload(fileInfo, md5Hash, uploadPath, taskId);
         if (success) return true;
+
+        // ✅ 上传失败后检查是否是取消导致的
+        if (_isCancelled) return false;
+
       } catch (e) {
         LogUtil.log("[UploadManager] Upload error (attempt $attempt): $e");
 
-        // 🆕 如果是连接关闭错误，标记需要重新预热
         if (_isConnectionClosedError(e)) {
           LogUtil.log('[UploadManager] 检测到连接错误，标记需要重新预热');
           _isConnectionWarmedUp = false;
         }
+
+        // ✅ 异常后检查取消状态
+        if (_isCancelled) return false;
       }
     }
 

@@ -205,7 +205,7 @@ class UploadCoordinator extends ChangeNotifier {
     }
 
     if (targetTask == null || targetIndex == -1) {
-      return CancelTaskResult(success: false, message: '任务不存在或已完成');
+      return CancelTaskResult(success: false, message: '任务不存在或已完成', taskWasActive: false,  );// ✅ 任务不在活跃列表
     }
 
     // 获取当前进度（用于返回信息）
@@ -220,11 +220,11 @@ class UploadCoordinator extends ChangeNotifier {
       cancelledBytes = progress.globalTotalBytes - progress.globalTransferredBytes;
     }
 
-    // ✅ 调用 uploadManager 的取消方法（会终止 McService 进程）
-    await targetTask.uploadManager.cancelUpload();
-
     // ✅ 从活跃任务中移除（不计入已完成统计）
     _activeTasks.removeAt(targetIndex);
+
+    // ✅ 调用 uploadManager 的取消方法（会终止 McService 进程）
+    await targetTask.uploadManager.cancelUpload();
 
     // ✅ 立即通知监听器更新 UI
     notifyListeners();
@@ -242,6 +242,7 @@ class UploadCoordinator extends ChangeNotifier {
       message: '任务已取消',
       cancelledFiles: cancelledFiles,
       cancelledBytes: cancelledBytes,
+      taskWasActive: true,  // ✅ 任务在活跃列表中被取消
     );
   }
 
@@ -343,7 +344,10 @@ class UploadCoordinator extends ChangeNotifier {
           _activeTasks.remove(taskContext);
           notifyListeners();
 
-          onMessage(message, isError: !success);
+          // ✅ 修改：只有非空消息才显示
+          if (message.isNotEmpty) {
+            onMessage(message, isError: !success);
+          }
           onComplete(uploadedMd5s);
 
           if (_activeTasks.isEmpty) {
@@ -412,12 +416,13 @@ class CancelTaskResult {
   final String message;
   final int cancelledFiles;
   final int cancelledBytes;
-
+  final bool taskWasActive;  // ✅ 新增：任务是否在活跃列表中
   CancelTaskResult({
     required this.success,
     required this.message,
     this.cancelledFiles = 0,
     this.cancelledBytes = 0,
+    this.taskWasActive = false,
   });
 }
 
