@@ -9,6 +9,7 @@ class VerifyCodeLogin extends StatelessWidget {
   final String? phoneErrorText;  // 🆕 手机号错误提示
   final String? verifyCodeErrorText;  // 🆕 验证码错误提示
   final VoidCallback onGetVerifyCode;
+  final VoidCallback? onSubmit;  // 🆕 Enter键提交回调
 
   const VerifyCodeLogin({
     super.key,
@@ -18,6 +19,7 @@ class VerifyCodeLogin extends StatelessWidget {
     this.phoneErrorText,  // 🆕
     this.verifyCodeErrorText,  // 🆕
     required this.onGetVerifyCode,
+    this.onSubmit,  // 🆕
   });
 
   @override
@@ -33,6 +35,7 @@ class VerifyCodeLogin extends StatelessWidget {
             LengthLimitingTextInputFormatter(11),     // 限制长度为11
           ],
           keyboardType: TextInputType.number,  // 数字键盘
+          textInputAction: TextInputAction.next,  // 🆕 设置为下一个输入框
           decoration: InputDecoration(
             labelText: '手机号',
             hintText: '请输入手机号',
@@ -89,6 +92,8 @@ class VerifyCodeLogin extends StatelessWidget {
                   LengthLimitingTextInputFormatter(6),     // 限制长度为6
                 ],
                 keyboardType: TextInputType.number,  // 数字键盘
+                textInputAction: TextInputAction.done,  // 🆕 设置为完成
+                onSubmitted: (_) => onSubmit?.call(),   // 🆕 Enter键触发登录
                 decoration: InputDecoration(
                   labelText: '验证码',
                   hintText: '请输入验证码',

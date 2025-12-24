@@ -9,6 +9,7 @@ class PasswordLogin extends StatelessWidget {
   final String? phoneErrorText;  // 🆕 手机号错误提示
   final String? passwordErrorText;  // 🆕 密码错误提示
   final VoidCallback onTogglePasswordVisibility;
+  final VoidCallback? onSubmit;  // 🆕 Enter键提交回调
 
   const PasswordLogin({
     super.key,
@@ -18,6 +19,7 @@ class PasswordLogin extends StatelessWidget {
     this.phoneErrorText,  // 🆕
     this.passwordErrorText,  // 🆕
     required this.onTogglePasswordVisibility,
+    this.onSubmit,  // 🆕
   });
 
   @override
@@ -33,6 +35,7 @@ class PasswordLogin extends StatelessWidget {
             LengthLimitingTextInputFormatter(11),     // 限制长度为11
           ],
           keyboardType: TextInputType.number,  // 数字键盘
+          textInputAction: TextInputAction.next,  // 🆕 设置为下一个输入框
           decoration: InputDecoration(
             labelText: '手机号',
             hintText: '请输入手机号',
@@ -86,6 +89,8 @@ class PasswordLogin extends StatelessWidget {
             FilteringTextInputFormatter.allow(RegExp(r'[a-zA-Z0-9]')),  // 只允许字母和数字
             LengthLimitingTextInputFormatter(20),  // 限制最大长度
           ],
+          textInputAction: TextInputAction.done,  // 🆕 设置为完成
+          onSubmitted: (_) => onSubmit?.call(),   // 🆕 Enter键触发登录
           decoration: InputDecoration(
             labelText: '密码',
             hintText: '请输入密码',

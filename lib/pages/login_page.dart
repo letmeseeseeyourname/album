@@ -11,6 +11,20 @@ import '../widgets/custom_title_bar.dart';
 import '../services/login_service.dart';
 import 'home_page.dart';
 
+/*
+ * ⚠️ 重要：需要同步修改以下组件文件以支持Enter键登录功能：
+ *
+ * 1. password_login.dart - 添加 onSubmit 回调参数：
+ *    - 添加参数: final VoidCallback? onSubmit;
+ *    - 在 TextField 中添加: onSubmitted: (_) => onSubmit?.call(),
+ *
+ * 2. verify_code_login.dart - 添加 onSubmit 回调参数：
+ *    - 添加参数: final VoidCallback? onSubmit;
+ *    - 在 TextField 中添加: onSubmitted: (_) => onSubmit?.call(),
+ *
+ * 详细修改示例见文件末尾的注释。
+ */
+
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
 
@@ -23,7 +37,7 @@ class _LoginPageState extends State<LoginPage> {
   final phoneController = TextEditingController();
   final passwordController = TextEditingController();
   final verifyCodeController = TextEditingController();
-  bool agreeToTerms = true;
+  bool agreeToTerms = false;  // 默认不选中用户协议
   bool obscurePassword = true;
   bool isLoading = false;
 
@@ -114,6 +128,42 @@ class _LoginPageState extends State<LoginPage> {
     if (phone.isEmpty) return false;
     final regex = RegExp(r'^1[3-9]\d{9}$');
     return regex.hasMatch(phone);
+  }
+
+  // 🆕 检查密码登录是否满足提交条件
+  bool _canSubmitPasswordLogin() {
+    final phone = phoneController.text.trim();
+    final password = passwordController.text;
+    return isValidPhone(phone) &&
+        password.length >= 6 &&
+        RegExp(r'^[a-zA-Z0-9]+$').hasMatch(password) &&
+        phoneErrorText == null &&
+        passwordErrorText == null;
+  }
+
+  // 🆕 检查验证码登录是否满足提交条件
+  bool _canSubmitVerifyCodeLogin() {
+    final phone = phoneController.text.trim();
+    final code = verifyCodeController.text;
+    return isValidPhone(phone) &&
+        code.length >= 4 &&
+        RegExp(r'^[0-9]+$').hasMatch(code) &&
+        phoneErrorText == null &&
+        verifyCodeErrorText == null;
+  }
+
+  // 🆕 处理密码登录界面的Enter键
+  void _handlePasswordLoginSubmit() {
+    if (_canSubmitPasswordLogin() && !isLoading) {
+      handleLogin();
+    }
+  }
+
+  // 🆕 处理验证码登录界面的Enter键
+  void _handleVerifyCodeLoginSubmit() {
+    if (_canSubmitVerifyCodeLogin() && !isLoading) {
+      handleLogin();
+    }
   }
 
   void startCountdown() {
@@ -405,6 +455,7 @@ class _LoginPageState extends State<LoginPage> {
                             obscurePassword = !obscurePassword;
                           });
                         },
+                        onSubmit: _handlePasswordLoginSubmit,  // 🆕 Enter键提交
                       )
                     else
                       VerifyCodeLogin(
@@ -414,6 +465,7 @@ class _LoginPageState extends State<LoginPage> {
                         phoneErrorText: phoneErrorText,  // 🆕 传递错误提示
                         verifyCodeErrorText: verifyCodeErrorText,  // 🆕 传递错误提示
                         onGetVerifyCode: handleGetVerifyCode,
+                        onSubmit: _handleVerifyCodeLoginSubmit,  // 🆕 Enter键提交
                       ),
 
                     const SizedBox(height: 30),
