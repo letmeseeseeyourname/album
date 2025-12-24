@@ -8,6 +8,7 @@ import 'package:intl/intl.dart';
 import 'package:window_manager/window_manager.dart';
 import '../album/database/upload_task_db_helper.dart';
 import '../album/database/download_task_db_helper.dart';
+import '../album/manager/download_queue_manager.dart';
 import '../album/provider/album_provider.dart';
 import '../user/my_instance.dart';
 import 'local_album/controllers/upload_coordinator.dart';
@@ -26,6 +27,8 @@ class _TransferRecordsPageState extends State<TransferRecordsPage>
   final UploadFileTaskManager _taskManager = UploadFileTaskManager.instance;
   final DownloadTaskDbHelper _downloadDbHelper = DownloadTaskDbHelper.instance;
   final AlbumProvider _albumProvider = AlbumProvider();  // ✅ 新增
+  // ✅ 新增：DownloadQueueManager 引用
+  final DownloadQueueManager _downloadQueueManager = DownloadQueueManager.instance;
 
   List<UploadTaskRecord> _uploadTasks = [];
   List<DownloadTaskRecord> _downloadTasks = [];
@@ -33,6 +36,7 @@ class _TransferRecordsPageState extends State<TransferRecordsPage>
 
   bool _isLoading = true;
   bool _isCancelling = false;  // ✅ 新增：取消中状态
+  bool _isCancellingDownload = false;  // ✅ 新增：下载取消中状态
 
   // ✅ 新增：UploadCoordinator 引用
   late final UploadCoordinator _uploadCoordinator;
@@ -45,6 +49,8 @@ class _TransferRecordsPageState extends State<TransferRecordsPage>
     // ✅ 监听 UploadCoordinator 状态变化
     _uploadCoordinator = UploadCoordinator.instance;
     _uploadCoordinator.addListener(_onUploadStateChanged);
+    // ✅ 新增：监听下载状态变化
+    _downloadQueueManager.addListener(_onDownloadStateChanged);
 
     _loadAllTasks();
   }
@@ -55,6 +61,16 @@ class _TransferRecordsPageState extends State<TransferRecordsPage>
     // ✅ 移除监听
     _uploadCoordinator.removeListener(_onUploadStateChanged);
     super.dispose();
+  }
+  // ✅ 新增：下载状态变化回调
+  void _onDownloadStateChanged() {
+    if (mounted) {
+      _loadDownloadTasks().then((_) {
+        if (mounted) {
+          setState(() {});
+        }
+      });
+    }
   }
 
   /// ✅ 新增：上传状态变化回调
@@ -125,34 +141,24 @@ class _TransferRecordsPageState extends State<TransferRecordsPage>
   }
 
   /// 将下载任务按时间聚合为批次
+  /// ✅ 修改：将下载任务按 batchId 聚合为批次
   List<DownloadBatchRecord> _aggregateDownloadTasks(List<DownloadTaskRecord> tasks) {
     if (tasks.isEmpty) return [];
 
-    final sortedTasks = List<DownloadTaskRecord>.from(tasks)
+    // 按 batchId 分组
+    final Map<String, List<DownloadTaskRecord>> batchMap = {};
+
+    for (final task in tasks) {
+      final batchKey = task.batchId ?? task.taskId;  // 没有 batchId 的旧数据用 taskId
+      batchMap.putIfAbsent(batchKey, () => []);
+      batchMap[batchKey]!.add(task);
+    }
+
+    // 转换为批次记录列表，按创建时间倒序排序
+    final batches = batchMap.values
+        .map((tasks) => DownloadBatchRecord.fromTasks(tasks))
+        .toList()
       ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
-
-    final batches = <DownloadBatchRecord>[];
-    List<DownloadTaskRecord> currentBatch = [];
-    int? currentBatchMinute;
-
-    for (final task in sortedTasks) {
-      final taskMinute = task.createdAt ~/ 60000;
-
-      if (currentBatchMinute == null || taskMinute == currentBatchMinute) {
-        currentBatch.add(task);
-        currentBatchMinute = taskMinute;
-      } else {
-        if (currentBatch.isNotEmpty) {
-          batches.add(DownloadBatchRecord.fromTasks(currentBatch));
-        }
-        currentBatch = [task];
-        currentBatchMinute = taskMinute;
-      }
-    }
-
-    if (currentBatch.isNotEmpty) {
-      batches.add(DownloadBatchRecord.fromTasks(currentBatch));
-    }
 
     return batches;
   }
@@ -523,6 +529,55 @@ class _TransferRecordsPageState extends State<TransferRecordsPage>
     );
   }
 
+  /// ✅ 新增：取消下载批次
+  /// ✅ 修改：取消下载批次（只更新状态，不删除记录）
+  Future<void> _cancelDownloadBatch(DownloadBatchRecord batch) async {
+    if (_isCancellingDownload) return;
+
+    setState(() {
+      _isCancellingDownload = true;
+    });
+
+    try {
+      // 获取批次ID
+      final batchId = batch.tasks.isNotEmpty ? batch.tasks.first.batchId : null;
+
+      if (batchId != null) {
+        // 使用批次取消
+        await _downloadQueueManager.cancelBatch(batchId);
+      } else {
+        // 兼容旧数据：逐个取消
+        for (final task in batch.tasks) {
+          if (task.status == DownloadTaskStatus.downloading ||
+              task.status == DownloadTaskStatus.pending) {
+            await _downloadQueueManager.cancelDownload(task.taskId);
+          }
+        }
+      }
+
+      // 重新加载任务列表
+      await _loadDownloadTasks();
+
+      if (mounted) {
+        setState(() {
+          _isCancellingDownload = false;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('已取消下载')),
+        );
+      }
+    } catch (e) {
+      debugPrint('[DownloadRecords] Cancel error: $e');
+      if (mounted) {
+        setState(() {
+          _isCancellingDownload = false;
+        });
+        await _loadDownloadTasks();
+        setState(() {});
+      }
+    }
+  }
+
   /// 构建上传任务项
   Widget _buildUploadTaskItem(UploadTaskRecord task, int index) {
     final dateTime = DateTime.fromMillisecondsSinceEpoch(task.createdAt);
@@ -754,10 +809,26 @@ class _TransferRecordsPageState extends State<TransferRecordsPage>
     );
   }
 
-  /// 构建下载批次操作按钮
+  /// ✅ 修改：构建下载批次操作按钮
   Widget _buildDownloadBatchActionButtons(DownloadBatchRecord batch) {
+    final isDownloading = batch.status == DownloadBatchStatus.downloading ||
+        batch.status == DownloadBatchStatus.pending;
+
     return Row(
       children: [
+        // ✅ 新增：正在下载时显示"取消下载"按钮
+        if (isDownloading)
+          TextButton(
+            onPressed: _isCancellingDownload ? null : () => _cancelDownloadBatch(batch),
+            child: Text(
+              _isCancellingDownload ? '取消中...' : '取消下载',
+              style: TextStyle(
+                fontSize: 13,
+                color: _isCancellingDownload ? Colors.grey.shade400 : Colors.grey,
+              ),
+            ),
+          ),
+        if (isDownloading) const SizedBox(width: 8),
         TextButton(
           onPressed: () => _showDeleteDownloadBatchConfirmDialog(batch),
           child: const Text(

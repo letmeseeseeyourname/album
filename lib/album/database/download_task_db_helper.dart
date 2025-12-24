@@ -39,6 +39,7 @@ class DownloadTaskRecord {
   final String? errorMessage; // 错误信息
   final int createdAt;       // 创建时间
   final int updatedAt;       // 更新时间
+  final String? batchId;    // ✅ 新增：批次ID（同一次点击下载的任务共享同一个batchId）
 
   DownloadTaskRecord({
     required this.taskId,
@@ -56,6 +57,7 @@ class DownloadTaskRecord {
     this.errorMessage,
     required this.createdAt,
     required this.updatedAt,
+    this.batchId,           // ✅ 新增
   });
 
   DownloadTaskRecord copyWith({
@@ -70,6 +72,7 @@ class DownloadTaskRecord {
     String? savePath,
     String? errorMessage,
     int? updatedAt,
+    String? batchId,
   }) =>
       DownloadTaskRecord(
         taskId: taskId,
@@ -87,6 +90,7 @@ class DownloadTaskRecord {
         errorMessage: errorMessage ?? this.errorMessage,
         createdAt: createdAt,
         updatedAt: updatedAt ?? this.updatedAt,
+        batchId: batchId ?? this.batchId,
       );
 
   Map<String, Object?> toMap() => {
@@ -105,6 +109,7 @@ class DownloadTaskRecord {
     'error_message': errorMessage,
     'created_at': createdAt,
     'updated_at': updatedAt,
+    'batch_id': batchId, // ✅ 新增'
   };
 
   static DownloadTaskRecord fromMap(Map<String, Object?> map) => DownloadTaskRecord(
@@ -123,6 +128,7 @@ class DownloadTaskRecord {
     errorMessage: map['error_message'] as String?,
     createdAt: map['created_at'] as int,
     updatedAt: map['updated_at'] as int,
+    batchId: map['batch_id'] as String?, // ✅ 新增
   );
 
   /// 计算下载进度（百分比）
@@ -199,12 +205,11 @@ class DownloadTaskDbHelper {
     }
   }
 
-  /// ✅ 确保下载任务表存在
+  /// ✅ 修改：确保表存在时也检查列
   Future<void> _ensureTableExists(Database db) async {
     if (_tableEnsured) return;
 
     try {
-      // 检查表是否存在
       final tables = await db.rawQuery(
           "SELECT name FROM sqlite_master WHERE type='table' AND name='$_table'"
       );
@@ -214,12 +219,13 @@ class DownloadTaskDbHelper {
         await _createDownloadTable(db);
       } else {
         debugPrint('download_tasks 表已存在');
+        // ✅ 检查并添加新列
+        await _ensureBatchIdColumn(db);
       }
 
       _tableEnsured = true;
     } catch (e) {
       debugPrint('检查/创建表失败: $e');
-      // 尝试强制创建
       try {
         await _createDownloadTable(db);
         _tableEnsured = true;
@@ -251,6 +257,7 @@ class DownloadTaskDbHelper {
           error_message TEXT,
           created_at INTEGER NOT NULL,
           updated_at INTEGER NOT NULL,
+          batch_id TEXT,
           PRIMARY KEY (task_id, user_id, group_id)
         );
       ''');
@@ -261,11 +268,28 @@ class DownloadTaskDbHelper {
       await db.execute('CREATE INDEX IF NOT EXISTS idx_${_table}_group ON $_table(group_id);');
       await db.execute('CREATE INDEX IF NOT EXISTS idx_${_table}_status ON $_table(status);');
       await db.execute('CREATE INDEX IF NOT EXISTS idx_${_table}_created ON $_table(created_at DESC);');
+      await db.execute('CREATE INDEX IF NOT EXISTS idx_${_table}_batch ON $_table(batch_id);');  // ✅ 新增
       debugPrint('索引创建成功');
 
     } catch (e) {
       debugPrint('创建 download_tasks 表失败: $e');
       rethrow;
+    }
+  }
+
+  /// ✅ 新增：数据库升级 - 添加 batch_id 列
+  Future<void> _ensureBatchIdColumn(Database db) async {
+    try {
+      // 检查列是否存在
+      final columns = await db.rawQuery("PRAGMA table_info($_table)");
+      final hasBatchId = columns.any((col) => col['name'] == 'batch_id');
+
+      if (!hasBatchId) {
+        await db.execute('ALTER TABLE $_table ADD COLUMN batch_id TEXT');
+        debugPrint('已添加 batch_id 列');
+      }
+    } catch (e) {
+      debugPrint('检查/添加 batch_id 列失败: $e');
     }
   }
 

@@ -195,20 +195,27 @@ class _AlbumBottomBarState extends State<AlbumBottomBar> {
   }
 
   // ✅ 计算下载进度信息
+// ✅ 修改：计算下载进度信息（只计算未取消的任务）
   Map<String, dynamic> _calculateDownloadProgress() {
     final tasks = _downloadManager.downloadTasks;
 
     int totalBytes = 0;
     int downloadedBytes = 0;
     int completedCount = 0;
-    int totalCount = tasks.length;
+    int totalCount = 0;
     int downloadingCount = 0;
     int pendingCount = 0;
     int failedCount = 0;
 
     for (final task in tasks) {
+      // ✅ 跳过已取消的任务
+      if (task.status == DownloadTaskStatus.canceled) {
+        continue;
+      }
+
       totalBytes += task.fileSize;
       downloadedBytes += task.downloadedSize;
+      totalCount++;
 
       switch (task.status) {
         case DownloadTaskStatus.completed:

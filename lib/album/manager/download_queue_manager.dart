@@ -5,6 +5,7 @@ import 'package:ablumwin/utils/snack_bar_helper.dart';
 import 'package:flutter/material.dart';
 import 'package:dio/dio.dart';
 import 'package:path/path.dart' as p;
+import 'package:uuid/uuid.dart';
 import '../../../user/my_instance.dart';
 import '../../../user/models/resource_list_model.dart';
 import '../../../network/constant_sign.dart';
@@ -18,11 +19,12 @@ import 'package:ablumwin/main.dart';
 /// 下载队列管理器（增强版 - 多轮重试队列机制）
 class DownloadQueueManager extends ChangeNotifier {
   static final DownloadQueueManager instance = DownloadQueueManager._init();
+
   DownloadQueueManager._init();
 
   final DownloadTaskDbHelper _dbHelper = DownloadTaskDbHelper.instance;
   final Dio _dio = Dio();
-
+  final Uuid _uuid = const Uuid(); // ✅ 新增
   // 当前用户和群组信息
   int? _currentUserId;
   int? _currentGroupId;
@@ -71,7 +73,8 @@ class DownloadQueueManager extends ChangeNotifier {
 
   // ==================== Getters ====================
   // 获取所有任务
-  List<DownloadTaskRecord> get downloadTasks => List.unmodifiable(_downloadTasks);
+  List<DownloadTaskRecord> get downloadTasks =>
+      List.unmodifiable(_downloadTasks);
 
   // 获取当前下载路径
   String get downloadPath => _downloadPath;
@@ -80,19 +83,29 @@ class DownloadQueueManager extends ChangeNotifier {
   int get activeDownloadCount => _activeTasks.length;
 
   // 获取等待中的任务数量
-  int get pendingCount => _downloadTasks.where((t) => t.status == DownloadTaskStatus.pending).length;
+  int get pendingCount =>
+      _downloadTasks
+          .where((t) => t.status == DownloadTaskStatus.pending)
+          .length;
 
   // 获取已完成的任务数量
-  int get completedCount => _downloadTasks.where((t) => t.status == DownloadTaskStatus.completed).length;
+  int get completedCount =>
+      _downloadTasks
+          .where((t) => t.status == DownloadTaskStatus.completed)
+          .length;
 
   // 获取失败的任务数量
-  int get failedCount => _downloadTasks.where((t) => t.status == DownloadTaskStatus.failed).length;
+  int get failedCount =>
+      _downloadTasks
+          .where((t) => t.status == DownloadTaskStatus.failed)
+          .length;
 
   // 🆕 获取失败队列
   List<DownloadTaskRecord> get failedQueue => List.unmodifiable(_failedQueue);
 
   // 🆕 获取永久失败列表
-  List<DownloadTaskRecord> get permanentlyFailedTasks => List.unmodifiable(_permanentlyFailedTasks);
+  List<DownloadTaskRecord> get permanentlyFailedTasks =>
+      List.unmodifiable(_permanentlyFailedTasks);
 
   // 🆕 获取当前重试轮次
   int get currentRetryRound => _currentRetryRound;
@@ -261,15 +274,17 @@ class DownloadQueueManager extends ChangeNotifier {
   }
 
   /// 添加下载任务（从资源列表）
+  /// ✅ 修改：为同一批次的任务生成相同的 batchId
   Future<void> addDownloadTasks(List<ResList> resources) async {
     debugPrint('=== addDownloadTasks 开始 ===');
-    debugPrint('currentUserId: $_currentUserId, currentGroupId: $_currentGroupId');
+    debugPrint(
+        'currentUserId: $_currentUserId, currentGroupId: $_currentGroupId');
 
     if (_currentUserId == null || _currentGroupId == null) {
       debugPrint('错误：用户ID或群组ID为空');
       return;
     }
-    // GlobalSnackBar.showInfo('addDownloadTasks~',duration: const Duration(seconds: 1));
+
     // 确保使用最新的下载路径
     final currentDownloadPath = await MyInstance().getDownloadPath();
     if (currentDownloadPath != _downloadPath) {
@@ -277,10 +292,16 @@ class DownloadQueueManager extends ChangeNotifier {
       debugPrint('更新下载路径为: $_downloadPath');
     }
 
-    final now = DateTime.now().millisecondsSinceEpoch;
+    final now = DateTime
+        .now()
+        .millisecondsSinceEpoch;
     final newTasks = <DownloadTaskRecord>[];
     int skippedCount = 0;
     int invalidCount = 0;
+
+    // ✅ 为这一批次生成唯一的 batchId
+    final batchId = _uuid.v4();
+    debugPrint('生成批次ID: $batchId');
 
     for (final resource in resources) {
       // 检查必要字段
@@ -310,11 +331,6 @@ class DownloadQueueManager extends ChangeNotifier {
           ? "${AppConfig.minio()}/${resource.thumbnailPath}"
           : null;
 
-      debugPrint('创建任务: ${resource.fileName}');
-      debugPrint('  resId: ${resource.resId}');
-      debugPrint('  downloadUrl: $downloadUrl');
-      debugPrint('  fileSize: ${resource.fileSize}');
-
       // 创建任务记录
       final task = DownloadTaskRecord(
         taskId: resource.resId!,
@@ -328,36 +344,30 @@ class DownloadQueueManager extends ChangeNotifier {
         downloadedSize: 0,
         fileType: resource.fileType ?? 'P',
         status: DownloadTaskStatus.pending,
-        savePath: p.join(_downloadPath, resource.fileName ?? 'unknown_${resource.resId}'),
+        savePath: p.join(
+            _downloadPath, resource.fileName ?? 'unknown_${resource.resId}'),
         createdAt: now,
         updatedAt: now,
+        batchId: batchId, // ✅ 使用统一的批次ID
       );
 
       newTasks.add(task);
       _downloadTasks.add(task);
     }
-    // GlobalSnackBar.showInfo('创建任务记录 ',duration: const Duration(seconds: 1));
-    debugPrint('任务统计: 新增=${newTasks.length}, 跳过=${skippedCount}, 无效=${invalidCount}');
+
+    debugPrint('任务统计: 新增=${newTasks
+        .length}, 跳过=${skippedCount}, 无效=${invalidCount}');
 
     if (newTasks.isNotEmpty) {
       try {
-        // 批量保存到数据库
         await _dbHelper.insertTasks(newTasks);
         debugPrint('成功保存到数据库: ${newTasks.length}个任务');
 
-        // 🆕 下载前预热连接
         await _warmUpConnection();
-
         notifyListeners();
-
-        // 实际添加的任务数量
-        debugPrint('实际添加的任务数量: ${newTasks.length}');
-
-        // 自动开始下载
         _processNextDownload();
       } catch (e) {
         debugPrint('保存到数据库失败: $e');
-        // 从内存中移除失败的任务
         for (final task in newTasks) {
           _downloadTasks.removeWhere((t) => t.taskId == task.taskId);
         }
@@ -395,7 +405,9 @@ class DownloadQueueManager extends ChangeNotifier {
     // 更新状态为下载中
     _downloadTasks[taskIndex] = task.copyWith(
       status: DownloadTaskStatus.downloading,
-      updatedAt: DateTime.now().millisecondsSinceEpoch,
+      updatedAt: DateTime
+          .now()
+          .millisecondsSinceEpoch,
     );
     notifyListeners();
 
@@ -439,7 +451,9 @@ class DownloadQueueManager extends ChangeNotifier {
         if (index != -1) {
           _downloadTasks[index] = _downloadTasks[index].copyWith(
             savePath: actualSavePath,
-            updatedAt: DateTime.now().millisecondsSinceEpoch,
+            updatedAt: DateTime
+                .now()
+                .millisecondsSinceEpoch,
           );
           notifyListeners();
         }
@@ -454,7 +468,8 @@ class DownloadQueueManager extends ChangeNotifier {
       }
 
       // 开始下载
-      debugPrint('开始下载: ${task.fileName} (已下载: $downloadedSize/${task.fileSize})');
+      debugPrint('开始下载: ${task.fileName} (已下载: $downloadedSize/${task
+          .fileSize})');
 
       await _dio.download(
         task.downloadUrl,
@@ -481,13 +496,16 @@ class DownloadQueueManager extends ChangeNotifier {
           if (index != -1) {
             _downloadTasks[index] = _downloadTasks[index].copyWith(
               downloadedSize: currentSize,
-              updatedAt: DateTime.now().millisecondsSinceEpoch,
+              updatedAt: DateTime
+                  .now()
+                  .millisecondsSinceEpoch,
             );
             notifyListeners();
 
             // 定期更新数据库（每10%更新一次）
             final progress = currentSize / totalSize;
-            if ((progress * 10).floor() > ((currentSize - received) / totalSize * 10).floor()) {
+            if ((progress * 10).floor() >
+                ((currentSize - received) / totalSize * 10).floor()) {
               _dbHelper.updateProgress(
                 taskId: taskId,
                 userId: _currentUserId!,
@@ -510,7 +528,9 @@ class DownloadQueueManager extends ChangeNotifier {
         _downloadTasks[index] = _downloadTasks[index].copyWith(
           status: DownloadTaskStatus.completed,
           downloadedSize: task.fileSize,
-          updatedAt: DateTime.now().millisecondsSinceEpoch,
+          updatedAt: DateTime
+              .now()
+              .millisecondsSinceEpoch,
         );
         notifyListeners();
       }
@@ -528,7 +548,6 @@ class DownloadQueueManager extends ChangeNotifier {
         fileName: task.fileName,
         savePath: task.savePath,
       ));
-
     } catch (e) {
       if (e is DioException && CancelToken.isCancel(e)) {
         // 用户取消
@@ -539,7 +558,9 @@ class DownloadQueueManager extends ChangeNotifier {
         if (index != -1) {
           _downloadTasks[index] = _downloadTasks[index].copyWith(
             status: DownloadTaskStatus.canceled,
-            updatedAt: DateTime.now().millisecondsSinceEpoch,
+            updatedAt: DateTime
+                .now()
+                .millisecondsSinceEpoch,
           );
           notifyListeners();
         }
@@ -556,12 +577,14 @@ class DownloadQueueManager extends ChangeNotifier {
         final currentRetry = _taskRetryCount[taskId] ?? 0;
 
         debugPrint('下载失败: ${task.fileName}, 错误: $e');
-        debugPrint('是否连接错误: $isConnectionError, 当前重试次数: $currentRetry');
+        debugPrint(
+            '是否连接错误: $isConnectionError, 当前重试次数: $currentRetry');
 
         if (isConnectionError && currentRetry < _maxConnectionRetries) {
           // 自动重试
           _taskRetryCount[taskId] = currentRetry + 1;
-          debugPrint('连接错误，将在1秒后自动重试 (${currentRetry + 1}/$_maxConnectionRetries)');
+          debugPrint('连接错误，将在1秒后自动重试 (${currentRetry +
+              1}/$_maxConnectionRetries)');
 
           // 标记连接需要重新预热
           _isConnectionWarmedUp = false;
@@ -571,7 +594,9 @@ class DownloadQueueManager extends ChangeNotifier {
           if (index != -1) {
             _downloadTasks[index] = _downloadTasks[index].copyWith(
               status: DownloadTaskStatus.pending,
-              updatedAt: DateTime.now().millisecondsSinceEpoch,
+              updatedAt: DateTime
+                  .now()
+                  .millisecondsSinceEpoch,
             );
             notifyListeners();
           }
@@ -605,7 +630,9 @@ class DownloadQueueManager extends ChangeNotifier {
           _downloadTasks[index] = _downloadTasks[index].copyWith(
             status: DownloadTaskStatus.failed,
             errorMessage: e.toString(),
-            updatedAt: DateTime.now().millisecondsSinceEpoch,
+            updatedAt: DateTime
+                .now()
+                .millisecondsSinceEpoch,
           );
 
           // 🆕 如果正在批量重试模式，将任务添加到失败队列
@@ -649,7 +676,9 @@ class DownloadQueueManager extends ChangeNotifier {
       if (index != -1) {
         _downloadTasks[index] = _downloadTasks[index].copyWith(
           status: DownloadTaskStatus.paused,
-          updatedAt: DateTime.now().millisecondsSinceEpoch,
+          updatedAt: DateTime
+              .now()
+              .millisecondsSinceEpoch,
         );
         notifyListeners();
 
@@ -663,33 +692,72 @@ class DownloadQueueManager extends ChangeNotifier {
     }
   }
 
-  /// 取消下载
+  /// 取消下载（增强版 - 从内存和数据库中移除）
+  /// ✅ 修改：取消下载（只更新状态，不删除记录）
   Future<void> cancelDownload(String taskId) async {
     // 清除重试计数
     _taskRetryCount.remove(taskId);
 
-    // 停止下载
-    await pauseDownload(taskId);
-
-    // 删除文件
-    final task = _downloadTasks.firstWhere((t) => t.taskId == taskId);
-    if (task.savePath != null) {
-      final file = File(task.savePath!);
-      if (await file.exists()) {
-        await file.delete();
-      }
+    // 取消正在进行的下载
+    final cancelToken = _activeTasks[taskId];
+    if (cancelToken != null) {
+      cancelToken.cancel('User canceled');
+      _activeTasks.remove(taskId);
     }
 
-    // 从列表和数据库中删除
-    _downloadTasks.removeWhere((t) => t.taskId == taskId);
-    await _dbHelper.deleteTask(
-      taskId: taskId,
-      userId: _currentUserId!,
-      groupId: _currentGroupId!,
-    );
+    // 删除临时文件
+    final taskIndex = _downloadTasks.indexWhere((t) => t.taskId == taskId);
+    if (taskIndex != -1) {
+      final task = _downloadTasks[taskIndex];
+
+      // 删除未完成的临时文件
+      if (task.savePath != null &&
+          task.status != DownloadTaskStatus.completed) {
+        final file = File(task.savePath!);
+        if (await file.exists()) {
+          await file.delete();
+          debugPrint('已删除临时文件: ${task.savePath}');
+        }
+      }
+
+      // ✅ 更新状态为已取消（不从列表中移除）
+      _downloadTasks[taskIndex] = task.copyWith(
+        status: DownloadTaskStatus.canceled,
+        updatedAt: DateTime
+            .now()
+            .millisecondsSinceEpoch,
+      );
+    }
+
+    // ✅ 更新数据库状态（不删除）
+    if (_currentUserId != null && _currentGroupId != null) {
+      await _dbHelper.updateStatus(
+        taskId: taskId,
+        userId: _currentUserId!,
+        groupId: _currentGroupId!,
+        status: DownloadTaskStatus.canceled,
+      );
+    }
 
     notifyListeners();
+
+    // 处理下一个任务
+    _processNextDownload();
   }
+
+
+  /// ✅ 新增：取消整个批次的下载
+  Future<void> cancelBatch(String batchId) async {
+    final tasksInBatch = _downloadTasks.where((t) => t.batchId == batchId).toList();
+
+    for (final task in tasksInBatch) {
+      if (task.status == DownloadTaskStatus.downloading ||
+          task.status == DownloadTaskStatus.pending) {
+        await cancelDownload(task.taskId);
+      }
+    }
+  }
+
 
   /// 重试失败的下载
   Future<void> retryDownload(String taskId) async {
