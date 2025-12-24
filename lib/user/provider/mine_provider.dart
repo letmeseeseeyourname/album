@@ -78,7 +78,7 @@ class MyNetworkProvider extends ChangeNotifier {
   String currentP2pAccount = ''; // 当前P2P连接的账号
   // 添加 P2P 连接锁
   final _p2pLock = LocalSemaphore(1);
-  bool _isP2pConnecting = false;  // 连接中标志
+  bool _isP2pConnecting = false; // 连接中标志
 
   // 🆕 当前 P2P 连接状态（用于同步获取）
   P2pConnectionStatus _currentP2pStatus = P2pConnectionStatus.disconnected;
@@ -214,9 +214,9 @@ class MyNetworkProvider extends ChangeNotifier {
         code: -1,
         model: null,
       );
-    }else{
+    } else {
       /// 局域网与p2p 判断
-      var p6IP = resp.model?.p2pAddress??"";
+      var p6IP = resp.model?.p2pAddress ?? "";
       await DevEnvironmentHelper().resetEnvironment(p6IP);
     }
     MyInstance().deviceCode = deviceCode;
@@ -289,6 +289,37 @@ class MyNetworkProvider extends ChangeNotifier {
     ResponseModel<String> responseModel = await requestAndConvertResponseModel(
       url,
       formData: {},
+      netMethod: NetMethod.post,
+    );
+    return responseModel;
+  }
+
+  ///更新获取验证码的方式
+  ///get-phone-code-new -> send-phone-code
+  Future<ResponseModel<String>> getPhoneCheckCode(String phone) async {
+    String url =
+        "${AppConfig.userUrl()}/api/admin/auth/get-phone-code-new";
+    ResponseModel<String> responseModel = await requestAndConvertResponseModel(
+      url,
+      formData: {
+        'phone':phone,
+        "code":""
+      },
+      netMethod: NetMethod.post,
+    );
+    return responseModel;
+  }
+
+  ///get Actual verification code
+  Future<ResponseModel<String>> getActualCode(String phone,String checkCode) async {
+    String url =
+        "${AppConfig.userUrl()}/api/admin/auth/send-phone-code2";
+    ResponseModel<String> responseModel = await requestAndConvertResponseModel(
+      url,
+      formData: {
+        "phone": phone,
+        "code": checkCode,
+      },
       netMethod: NetMethod.post,
     );
     return responseModel;
@@ -515,7 +546,8 @@ class MyNetworkProvider extends ChangeNotifier {
     await _p2pLock.acquire();
     try {
       // 🔧 修复2: 双重检查，获取锁后再次验证
-      if (currentP2pAccount == p2pName && _currentP2pStatus == P2pConnectionStatus.connected) {
+      if (currentP2pAccount == p2pName &&
+          _currentP2pStatus == P2pConnectionStatus.connected) {
         debugPrint("P2P已连接到账号: $p2pName");
         return true;
       }
@@ -574,7 +606,9 @@ class MyNetworkProvider extends ChangeNotifier {
       String uuid = await WinHelper.uuid();
 
       int nowInMicroseconds = DateTime.now().microsecondsSinceEpoch;
-      debugPrint("Starting P2P tunnel with account: $p2pName, device : $nowInMicroseconds");
+      debugPrint(
+        "Starting P2P tunnel with account: $p2pName, device : $nowInMicroseconds",
+      );
       // 启动隧道
       await p2pService.start(nowInMicroseconds.toString());
 
@@ -608,7 +642,7 @@ class MyNetworkProvider extends ChangeNotifier {
         );
 
         _isP2pConnecting = false;
-        _p2pLock.release();  // 🔧 确保释放锁
+        _p2pLock.release(); // 🔧 确保释放锁
         return true;
       } catch (e) {
         // 连接失败时回滚：清理已建立的连接
@@ -654,7 +688,7 @@ class MyNetworkProvider extends ChangeNotifier {
         ),
       );
       _isP2pConnecting = false;
-      _p2pLock.release();  // 🔧 确保释放锁
+      _p2pLock.release(); // 🔧 确保释放锁
       return false;
     }
   }

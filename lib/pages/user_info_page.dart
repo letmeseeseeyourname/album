@@ -5,6 +5,8 @@ import 'package:ablumwin/services/login_service.dart';
 import 'package:ablumwin/network/constant_sign.dart';
 import 'package:path_provider/path_provider.dart';
 import 'dart:io';
+import '../album/database/download_task_db_helper.dart';  // ✅ 新增
+import '../album/manager/download_queue_manager.dart';    // ✅ 新增
 import '../album/database/database_helper.dart';
 import '../album/database/upload_task_db_helper.dart';
 import '../album/provider/album_provider.dart';
@@ -257,7 +259,15 @@ class _UserInfoPageState extends State<UserInfoPage> {
       // 7. 清除上传任务记录
       await _clearUploadTasks();
 
-      // 8. 显示成功提示
+      // 8. 清除上传任务记录
+      await _clearUploadTasks();
+
+      await _cancelAllDownloads();
+      // 9. 清除下载任务状态
+      await _clearDownloadTasks();
+
+
+      // 10. 显示成功提示
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -267,7 +277,7 @@ class _UserInfoPageState extends State<UserInfoPage> {
         );
       }
 
-      // 9. 延迟后跳转到登录页
+      // 11. 延迟后跳转到登录页
       await Future.delayed(const Duration(milliseconds: 500));
 
       if (mounted) {
@@ -427,6 +437,83 @@ class _UserInfoPageState extends State<UserInfoPage> {
       debugPrint('✅ 用户数据已清除');
     } catch (e) {
       debugPrint('❌ 清除用户数据失败: $e');
+    }
+  }
+
+  // ✅ 新增：取消所有正在进行的下载任务
+  Future<void> _cancelAllDownloads() async {
+    try {
+      debugPrint('⏹️ 开始取消所有下载任务...');
+
+      final userId = MyInstance().user?.user?.id ?? 0;
+      final groupId = MyInstance().group?.groupId ?? 0;
+      final downloadDbHelper = DownloadTaskDbHelper.instance;
+
+      // 检查 DownloadQueueManager 是否有活跃任务
+      try {
+        final downloadManager = DownloadQueueManager.instance;
+
+        // 获取所有正在下载或等待中的任务
+        final activeTasks = downloadManager.downloadTasks.where(
+                (t) => t.status == DownloadTaskStatus.downloading ||
+                t.status == DownloadTaskStatus.pending
+        ).toList();
+
+        if (activeTasks.isNotEmpty) {
+          debugPrint('📥 发现 ${activeTasks.length} 个正在进行的下载任务');
+
+          // 遍历取消每个任务
+          for (final task in activeTasks) {
+            try {
+              // 1. 取消下载（停止下载、删除临时文件、更新状态）
+              await downloadManager.cancelDownload(task.taskId);
+              debugPrint('✅ 已取消下载: ${task.fileName}');
+            } catch (e) {
+              debugPrint('⚠️ 取消下载失败 (${task.fileName}): $e');
+
+              // 即使取消失败，也尝试更新数据库状态
+              if (userId > 0 && groupId > 0) {
+                try {
+                  await downloadDbHelper.updateStatus(
+                    taskId: task.taskId,
+                    userId: userId,
+                    groupId: groupId,
+                    status: DownloadTaskStatus.canceled,
+                  );
+                } catch (e2) {
+                  debugPrint('⚠️ 更新数据库状态失败: $e2');
+                }
+              }
+            }
+          }
+
+          debugPrint('✅ 所有下载任务已取消');
+        } else {
+          debugPrint('ℹ️ 没有正在进行的下载任务');
+        }
+      } catch (e) {
+        debugPrint('ℹ️ DownloadQueueManager 未初始化，跳过取消下载: $e');
+      }
+    } catch (e) {
+      debugPrint('❌ 取消下载任务失败: $e');
+      // 不抛出异常，继续执行后续清理操作
+    }
+  }
+
+  // ✅ 新增：清除下载任务状态（只重置内存，保留数据库记录）
+  Future<void> _clearDownloadTasks() async {
+    try {
+      try {
+        final downloadManager = DownloadQueueManager.instance;
+        downloadManager.clearAllState();
+        debugPrint('✅ DownloadQueueManager 已重置');
+      } catch (e) {
+        debugPrint('ℹ️ DownloadQueueManager 重置跳过: $e');
+      }
+
+      debugPrint('✅ 下载任务状态已清理（保留数据库记录）');
+    } catch (e) {
+      debugPrint('❌ 清理下载任务状态失败: $e');
     }
   }
 

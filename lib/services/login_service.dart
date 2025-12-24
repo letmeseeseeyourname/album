@@ -1,5 +1,6 @@
 // services/login_service.dart
 import 'package:ablumwin/user/my_instance.dart';
+import 'package:flutter/cupertino.dart';
 
 import '../user/models/qr_code_model.dart';
 import '../user/provider/mine_provider.dart';
@@ -119,7 +120,11 @@ class LoginService {
   /// [phone] 手机号
   static Future<SendCodeResult> sendVerifyCode(String phone) async {
     try {
-      final response = await _provider.getCode(phone);
+      // final response = await _provider.getCode(phone);
+      final response = await _provider.getPhoneCheckCode(phone);
+      debugPrint('PhoneCheckCode : ${response.model}');
+      final codeRes = await _provider.getActualCode(phone, response.model ?? '');
+      debugPrint('ActualCode : ${codeRes}');
 
       if (response.isSuccess) {
         return SendCodeResult(

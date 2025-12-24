@@ -35,6 +35,9 @@ class DownloadQueueManager extends ChangeNotifier {
   // 当前正在下载的任务
   final Map<String, CancelToken> _activeTasks = {};
 
+  // ✅ 新增：公开 activeTasks（用于退出登录时清理）
+  Map<String, CancelToken> get activeTasks => _activeTasks;
+
   // ==================== 重试配置 ====================
   // 最大并发下载数
   static const int maxConcurrentDownloads = 3;
@@ -159,6 +162,33 @@ class DownloadQueueManager extends ChangeNotifier {
       downloadPath: downloadPath,
     );
   }
+
+  // ✅ 新增：清空所有内存状态（用于退出登录）
+  void clearAllState() {
+    // 取消所有活动下载
+    for (final cancelToken in _activeTasks.values) {
+      cancelToken.cancel('Logout');
+    }
+    _activeTasks.clear();
+
+    // 清空任务列表
+    _downloadTasks.clear();
+
+    // 清空重试状态
+    clearRetryState();
+
+    // 重置连接预热状态
+    _isConnectionWarmedUp = false;
+    _lastWarmUpTime = null;
+
+    // 重置用户信息
+    _currentUserId = null;
+    _currentGroupId = null;
+
+    notifyListeners();
+    debugPrint('DownloadQueueManager: 所有状态已清空');
+  }
+
 
   /// 更新下载路径
   Future<void> updateDownloadPath(String newPath) async {
@@ -487,7 +517,7 @@ class DownloadQueueManager extends ChangeNotifier {
         onReceiveProgress: (received, total) {
           final totalSize = downloadedSize + total;
           final currentSize = downloadedSize + received;
-
+          debugPrint('taskId: $taskId, 下载中: ${task.fileName} (currentSize-> $currentSize)');
           // 更新传输速率服务
           TransferSpeedService.instance.updateDownloadProgress(currentSize);
 
