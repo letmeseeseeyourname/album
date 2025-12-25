@@ -227,14 +227,50 @@ class MyNetworkProvider extends ChangeNotifier {
     await _initMinIO();
     var deviceRsp = await getStorageInfo();
     await Future.delayed(const Duration(seconds: 2));
-    var p6loginResp = await p6Login(deviceCode);
     if (deviceRsp.isSuccess) {
       P6DeviceInfoModel? storageInfo = deviceRsp.model;
       debugPrint("storageInfo $storageInfo");
       MyInstance().p6deviceInfoModel = storageInfo;
     }
-    MCEventBus.fire(GroupChangedEvent());
-    return p6loginResp;
+    // 8. ✅ P6 登录（带超时判断是否在线）
+    bool isOnline = true;
+    String offlineError ="offlineError";
+
+    try {
+      var p6loginResp = await p6Login(deviceCode).timeout(
+        const Duration(seconds: 10),
+        onTimeout: () {
+          debugPrint("p6Login 超时，判定设备离线");
+          return ResponseModel<UserModel>(
+            message: "登录超时",
+            code: -3,
+            model: null,
+          );
+        },
+      );
+
+      if (p6loginResp.isNotSuccess) {
+        isOnline = false;
+        offlineError = p6loginResp.message ?? "设备登录失败";
+        debugPrint("p6Login 失败: $offlineError");
+      }
+    } catch (e) {
+      isOnline = false;
+      offlineError = "设备连接异常: ${e.toString()}";
+      debugPrint("p6Login 异常: $e");
+    }
+
+    //  发送事件（包含在线状态）
+    MCEventBus.fire(GroupChangedEvent(
+      isOnline: isOnline,
+      errorMessage: offlineError,
+    ));
+
+    return ResponseModel<UserModel>(
+      message: isOnline ? "切换成功" : offlineError,
+      code: isOnline ? 200 : -3,
+      model: null,
+    );
   }
 
   Future<void> _initMinIO() async{

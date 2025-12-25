@@ -32,8 +32,8 @@ class SideNavigation extends StatefulWidget {
 
 class _SideNavigationState extends State<SideNavigation> {
   int? _hoveredGroupIndex;
-  bool _isLoading = false;
-  int? _loadingGroupIndex;
+  // bool _isLoading = false;
+  // int? _loadingGroupIndex;
 
   // 拖拽滑动相关
   final ScrollController _groupScrollController = ScrollController();
@@ -148,30 +148,55 @@ class _SideNavigationState extends State<SideNavigation> {
   }
 
   // 处理group点击事件（带loading）
+  // Future<void> _onGroupTap(Group group, int index) async {
+  //   if (_isCurrentGroup(group) || _isLoading) {
+  //     return;
+  //   }
+  //
+  //   setState(() {
+  //     _isLoading = true;
+  //     _loadingGroupIndex = index;
+  //   });
+  //
+  //   try {
+  //     if (widget.onGroupSelected != null) {
+  //       await widget.onGroupSelected!(group);
+  //     }
+  //   } catch (e) {
+  //     debugPrint("切换group失败: $e");
+  //   } finally {
+  //     if (mounted) {
+  //       setState(() {
+  //         _isLoading = false;
+  //         _loadingGroupIndex = null;
+  //       });
+  //     }
+  //   }
+  // }
+
+  // ✅ 修改：处理group点击事件
   Future<void> _onGroupTap(Group group, int index) async {
-    if (_isCurrentGroup(group) || _isLoading) {
+    if (_isCurrentGroup(group)) {
       return;
     }
 
-    setState(() {
-      _isLoading = true;
-      _loadingGroupIndex = index;
-    });
-
-    try {
-      if (widget.onGroupSelected != null) {
-        await widget.onGroupSelected!(group);
-      }
-    } catch (e) {
-      debugPrint("切换group失败: $e");
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-          _loadingGroupIndex = null;
-        });
-      }
-    }
+    // 弹出确认对话框
+    await _showSwitchGroupConfirmDialog(group);
+  }
+  // 显示切换Group确认对话框
+  Future<bool?> _showSwitchGroupConfirmDialog(Group group) {
+    return showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => _SwitchGroupConfirmDialog(
+        group: group,
+        onConfirm: () async {
+          if (widget.onGroupSelected != null) {
+            await widget.onGroupSelected!(group);
+          }
+        },
+      ),
+    );
   }
 
   // 处理拖拽开始
@@ -284,7 +309,7 @@ class _SideNavigationState extends State<SideNavigation> {
   }
 
   // 构建Group列表
-  Widget _buildGroupsList() {
+ /* Widget _buildGroupsList() {
     final sortedGroups = _getSortedGroups();
 
     return Container(
@@ -361,6 +386,84 @@ class _SideNavigationState extends State<SideNavigation> {
                         ),
                       )
                           : Text(
+                        initial,
+                        style: TextStyle(
+                          color: isCurrentGroup ? Colors.white : Colors.black,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+      ),
+    );
+  }*/
+  // ✅ 修改：构建Group列表项（移除 loading 相关逻辑）
+  Widget _buildGroupsList() {
+    final sortedGroups = _getSortedGroups();
+
+    return Container(
+      height: 38,
+      padding: const EdgeInsets.symmetric(horizontal: 4),
+      child: GestureDetector(
+        onHorizontalDragStart: _onDragStart,
+        onHorizontalDragUpdate: _onDragUpdate,
+        onHorizontalDragEnd: _onDragEnd,
+        child: ScrollConfiguration(
+          behavior: ScrollConfiguration.of(context).copyWith(
+            dragDevices: {
+              PointerDeviceKind.touch,
+              PointerDeviceKind.mouse,
+            },
+          ),
+          child: ListView.separated(
+            controller: _groupScrollController,
+            scrollDirection: Axis.horizontal,
+            physics: const BouncingScrollPhysics(),
+            itemCount: sortedGroups.length,
+            separatorBuilder: (context, index) => const SizedBox(width: 5),
+            itemBuilder: (context, index) {
+              final group = sortedGroups[index];
+              final isCurrentGroup = _isCurrentGroup(group);
+              final initial = _getGroupInitial(group);
+              final isHovered = _hoveredGroupIndex == index;
+
+              _itemKeys[index] ??= GlobalKey();
+
+              return MouseRegion(
+                onEnter: (_) {
+                  setState(() => _hoveredGroupIndex = index);
+                  _showTooltip(index, group);
+                },
+                onExit: (_) {
+                  setState(() => _hoveredGroupIndex = null);
+                  _removeTooltip();
+                },
+                cursor: isCurrentGroup ? SystemMouseCursors.basic : SystemMouseCursors.click,
+                child: GestureDetector(
+                  key: _itemKeys[index],
+                  onTap: () => _onGroupTap(group, index),
+                  child: Container(
+                    width: 32,
+                    height: 32,
+                    decoration: BoxDecoration(
+                      color: isCurrentGroup ? Colors.black : Colors.white,
+                      border: Border.all(
+                        color: (isHovered && !isCurrentGroup)
+                            ? Colors.black
+                            : Colors.transparent,
+                        width: 1.5,
+                      ),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Center(
+                      // ✅ 移除 loading 判断，直接显示文字
+                      child: Text(
                         initial,
                         style: TextStyle(
                           color: isCurrentGroup ? Colors.white : Colors.black,
@@ -488,6 +591,195 @@ class NavButton extends StatelessWidget {
           ),
         ),
         onTap: onTap,
+      ),
+    );
+  }
+}
+
+// 切换Group确认对话框
+class _SwitchGroupConfirmDialog extends StatefulWidget {
+  final Group group;
+  final Future<void> Function() onConfirm;
+
+  const _SwitchGroupConfirmDialog({
+    required this.group,
+    required this.onConfirm,
+  });
+
+  @override
+  State<_SwitchGroupConfirmDialog> createState() => _SwitchGroupConfirmDialogState();
+}
+
+class _SwitchGroupConfirmDialogState extends State<_SwitchGroupConfirmDialog> {
+  // 对话框状态：normal / loading / error
+  String _state = 'normal';
+
+  Future<void> _handleConfirm() async {
+    setState(() {
+      _state = 'loading';
+    });
+
+    try {
+      await widget.onConfirm();
+      if (mounted) {
+        Navigator.of(context).pop(true);
+      }
+    } catch (e) {
+      debugPrint('切换Group失败: $e');
+      if (mounted) {
+        setState(() {
+          _state = 'error';
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final groupName = widget.group.groupName ?? '未命名';
+
+    return Dialog(
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Container(
+        width: 320,
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // 标题
+            Text(
+              _state == 'error' ? '切换失败' : '登录其他家庭相册',
+              style: const TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 16),
+
+            // 提示内容
+            Text(
+              _state == 'error'
+                  ? '请确认相册设备在线'
+                  : '确定登录$groupName的家庭相册？',
+              style: TextStyle(
+                fontSize: 14,
+                color: _state == 'error' ? Colors.red.shade600 : Colors.grey.shade600,
+              ),
+            ),
+            const SizedBox(height: 24),
+
+            // 底部区域
+            if (_state == 'loading')
+              _buildLoadingIndicator()
+            else if (_state == 'error')
+              _buildCloseButton()
+            else
+              _buildButtons(),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // 构建 Loading 指示器
+  Widget _buildLoadingIndicator() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Column(
+        children: [
+          const SizedBox(
+            width: 32,
+            height: 32,
+            child: CircularProgressIndicator(
+              strokeWidth: 3,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            '正在切换...',
+            style: TextStyle(
+              fontSize: 14,
+              color: Colors.grey.shade600,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // 构建确认按钮
+  Widget _buildButtons() {
+    return Row(
+      children: [
+        // 取消按钮
+        Expanded(
+          child: OutlinedButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            style: OutlinedButton.styleFrom(
+              padding: const EdgeInsets.symmetric(vertical: 14),
+              side: BorderSide(color: Colors.grey.shade300),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+            ),
+            child: const Text(
+              '取消',
+              style: TextStyle(
+                fontSize: 16,
+                color: Colors.black87,
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(width: 12),
+        // 确定按钮
+        Expanded(
+          child: ElevatedButton(
+            onPressed: _handleConfirm,
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.black,
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(vertical: 14),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+            ),
+            child: const Text(
+              '确定',
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ✅ 新增：构建关闭按钮（失败状态）
+  Widget _buildCloseButton() {
+    return SizedBox(
+      width: double.infinity,
+      child: ElevatedButton(
+        onPressed: () => Navigator.of(context).pop(false),
+        style: ElevatedButton.styleFrom(
+          backgroundColor: Colors.black,
+          foregroundColor: Colors.white,
+          padding: const EdgeInsets.symmetric(vertical: 14),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(8),
+          ),
+        ),
+        child: const Text(
+          '关闭',
+          style: TextStyle(
+            fontSize: 16,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
       ),
     );
   }

@@ -7,8 +7,11 @@ import '../../../album/manager/download_queue_manager.dart';
 import '../../../eventbus/event_bus.dart';
 import '../../../eventbus/p2p_events.dart';
 import '../../../eventbus/download_events.dart'; // 新增：导入下载事件
+import '../../../network/response/response_model.dart';
 import '../../../pages/home_page.dart'; // 导入 GroupChangedEvent
 import '../../../user/models/group.dart';
+import '../../../user/models/user_model.dart';
+import '../../../user/my_instance.dart';
 import '../../../user/provider/mine_provider.dart';
 import '../../../widgets/custom_title_bar.dart';
 import '../../../widgets/side_navigation.dart';
@@ -76,6 +79,11 @@ class _AlbumLibraryPageState extends State<AlbumLibraryPage> {
   StreamSubscription? _downloadCompleteSubscription; // 新增：下载完成事件订阅
   String? _p2pErrorMessage;
 
+  // ✅ 新增：Group 在线状态
+  bool _isGroupOnline = true;
+  String? _groupOfflineError;
+  bool _isRetrying = false;  // 重试中状态
+
   @override
   void initState() {
     super.initState();
@@ -133,20 +141,114 @@ class _AlbumLibraryPageState extends State<AlbumLibraryPage> {
   }
 
   // 处理 Group 切换事件
+// ✅ 修改：处理 Group 切换事件
   void _onGroupChanged(GroupChangedEvent event) async {
     if (!mounted) return;
 
-    debugPrint('AlbumLibraryPage 收到 GroupChangedEvent，开始刷新数据');
+    debugPrint('AlbumLibraryPage 收到 GroupChangedEvent，isOnline: ${event.isOnline}');
 
-    // 清除选中状态和预览
+    // 更新在线状态
+    setState(() {
+      _isGroupOnline = event.isOnline;
+      _groupOfflineError = event.errorMessage;
+    });
+
+    // 如果离线，不加载数据
+    if (!event.isOnline) {
+      debugPrint('Group 离线，不加载数据');
+      return;
+    }
+
+    // 在线时，清除选中状态和预览，加载数据
     _selectionManager.clearSelection();
     _closePreview();
 
-    // 先清空所有 Tab 的缓存（个人和家庭）
+    // 清空所有 Tab 的缓存
     await _dataManager.clearAllCache();
 
-    // 再加载当前 Tab 的数据
+    // 加载当前 Tab 的数据
     _dataManager.forceRefresh(isPrivate: _isPersonalTab);
+  }
+
+  // ✅ 新增：重试连接
+  Future<void> _retryConnection() async {
+    if (_isRetrying) return;
+
+    setState(() {
+      _isRetrying = true;
+    });
+
+    try {
+      final mineProvider = MyNetworkProvider();
+
+      // 1. 重连 P2P
+      debugPrint('开始重连 P2P...');
+      final p2pSuccess = await mineProvider.reconnectP2p();
+
+      if (!p2pSuccess) {
+        if (mounted) {
+          setState(() {
+            _isRetrying = false;
+            _groupOfflineError = "P2P 重连失败";
+          });
+        }
+        return;
+      }
+
+      // 2. 重新执行 p6Login
+      debugPrint('P2P 重连成功，执行 p6Login...');
+      final deviceCode = MyInstance().deviceCode;
+
+      bool loginSuccess = false;
+      String? loginError;
+
+      try {
+        final loginResp = await mineProvider.p6Login(deviceCode).timeout(
+          const Duration(seconds: 10),
+          onTimeout: () {
+            return ResponseModel<UserModel>(
+              message: "登录超时",
+              code: -3,
+              model: null,
+            );
+          },
+        );
+
+        loginSuccess = loginResp.isSuccess;
+        if (!loginSuccess) {
+          loginError = loginResp.message ?? "登录失败";
+        }
+      } catch (e) {
+        loginError = "登录异常: ${e.toString()}";
+      }
+
+      if (!mounted) return;
+
+      // 3. 更新状态
+      setState(() {
+        _isRetrying = false;
+        _isGroupOnline = loginSuccess;
+        _groupOfflineError = loginError;
+      });
+
+      // 4. 如果成功，加载数据
+      if (loginSuccess) {
+        debugPrint('重试成功，开始加载数据');
+        _selectionManager.clearSelection();
+        _closePreview();
+        await _dataManager.clearAllCache();
+        _dataManager.forceRefresh(isPrivate: _isPersonalTab);
+      }
+
+    } catch (e) {
+      debugPrint('重试连接失败: $e');
+      if (mounted) {
+        setState(() {
+          _isRetrying = false;
+          _groupOfflineError = "重试失败: ${e.toString()}";
+        });
+      }
+    }
   }
 
   // 处理 P2P 事件（仅更新 UI 状态）
@@ -425,6 +527,10 @@ class _AlbumLibraryPageState extends State<AlbumLibraryPage> {
   }
 
   Widget _buildMainContent() {
+    // ✅ 优先检查 Group 在线状态
+    if (!_isGroupOnline) {
+      return _buildGroupOfflineView();
+    }
     // 优先检查 P2P 连接状态
     if (_p2pStatus == P2pConnectionStatus.disconnected ||
         _p2pStatus == P2pConnectionStatus.failed) {
@@ -531,6 +637,92 @@ class _AlbumLibraryPageState extends State<AlbumLibraryPage> {
     );
   }
 
+  // ✅ 新增：Group 离线视图
+  Widget _buildGroupOfflineView() {
+    final groupName = widget.selectedGroup?.groupName ?? '家庭相册';
+
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          // 图标
+          Icon(
+            Icons.cloud_off_outlined,
+            size: 80,
+            color: Colors.grey.shade400,
+          ),
+          const SizedBox(height: 24),
+
+          // 标题
+          Text(
+            '$groupName不在线',
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.w500,
+              color: Colors.grey.shade700,
+            ),
+          ),
+          const SizedBox(height: 8),
+
+          // 错误信息（可选）
+          if (_groupOfflineError != null)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 40),
+              child: Text(
+                _groupOfflineError!,
+                style: TextStyle(
+                  fontSize: 14,
+                  color: Colors.grey.shade500,
+                ),
+                textAlign: TextAlign.center,
+              ),
+            ),
+          const SizedBox(height: 32),
+
+          // 重试按钮
+          if (_isRetrying)
+            Column(
+              children: [
+                const SizedBox(
+                  width: 32,
+                  height: 32,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 3,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  '正在重试...',
+                  style: TextStyle(
+                    fontSize: 14,
+                    color: Colors.grey.shade600,
+                  ),
+                ),
+              ],
+            )
+          else
+            ElevatedButton(
+              onPressed: _retryConnection,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.black,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 14),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+              ),
+              child: const Text(
+                '重试',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
   // P2P 断开连接视图
   Widget _buildP2pDisconnectedView() {
     return Center(

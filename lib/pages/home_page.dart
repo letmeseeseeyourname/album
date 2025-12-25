@@ -26,8 +26,15 @@ class HomePageReloadEvent {
   HomePageReloadEvent();
 }
 
+// ✅ 修改 GroupChangedEvent，加入状态
 class GroupChangedEvent {
-  GroupChangedEvent();
+  final bool isOnline;  // Group 是否在线
+  final String? errorMessage;  // 错误信息（离线时）
+
+  GroupChangedEvent({
+    this.isOnline = true,
+    this.errorMessage,
+  });
 }
 
 class HomePage extends StatefulWidget {
