@@ -45,7 +45,6 @@ class LocalFolderUploadManager extends ChangeNotifier {
   DatabaseHelper dbHelper = DatabaseHelper.instance;
   UploadFileTaskManager taskManager = UploadFileTaskManager.instance;
   AlbumProvider provider = AlbumProvider();
-  final minioService = MinioService.instance;
 
   // ✅ 新增：字节进度追踪
   int _globalTotalBytes = 0;        // 所有待上传文件的总字节数

@@ -10,6 +10,8 @@ import 'package:path_provider/path_provider.dart';
 import 'package:semaphore_plus/semaphore_plus.dart';
 import '../../eventbus/event_bus.dart';
 import '../../eventbus/p2p_events.dart';
+import '../../minio/mc_service.dart';
+import '../../minio/minio_config.dart';
 import '../../network/constant_sign.dart';
 import '../../network/network_provider.dart';
 import '../../network/response/response_model.dart';
@@ -222,6 +224,7 @@ class MyNetworkProvider extends ChangeNotifier {
     MyInstance().deviceCode = deviceCode;
     MyInstance().deviceModel = resp.model!;
     await _loginP2p(resp.model?.p2pName ?? "");
+    await _initMinIO();
     var deviceRsp = await getStorageInfo();
     await Future.delayed(const Duration(seconds: 2));
     var p6loginResp = await p6Login(deviceCode);
@@ -232,6 +235,13 @@ class MyNetworkProvider extends ChangeNotifier {
     }
     MCEventBus.fire(GroupChangedEvent());
     return p6loginResp;
+  }
+
+  Future<void> _initMinIO() async{
+   await McService.instance.reconfigure(
+        endpoint: 'http://${AppConfig.usedIP}:9000',
+        accessKey: MinioConfig.accessKey,
+        secretKey: MinioConfig.secretKey);
   }
 
   /// 获取二维码接口

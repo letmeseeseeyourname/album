@@ -47,12 +47,6 @@ class DevEnvironmentHelper {
       // 不在同一局域网，直接使用targetIP2
       debugPrint('$targetIP1 不在局域网内，使用备用IP: $targetIP2');
       AppConfig.usedIP = targetIP2;
-      // MinioService.instance.reInitializeMinio(targetIP2);
-      // McService.instance.reconfigure(
-      //     endpoint: 'http://$targetIP2:9000',
-      //     accessKey: MinioConfig.accessKey,
-      //     secretKey: MinioConfig.secretKey);
-      // await McService.instance.initialize();
     }
 
     // 步骤2: 检测targetIP1的8080和9000端口是否可用
@@ -92,13 +86,6 @@ class DevEnvironmentHelper {
       }
       debugPrint('端口不可用，reason: $reason');
     }
-    MinioService.instance.reInitializeMinio(AppConfig.usedIP);
-    McService.instance.reconfigure(
-        endpoint: 'http://${AppConfig.usedIP}:9000',
-        accessKey: MinioConfig.accessKey,
-        secretKey: MinioConfig.secretKey);
-    await McService.instance.initialize();
-
     MCEventBus.fire(EnvironmentResetEvent(
       usedIP: AppConfig.usedIP,
       isPrimaryIP: AppConfig.usedIP.contains("127.0.0.1"),

@@ -43,7 +43,6 @@ class _HomePageState extends State<HomePage> {
   int _selectedIndex = 0;
   int _albumTabIndex = 0;
 
-  final minioService = MinioService.instance;
   List<Group> _groups = [];
   Group? _selectedGroup;
   int? _currentUserId;

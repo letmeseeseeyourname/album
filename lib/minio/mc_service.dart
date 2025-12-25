@@ -7,6 +7,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:ablumwin/minio/tasks/mc_task.dart';
+import 'package:flutter/cupertino.dart';
 import 'configs/mc_config.dart';
 import 'configs/mc_task_status.dart';
 import 'mc_output_parser.dart';
@@ -51,7 +52,7 @@ class McService {
     final mcFile = File(mcPath);
 
     if (await mcFile.exists()) {
-      print('[McService] mc.exe 路径: $mcPath');
+     debugPrint('[McService] mc.exe 路径: $mcPath');
       return true;
     }
 
@@ -64,19 +65,19 @@ class McService {
       );
       if (result.exitCode == 0) {
         final foundPath = (result.stdout as String).trim().split('\n').first;
-        print('[McService] 在 PATH 中找到 mc: $foundPath');
+       debugPrint('[McService] 在 PATH 中找到 mc: $foundPath');
         McConfig.setMcPath(foundPath);
         return true;
       }
     } catch (_) {}
 
-    print('[McService] 错误: mc.exe 未找到');
-    print('[McService] 请将 mc.exe 放置在以下位置之一:');
-    print('  - 可执行文件同级目录');
-    print('  - 可执行文件同级 tools/ 目录');
-    print('  - 项目 assets/ 目录');
-    print('  - 项目 tools/ 目录');
-    print('  - 或添加到系统 PATH 环境变量');
+   debugPrint('[McService] 错误: mc.exe 未找到');
+   debugPrint('[McService] 请将 mc.exe 放置在以下位置之一:');
+   debugPrint('  - 可执行文件同级目录');
+   debugPrint('  - 可执行文件同级 tools/ 目录');
+   debugPrint('  - 项目 assets/ 目录');
+   debugPrint('  - 项目 tools/ 目录');
+   debugPrint('  - 或添加到系统 PATH 环境变量');
 
     return false;
   }
@@ -113,14 +114,14 @@ class McService {
 
       if (result.exitCode == 0) {
         _aliasConfigured = true;
-        print('[McService] 别名配置成功: ${McConfig.alias} -> ${McConfig.endpoint}');
+        debugPrint('[McService] 别名配置成功: ${McConfig.alias} -> ${McConfig.endpoint}');
         return true;
       } else {
-        print('[McService] 别名配置失败: ${result.stderr}');
+       debugPrint('[McService] 别名配置失败: ${result.stderr}');
         return false;
       }
     } catch (e) {
-      print('[McService] 初始化失败: $e');
+     debugPrint('[McService] 初始化失败: $e');
       return false;
     }
   }
@@ -221,11 +222,11 @@ class McService {
     task.totalBytes = await file.length();
     _tasks[effectiveTaskId] = task;
 
-    print('[McService] ========== 上传开始 ==========');
-    print('[McService] 本地文件: $localPath');
-    print('[McService] 远程路径: $remotePath');
-    print('[McService] 文件大小: ${task.totalBytes} bytes');
-    print('[McService] mc 命令: ${McConfig.mcPath} cp --json "$localPath" "$remotePath"');
+   debugPrint('[McService] ========== 上传开始 ==========');
+   debugPrint('[McService] 本地文件: $localPath');
+   debugPrint('[McService] 远程路径: $remotePath');
+   debugPrint('[McService] 文件大小: ${task.totalBytes} bytes');
+   debugPrint('[McService] mc 命令: ${McConfig.mcPath} cp --json "$localPath" "$remotePath"');
 
     try {
       // 执行 mc cp 命令
@@ -238,9 +239,9 @@ class McService {
       // ✅ 上传完成后验证文件是否存在
       if (result.success) {
         final exists = await _objectExists(bucket, fileName);
-        print('[McService] 验证文件存在: $exists');
+       debugPrint('[McService] 验证文件存在: $exists');
         if (!exists) {
-          print('[McService] ⚠️ 警告: 上传似乎成功但文件未找到，请检查路径');
+         debugPrint('[McService] ⚠️ 警告: 上传似乎成功但文件未找到，请检查路径');
         }
       }
 
@@ -299,10 +300,10 @@ class McService {
     task.totalBytes = await file.length();
     _tasks[effectiveTaskId] = task;
 
-    print('[McService] ========== 上传开始（默认模式）==========');
-    print('[McService] 本地文件: $localPath');
-    print('[McService] 远程路径: $remotePath');
-    print('[McService] 文件大小: ${task.totalBytes} bytes');
+   debugPrint('[McService] ========== 上传开始（默认模式）==========');
+   debugPrint('[McService] 本地文件: $localPath');
+   debugPrint('[McService] 远程路径: $remotePath');
+   debugPrint('[McService] 文件大小: ${task.totalBytes} bytes');
 
     final startTime = DateTime.now();
     task.status = McTaskStatus.running;
@@ -310,7 +311,7 @@ class McService {
     try {
       // 使用默认模式
       final args = ['cp', localPath, remotePath];
-      print('[McService] 执行命令: ${McConfig.mcPath} ${args.join(" ")}');
+     debugPrint('[McService] 执行命令: ${McConfig.mcPath} ${args.join(" ")}');
 
       // 不使用 runInShell，直接启动 mc.exe，这样可以正确获取进程 PID 并终止
       task.process = await Process.start(
@@ -321,7 +322,7 @@ class McService {
         },
       );
 
-      print('[McService] 进程已启动, PID: ${task.process!.pid}');
+     debugPrint('[McService] 进程已启动, PID: ${task.process!.pid}');
 
       final stdoutBuffer = StringBuffer();
       final stderrBuffer = StringBuffer();
@@ -341,7 +342,7 @@ class McService {
               task.totalBytes = progressInfo.total;
             }
             task.speed = progressInfo.speed;
-            print('[McService] 进度: ${progressInfo.formattedTransferred} / ${progressInfo.formattedTotal} @ ${progressInfo.formattedSpeed}');
+           debugPrint('[McService] 进度: ${progressInfo.formattedTransferred} / ${progressInfo.formattedTotal} @ ${progressInfo.formattedSpeed}');
           }
         },
         onDone: () => stdoutCompleter.complete(),
@@ -376,9 +377,9 @@ class McService {
 
         // 验证文件是否存在
         final exists = await _objectExists(bucket, fileName);
-        print('[McService] 验证文件存在: $exists');
+       debugPrint('[McService] 验证文件存在: $exists');
 
-        print('[McService] ✅ 上传完成');
+       debugPrint('[McService] ✅ 上传完成');
 
         return McResult(
           success: true,
@@ -407,7 +408,7 @@ class McService {
         task.status = McTaskStatus.failed;
         task.errorMessage = stderrBuffer.toString();
 
-        print('[McService] ❌ 上传失败');
+       debugPrint('[McService] ❌ 上传失败');
 
         return McResult(
           success: false,
@@ -419,7 +420,7 @@ class McService {
       task.status = McTaskStatus.failed;
       task.errorMessage = e.toString();
 
-      print('[McService] ❌ 上传异常: $e');
+     debugPrint('[McService] ❌ 上传异常: $e');
 
       return McResult(
         success: false,
@@ -466,7 +467,7 @@ class McService {
     task.totalBytes = await _calculateDirectorySize(dir);
     _tasks[effectiveTaskId] = task;
 
-    print('[McService] 开始上传目录: $localDir -> $remotePath');
+   debugPrint('[McService] 开始上传目录: $localDir -> $remotePath');
 
     try {
       final args = recursive
@@ -515,7 +516,7 @@ class McService {
 
     _tasks[effectiveTaskId] = task;
 
-    print('[McService] 开始下载: $remotePath -> $localPath');
+   debugPrint('[McService] 开始下载: $remotePath -> $localPath');
 
     try {
       // 先获取文件大小
@@ -568,10 +569,10 @@ class McService {
       task.totalBytes = statResult;
     }
 
-    print('[McService] ========== 下载开始（默认模式）==========');
-    print('[McService] 远程路径: $remotePath');
-    print('[McService] 本地文件: $localPath');
-    print('[McService] 文件大小: ${task.totalBytes} bytes');
+   debugPrint('[McService] ========== 下载开始（默认模式）==========');
+   debugPrint('[McService] 远程路径: $remotePath');
+   debugPrint('[McService] 本地文件: $localPath');
+   debugPrint('[McService] 文件大小: ${task.totalBytes} bytes');
 
     final startTime = DateTime.now();
     task.status = McTaskStatus.running;
@@ -579,7 +580,7 @@ class McService {
     try {
       // 使用默认模式
       final args = ['cp', remotePath, localPath];
-      print('[McService] 执行命令: ${McConfig.mcPath} ${args.join(" ")}');
+     debugPrint('[McService] 执行命令: ${McConfig.mcPath} ${args.join(" ")}');
 
       // 不使用 runInShell，直接启动 mc.exe，这样可以正确获取进程 PID 并终止
       task.process = await Process.start(
@@ -590,7 +591,7 @@ class McService {
         },
       );
 
-      print('[McService] 进程已启动, PID: ${task.process!.pid}');
+     debugPrint('[McService] 进程已启动, PID: ${task.process!.pid}');
 
       final stdoutBuffer = StringBuffer();
       final stderrBuffer = StringBuffer();
@@ -610,7 +611,7 @@ class McService {
               task.totalBytes = progressInfo.total;
             }
             task.speed = progressInfo.speed;
-            print('[McService] 进度: ${progressInfo.formattedTransferred} / ${progressInfo.formattedTotal} @ ${progressInfo.formattedSpeed}');
+           debugPrint('[McService] 进度: ${progressInfo.formattedTransferred} / ${progressInfo.formattedTotal} @ ${progressInfo.formattedSpeed}');
           }
         },
         onDone: () => stdoutCompleter.complete(),
@@ -645,13 +646,13 @@ class McService {
         // 验证本地文件是否存在
         final localFile = File(localPath);
         final exists = await localFile.exists();
-        print('[McService] 验证本地文件存在: $exists');
+       debugPrint('[McService] 验证本地文件存在: $exists');
 
         if (exists) {
           task.transferredBytes = await localFile.length();
         }
 
-        print('[McService] ✅ 下载完成');
+       debugPrint('[McService] ✅ 下载完成');
 
         return McResult(
           success: true,
@@ -679,7 +680,7 @@ class McService {
         task.status = McTaskStatus.failed;
         task.errorMessage = stderrBuffer.toString();
 
-        print('[McService] ❌ 下载失败');
+       debugPrint('[McService] ❌ 下载失败');
 
         return McResult(
           success: false,
@@ -691,7 +692,7 @@ class McService {
       task.status = McTaskStatus.failed;
       task.errorMessage = e.toString();
 
-      print('[McService] ❌ 下载异常: $e');
+     debugPrint('[McService] ❌ 下载异常: $e');
 
       return McResult(
         success: false,
@@ -729,7 +730,7 @@ class McService {
 
     _tasks[effectiveTaskId] = task;
 
-    print('[McService] 开始下载目录: $remotePath -> $localDir');
+   debugPrint('[McService] 开始下载目录: $remotePath -> $localDir');
 
     try {
       final args = recursive
@@ -756,13 +757,13 @@ class McService {
   Future<bool> cancelTask(String taskId, {bool deleteIncomplete = false}) async {
     final task = _tasks[taskId];
     if (task == null) {
-      print('[McService] 任务不存在: $taskId');
+     debugPrint('[McService] 任务不存在: $taskId');
       return false;
     }
 
     // 支持取消 running 和 paused 状态的任务
     if (task.status != McTaskStatus.running && task.status != McTaskStatus.paused) {
-      print('[McService] 任务未在运行或暂停: $taskId (当前状态: ${task.status})');
+     debugPrint('[McService] 任务未在运行或暂停: $taskId (当前状态: ${task.status})');
       return false;
     }
 
@@ -778,12 +779,12 @@ class McService {
       // 杀死进程
       if (task.process != null) {
         final pid = task.process!.pid;
-        print('[McService] 正在终止进程, PID: $pid, 之前是否暂停: $wasPaused');
+       debugPrint('[McService] 正在终止进程, PID: $pid, 之前是否暂停: $wasPaused');
 
         if (Platform.isWindows) {
           // 如果进程是暂停状态，需要先恢复再终止
           if (wasPaused) {
-            print('[McService] 进程处于暂停状态，先恢复再终止');
+           debugPrint('[McService] 进程处于暂停状态，先恢复再终止');
 
             // 尝试使用 pssuspend -r 恢复
             final pssuspendPath = await _findPssuspend();
@@ -802,7 +803,7 @@ class McService {
           try {
             task.process!.kill(ProcessSignal.sigterm);
           } catch (e) {
-            print('[McService] kill sigterm 失败: $e');
+           debugPrint('[McService] kill sigterm 失败: $e');
           }
 
           // 方法2: 使用 taskkill 强制终止进程树
@@ -811,7 +812,7 @@ class McService {
             ['/F', '/T', '/PID', '$pid'],
             runInShell: true,
           );
-          print('[McService] taskkill /PID 结果: exitCode=${result.exitCode}, stdout=${result.stdout}, stderr=${result.stderr}');
+         debugPrint('[McService] taskkill /PID 结果: exitCode=${result.exitCode}, stdout=${result.stdout}, stderr=${result.stderr}');
 
           // 方法3: 如果还是失败，通过进程名强制杀死
           if (result.exitCode != 0) {
@@ -821,12 +822,12 @@ class McService {
               ['/F', '/IM', mcName],
               runInShell: true,
             );
-            print('[McService] taskkill /IM 结果: exitCode=${result2.exitCode}');
+           debugPrint('[McService] taskkill /IM 结果: exitCode=${result2.exitCode}');
           }
         } else {
           // Linux/macOS: 如果是暂停状态，先发送 SIGCONT
           if (wasPaused) {
-            print('[McService] 进程处于暂停状态，先恢复再终止');
+           debugPrint('[McService] 进程处于暂停状态，先恢复再终止');
             await Process.run('kill', ['-CONT', '$pid']);
             await Future.delayed(const Duration(milliseconds: 100));
           }
@@ -844,7 +845,7 @@ class McService {
         }
       }
 
-      print('[McService] 已取消任务: $taskId');
+     debugPrint('[McService] 已取消任务: $taskId');
 
       // 等待进程完全终止
       await Future.delayed(const Duration(milliseconds: 1500));
@@ -859,19 +860,19 @@ class McService {
           final objectName = parts.sublist(2).join('/');
 
           // 尝试删除不完整的文件
-          print('[McService] 尝试删除不完整文件: $bucket/$objectName');
+         debugPrint('[McService] 尝试删除不完整文件: $bucket/$objectName');
           final deleted = await deleteObject(bucket, objectName);
           if (deleted) {
-            print('[McService] 已删除不完整的上传文件: $objectName');
+           debugPrint('[McService] 已删除不完整的上传文件: $objectName');
           } else {
-            print('[McService] 未找到需要删除的文件（可能上传尚未开始或已完成清理）');
+           debugPrint('[McService] 未找到需要删除的文件（可能上传尚未开始或已完成清理）');
           }
         }
       }
 
       return true;
     } catch (e) {
-      print('[McService] 取消任务失败: $e');
+     debugPrint('[McService] 取消任务失败: $e');
       return false;
     }
   }
@@ -890,7 +891,7 @@ class McService {
       }
     }
 
-    print('[McService] 已取消 $cancelledCount 个任务');
+   debugPrint('[McService] 已取消 $cancelledCount 个任务');
     return cancelledCount;
   }
 
@@ -900,25 +901,25 @@ class McService {
   Future<bool> pauseTask(String taskId) async {
     final task = _tasks[taskId];
     if (task == null) {
-      print('[McService] 任务不存在: $taskId');
+     debugPrint('[McService] 任务不存在: $taskId');
       return false;
     }
 
     // 如果已经是暂停状态，直接返回成功
     if (task.status == McTaskStatus.paused) {
-      print('[McService] 任务已经是暂停状态: $taskId');
+     debugPrint('[McService] 任务已经是暂停状态: $taskId');
       return true;
     }
 
     if (task.status != McTaskStatus.running) {
-      print('[McService] 任务未在运行: $taskId (当前状态: ${task.status})');
+     debugPrint('[McService] 任务未在运行: $taskId (当前状态: ${task.status})');
       return false;
     }
 
     try {
       if (task.process != null) {
         final pid = task.process!.pid;
-        print('[McService] 正在暂停进程, PID: $pid');
+       debugPrint('[McService] 正在暂停进程, PID: $pid');
 
         // 立即标记状态为暂停，防止重复调用
         task.status = McTaskStatus.paused;
@@ -929,46 +930,46 @@ class McService {
 
           if (pssuspendPath != null) {
             // 使用 pssuspend.exe 暂停进程
-            print('[McService] 使用 pssuspend: $pssuspendPath');
+           debugPrint('[McService] 使用 pssuspend: $pssuspendPath');
             final result = await Process.run(
               pssuspendPath,
               ['-nobanner', '$pid'],
             );
 
-            print('[McService] pssuspend 暂停结果: exitCode=${result.exitCode}');
+           debugPrint('[McService] pssuspend 暂停结果: exitCode=${result.exitCode}');
             if (result.stdout.toString().isNotEmpty) {
-              print('[McService] pssuspend stdout: ${result.stdout}');
+             debugPrint('[McService] pssuspend stdout: ${result.stdout}');
             }
             if (result.stderr.toString().isNotEmpty) {
-              print('[McService] pssuspend stderr: ${result.stderr}');
+             debugPrint('[McService] pssuspend stderr: ${result.stderr}');
             }
 
             if (result.exitCode == 0 || result.stdout.toString().contains('suspended')) {
-              print('[McService] 任务已暂停 (pssuspend): $taskId');
+             debugPrint('[McService] 任务已暂停 (pssuspend): $taskId');
               return true;
             }
           }
 
           // pssuspend 不可用或失败，尝试 PowerShell 方案
-          print('[McService] pssuspend 不可用，尝试 PowerShell 方案');
+         debugPrint('[McService] pssuspend 不可用，尝试 PowerShell 方案');
           final success = await _suspendWithPowerShell(pid);
           if (success) {
-            print('[McService] 任务已暂停 (PowerShell): $taskId');
+           debugPrint('[McService] 任务已暂停 (PowerShell): $taskId');
             return true;
           }
 
           // 都失败了，恢复状态
           task.status = McTaskStatus.running;
-          print('[McService] 暂停失败');
+         debugPrint('[McService] 暂停失败');
           return false;
         } else {
           // Linux/macOS: 使用 SIGSTOP 信号暂停进程
           final result = await Process.run('kill', ['-STOP', '$pid']);
           if (result.exitCode == 0) {
-            print('[McService] 任务已暂停 (SIGSTOP): $taskId');
+           debugPrint('[McService] 任务已暂停 (SIGSTOP): $taskId');
             return true;
           } else {
-            print('[McService] 暂停失败: ${result.stderr}');
+           debugPrint('[McService] 暂停失败: ${result.stderr}');
             task.status = McTaskStatus.running;
             return false;
           }
@@ -976,7 +977,7 @@ class McService {
       }
       return false;
     } catch (e) {
-      print('[McService] 暂停任务失败: $e');
+     debugPrint('[McService] 暂停任务失败: $e');
       task.status = McTaskStatus.running;
       return false;
     }
@@ -986,19 +987,19 @@ class McService {
   Future<bool> resumeTask(String taskId) async {
     final task = _tasks[taskId];
     if (task == null) {
-      print('[McService] 任务不存在: $taskId');
+     debugPrint('[McService] 任务不存在: $taskId');
       return false;
     }
 
     if (task.status != McTaskStatus.paused) {
-      print('[McService] 任务未暂停: $taskId (当前状态: ${task.status})');
+     debugPrint('[McService] 任务未暂停: $taskId (当前状态: ${task.status})');
       return false;
     }
 
     try {
       if (task.process != null) {
         final pid = task.process!.pid;
-        print('[McService] 正在恢复进程, PID: $pid');
+       debugPrint('[McService] 正在恢复进程, PID: $pid');
 
         if (Platform.isWindows) {
           // 查找 pssuspend.exe 路径
@@ -1006,54 +1007,54 @@ class McService {
 
           if (pssuspendPath != null) {
             // 使用 pssuspend.exe -r 恢复进程
-            print('[McService] 使用 pssuspend -r: $pssuspendPath');
+           debugPrint('[McService] 使用 pssuspend -r: $pssuspendPath');
             final result = await Process.run(
               pssuspendPath,
               ['-nobanner', '-r', '$pid'],
             );
 
-            print('[McService] pssuspend 恢复结果: exitCode=${result.exitCode}');
+           debugPrint('[McService] pssuspend 恢复结果: exitCode=${result.exitCode}');
             if (result.stdout.toString().isNotEmpty) {
-              print('[McService] pssuspend stdout: ${result.stdout}');
+             debugPrint('[McService] pssuspend stdout: ${result.stdout}');
             }
             if (result.stderr.toString().isNotEmpty) {
-              print('[McService] pssuspend stderr: ${result.stderr}');
+             debugPrint('[McService] pssuspend stderr: ${result.stderr}');
             }
 
             if (result.exitCode == 0 || result.stdout.toString().contains('resumed')) {
               task.status = McTaskStatus.running;
-              print('[McService] 任务已恢复 (pssuspend): $taskId');
+             debugPrint('[McService] 任务已恢复 (pssuspend): $taskId');
               return true;
             }
           }
 
           // pssuspend 不可用或失败，尝试 PowerShell 方案
-          print('[McService] pssuspend 不可用，尝试 PowerShell 方案');
+         debugPrint('[McService] pssuspend 不可用，尝试 PowerShell 方案');
           final success = await _resumeWithPowerShell(pid);
           if (success) {
             task.status = McTaskStatus.running;
-            print('[McService] 任务已恢复 (PowerShell): $taskId');
+           debugPrint('[McService] 任务已恢复 (PowerShell): $taskId');
             return true;
           }
 
-          print('[McService] 恢复失败');
+         debugPrint('[McService] 恢复失败');
           return false;
         } else {
           // Linux/macOS: 使用 SIGCONT 信号恢复进程
           final result = await Process.run('kill', ['-CONT', '$pid']);
           if (result.exitCode == 0) {
             task.status = McTaskStatus.running;
-            print('[McService] 任务已恢复 (SIGCONT): $taskId');
+           debugPrint('[McService] 任务已恢复 (SIGCONT): $taskId');
             return true;
           } else {
-            print('[McService] 恢复失败: ${result.stderr}');
+           debugPrint('[McService] 恢复失败: ${result.stderr}');
             return false;
           }
         }
       }
       return false;
     } catch (e) {
-      print('[McService] 恢复任务失败: $e');
+     debugPrint('[McService] 恢复任务失败: $e');
       return false;
     }
   }
@@ -1074,7 +1075,7 @@ class McService {
 
     for (final path in possiblePaths) {
       if (await File(path).exists()) {
-        print('[McService] 找到 pssuspend.exe: $path');
+       debugPrint('[McService] 找到 pssuspend.exe: $path');
         return path;
       }
     }
@@ -1085,13 +1086,13 @@ class McService {
       if (result.exitCode == 0) {
         final path = (result.stdout as String).trim().split('\n').first.trim();
         if (path.isNotEmpty) {
-          print('[McService] 在 PATH 中找到 pssuspend.exe: $path');
+         debugPrint('[McService] 在 PATH 中找到 pssuspend.exe: $path');
           return path;
         }
       }
     } catch (_) {}
 
-    print('[McService] 未找到 pssuspend.exe');
+   debugPrint('[McService] 未找到 pssuspend.exe');
     return null;
   }
 
@@ -1134,14 +1135,14 @@ public class ProcSuspend {
 
       try { await scriptFile.delete(); } catch (_) {}
 
-      print('[McService] PowerShell 暂停结果: exitCode=${result.exitCode}');
+     debugPrint('[McService] PowerShell 暂停结果: exitCode=${result.exitCode}');
       if (result.stderr.toString().isNotEmpty) {
-        print('[McService] PowerShell stderr: ${result.stderr}');
+       debugPrint('[McService] PowerShell stderr: ${result.stderr}');
       }
 
       return result.exitCode == 0;
     } catch (e) {
-      print('[McService] PowerShell 暂停异常: $e');
+     debugPrint('[McService] PowerShell 暂停异常: $e');
       return false;
     }
   }
@@ -1185,14 +1186,14 @@ public class ProcResume {
 
       try { await scriptFile.delete(); } catch (_) {}
 
-      print('[McService] PowerShell 恢复结果: exitCode=${result.exitCode}');
+     debugPrint('[McService] PowerShell 恢复结果: exitCode=${result.exitCode}');
       if (result.stderr.toString().isNotEmpty) {
-        print('[McService] PowerShell stderr: ${result.stderr}');
+       debugPrint('[McService] PowerShell stderr: ${result.stderr}');
       }
 
       return result.exitCode == 0;
     } catch (e) {
-      print('[McService] PowerShell 恢复异常: $e');
+     debugPrint('[McService] PowerShell 恢复异常: $e');
       return false;
     }
   }
@@ -1232,7 +1233,7 @@ public class ProcResume {
       );
 
       if (result.exitCode != 0) {
-        print('[McService] 列出对象失败: ${result.stderr}');
+       debugPrint('[McService] 列出对象失败: ${result.stderr}');
         return [];
       }
 
@@ -1258,7 +1259,7 @@ public class ProcResume {
 
       return objects;
     } catch (e) {
-      print('[McService] 列出对象异常: $e');
+     debugPrint('[McService] 列出对象异常: $e');
       return [];
     }
   }
@@ -1277,14 +1278,14 @@ public class ProcResume {
       );
 
       if (result.exitCode == 0) {
-        print('[McService] 删除成功: $objectName');
+       debugPrint('[McService] 删除成功: $objectName');
         return true;
       } else {
-        print('[McService] 删除失败: ${result.stderr}');
+       debugPrint('[McService] 删除失败: ${result.stderr}');
         return false;
       }
     } catch (e) {
-      print('[McService] 删除异常: $e');
+     debugPrint('[McService] 删除异常: $e');
       return false;
     }
   }
@@ -1304,7 +1305,7 @@ public class ProcResume {
 
       return result.exitCode == 0;
     } catch (e) {
-      print('[McService] 删除目录异常: $e');
+     debugPrint('[McService] 删除目录异常: $e');
       return false;
     }
   }
@@ -1324,10 +1325,10 @@ public class ProcResume {
       if (result.exitCode == 0 || (result.stderr as String).contains('already exists')) {
         return true;
       }
-      print('[McService] 创建存储桶失败: ${result.stderr}');
+     debugPrint('[McService] 创建存储桶失败: ${result.stderr}');
       return false;
     } catch (e) {
-      print('[McService] 创建存储桶异常: $e');
+     debugPrint('[McService] 创建存储桶异常: $e');
       return false;
     }
   }
@@ -1363,7 +1364,7 @@ public class ProcResume {
     task.status = McTaskStatus.running;
 
     try {
-      print('[McService] 执行命令: ${McConfig.mcPath} ${args.join(" ")}');
+     debugPrint('[McService] 执行命令: ${McConfig.mcPath} ${args.join(" ")}');
 
       // 启动进程（设置配置目录环境变量）
       task.process = await Process.start(
@@ -1400,12 +1401,12 @@ public class ProcResume {
       final duration = DateTime.now().difference(startTime);
 
       // ✅ 打印完整输出用于调试
-      print('[McService] exitCode: $exitCode');
+     debugPrint('[McService] exitCode: $exitCode');
       if (stdoutBuffer.isNotEmpty) {
-        print('[McService] stdout: ${stdoutBuffer.toString()}');
+       debugPrint('[McService] stdout: ${stdoutBuffer.toString()}');
       }
       if (stderrBuffer.isNotEmpty) {
-        print('[McService] stderr: ${stderrBuffer.toString()}');
+       debugPrint('[McService] stderr: ${stderrBuffer.toString()}');
       }
 
       if (exitCode == 0) {
@@ -1413,7 +1414,7 @@ public class ProcResume {
         task.transferredBytes = task.totalBytes;
         onProgress?.call(task.totalBytes, task.totalBytes, 0);
 
-        print('[McService] ✅ 传输完成: ${task.localPath}');
+       debugPrint('[McService] ✅ 传输完成: ${task.localPath}');
 
         return McResult(
           success: true,
@@ -1435,7 +1436,7 @@ public class ProcResume {
         task.status = McTaskStatus.failed;
         task.errorMessage = stderrBuffer.toString();
 
-        print('[McService] ❌ 传输失败');
+       debugPrint('[McService] ❌ 传输失败');
 
         return McResult(
           success: false,
@@ -1447,7 +1448,7 @@ public class ProcResume {
       task.status = McTaskStatus.failed;
       task.errorMessage = e.toString();
 
-      print('[McService] ❌ 传输异常: $e');
+     debugPrint('[McService] ❌ 传输异常: $e');
 
       return McResult(
         success: false,
@@ -1493,7 +1494,7 @@ public class ProcResume {
           task.transferredBytes = task.totalBytes;
         }
 
-        print('[McService] 进度解析: transferred=${task.transferredBytes}, total=${task.totalBytes}, speed=${task.speed}');
+       debugPrint('[McService] 进度解析: transferred=${task.transferredBytes}, total=${task.totalBytes}, speed=${task.speed}');
 
       } catch (e) {
         // JSON 解析失败，尝试正则匹配
@@ -1641,14 +1642,14 @@ public class ProcResume {
         environment: {'MC_CONFIG_DIR': McConfig.mcConfigDir},
       );
 
-      print('[McService] stat 命令结果: exitCode=${result.exitCode}');
+     debugPrint('[McService] stat 命令结果: exitCode=${result.exitCode}');
       if (result.exitCode != 0) {
-        print('[McService] stat stderr: ${result.stderr}');
+       debugPrint('[McService] stat stderr: ${result.stderr}');
       }
 
       return result.exitCode == 0;
     } catch (e) {
-      print('[McService] _objectExists 异常: $e');
+     debugPrint('[McService] _objectExists 异常: $e');
       return false;
     }
   }
