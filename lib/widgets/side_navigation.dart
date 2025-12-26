@@ -2,6 +2,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter_svg/flutter_svg.dart';
+import '../album/database/database_helper.dart';
+import '../album/database/download_task_db_helper.dart';
+import '../album/database/upload_task_db_helper.dart';
+import '../album/manager/download_queue_manager.dart';
+import '../album/provider/album_provider.dart';
+import '../album/utils/upload_cancel_helper.dart';
+import '../pages/local_album/controllers/upload_coordinator.dart';
 import '../user/models/group.dart';
 import '../user/my_instance.dart';
 import '../user/provider/mine_provider.dart';
@@ -611,16 +618,35 @@ class _SwitchGroupConfirmDialog extends StatefulWidget {
 }
 
 class _SwitchGroupConfirmDialogState extends State<_SwitchGroupConfirmDialog> {
-  // 对话框状态：normal / loading / error
   String _state = 'normal';
+  String _loadingMessage = '正在切换...';
 
   Future<void> _handleConfirm() async {
     setState(() {
       _state = 'loading';
+      _loadingMessage = '正在取消上传任务...';
     });
 
     try {
+      // ✅ 1. 取消所有上传任务
+      await TaskCancelHelper.cancelAllUploads();
+
+      if (!mounted) return;
+      setState(() {
+        _loadingMessage = '正在取消下载任务...';
+      });
+
+      // ✅ 2. 取消所有下载任务
+      await TaskCancelHelper.cancelAllDownloads();
+
+      if (!mounted) return;
+      setState(() {
+        _loadingMessage = '正在切换设备...';
+      });
+
+      // 3. 执行切换
       await widget.onConfirm();
+
       if (mounted) {
         Navigator.of(context).pop(true);
       }
@@ -648,7 +674,6 @@ class _SwitchGroupConfirmDialogState extends State<_SwitchGroupConfirmDialog> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            // 标题
             Text(
               _state == 'error' ? '切换失败' : '登录其他家庭相册',
               style: const TextStyle(
@@ -657,8 +682,6 @@ class _SwitchGroupConfirmDialogState extends State<_SwitchGroupConfirmDialog> {
               ),
             ),
             const SizedBox(height: 16),
-
-            // 提示内容
             Text(
               _state == 'error'
                   ? '请确认相册设备在线'
@@ -669,8 +692,6 @@ class _SwitchGroupConfirmDialogState extends State<_SwitchGroupConfirmDialog> {
               ),
             ),
             const SizedBox(height: 24),
-
-            // 底部区域
             if (_state == 'loading')
               _buildLoadingIndicator()
             else if (_state == 'error')
@@ -683,7 +704,6 @@ class _SwitchGroupConfirmDialogState extends State<_SwitchGroupConfirmDialog> {
     );
   }
 
-  // 构建 Loading 指示器
   Widget _buildLoadingIndicator() {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8),
@@ -692,49 +712,33 @@ class _SwitchGroupConfirmDialogState extends State<_SwitchGroupConfirmDialog> {
           const SizedBox(
             width: 32,
             height: 32,
-            child: CircularProgressIndicator(
-              strokeWidth: 3,
-            ),
+            child: CircularProgressIndicator(strokeWidth: 3),
           ),
           const SizedBox(height: 12),
           Text(
-            '正在切换...',
-            style: TextStyle(
-              fontSize: 14,
-              color: Colors.grey.shade600,
-            ),
+            _loadingMessage,
+            style: TextStyle(fontSize: 14, color: Colors.grey.shade600),
           ),
         ],
       ),
     );
   }
 
-  // 构建确认按钮
   Widget _buildButtons() {
     return Row(
       children: [
-        // 取消按钮
         Expanded(
           child: OutlinedButton(
             onPressed: () => Navigator.of(context).pop(false),
             style: OutlinedButton.styleFrom(
               padding: const EdgeInsets.symmetric(vertical: 14),
               side: BorderSide(color: Colors.grey.shade300),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(8),
-              ),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
             ),
-            child: const Text(
-              '取消',
-              style: TextStyle(
-                fontSize: 16,
-                color: Colors.black87,
-              ),
-            ),
+            child: const Text('取消', style: TextStyle(fontSize: 16, color: Colors.black87)),
           ),
         ),
         const SizedBox(width: 12),
-        // 确定按钮
         Expanded(
           child: ElevatedButton(
             onPressed: _handleConfirm,
@@ -742,24 +746,15 @@ class _SwitchGroupConfirmDialogState extends State<_SwitchGroupConfirmDialog> {
               backgroundColor: Colors.black,
               foregroundColor: Colors.white,
               padding: const EdgeInsets.symmetric(vertical: 14),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(8),
-              ),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
             ),
-            child: const Text(
-              '确定',
-              style: TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
+            child: const Text('确定', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500)),
           ),
         ),
       ],
     );
   }
 
-  // ✅ 新增：构建关闭按钮（失败状态）
   Widget _buildCloseButton() {
     return SizedBox(
       width: double.infinity,
@@ -769,17 +764,9 @@ class _SwitchGroupConfirmDialogState extends State<_SwitchGroupConfirmDialog> {
           backgroundColor: Colors.black,
           foregroundColor: Colors.white,
           padding: const EdgeInsets.symmetric(vertical: 14),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(8),
-          ),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
         ),
-        child: const Text(
-          '关闭',
-          style: TextStyle(
-            fontSize: 16,
-            fontWeight: FontWeight.w500,
-          ),
-        ),
+        child: const Text('关闭', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500)),
       ),
     );
   }

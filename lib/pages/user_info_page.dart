@@ -10,6 +10,7 @@ import '../album/manager/download_queue_manager.dart';    // ✅ 新增
 import '../album/database/database_helper.dart';
 import '../album/database/upload_task_db_helper.dart';
 import '../album/provider/album_provider.dart';
+import '../album/utils/upload_cancel_helper.dart';
 import '../services/folder_manager.dart';
 import 'local_album/controllers/upload_coordinator.dart';
 import 'login_page.dart';
@@ -235,10 +236,10 @@ class _UserInfoPageState extends State<UserInfoPage> {
     });
 
     try {
-      // 0. 取消所有正在进行的上传任务（优先执行）
-      await _cancelAllUploads();
+      // ✅ 0. 取消所有传输任务（上传 + 下载）
+      await TaskCancelHelper.cancelAllTransfers();
 
-      // 1. 断开P2P连接（优先执行）
+      // 1. 断开P2P连接
       await _disconnectP2pConnection();
 
       // 2. 调用登出接口
@@ -256,18 +257,14 @@ class _UserInfoPageState extends State<UserInfoPage> {
       // 6. 清除 MyInstance 中的数据
       await _clearMyInstanceData();
 
-      // 7. 清除上传任务记录
+      // 7. 清除上传任务状态
       await _clearUploadTasks();
 
-      // 8. 清除上传任务记录
-      await _clearUploadTasks();
-
-      await _cancelAllDownloads();
-      // 9. 清除下载任务状态
+      // 8. 清除下载任务状态
       await _clearDownloadTasks();
 
 
-      // 10. 显示成功提示
+      // 9. 显示成功提示
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -277,7 +274,7 @@ class _UserInfoPageState extends State<UserInfoPage> {
         );
       }
 
-      // 11. 延迟后跳转到登录页
+      // 10. 延迟后跳转到登录页
       await Future.delayed(const Duration(milliseconds: 500));
 
       if (mounted) {
@@ -359,62 +356,6 @@ class _UserInfoPageState extends State<UserInfoPage> {
     }
   }
 
-  // 取消所有正在进行的上传任务
-  Future<void> _cancelAllUploads() async {
-    try {
-      debugPrint('⏹️ 开始取消所有上传任务...');
-
-      final userId = MyInstance().user?.user?.id ?? 0;
-      final groupId = MyInstance().group?.groupId ?? 0;
-      final taskManager = UploadFileTaskManager.instance;
-      final albumProvider = AlbumProvider();
-
-      try {
-        final coordinator = UploadCoordinator.instance;
-
-        if (coordinator.isUploading) {
-          debugPrint('📤 发现 ${coordinator.activeTaskCount} 个正在进行的上传任务');
-
-          final activeTaskIds = coordinator.activeDbTaskIds;
-          await coordinator.cancelAllUploads();
-          debugPrint('✅ 内存中的上传任务已取消');
-
-          for (final taskId in activeTaskIds) {
-            try {
-              debugPrint('📡 调用 revokeSyncTask: taskId=$taskId');
-              final response = await albumProvider.revokeSyncTask(taskId);
-              debugPrint('📡 Server revoke result: ${response.message}');
-            } catch (e) {
-              debugPrint('⚠️ revokeSyncTask 失败 (taskId=$taskId): $e');
-            }
-
-            if (userId > 0 && groupId > 0) {
-              try {
-                await taskManager.updateStatusForKey(
-                  taskId: taskId,
-                  userId: userId,
-                  groupId: groupId,
-                  status: UploadTaskStatus.canceled,
-                );
-                debugPrint('✅ 数据库状态已更新: taskId=$taskId -> canceled');
-              } catch (e) {
-                debugPrint('⚠️ 更新数据库状态失败 (taskId=$taskId): $e');
-              }
-            }
-          }
-
-          debugPrint('✅ 所有上传任务已取消并更新状态');
-        } else {
-          debugPrint('ℹ️ 没有正在进行的上传任务');
-        }
-      } catch (e) {
-        debugPrint('ℹ️ UploadCoordinator 未初始化，跳过取消上传: $e');
-      }
-    } catch (e) {
-      debugPrint('❌ 取消上传任务失败: $e');
-    }
-  }
-
   // 只重置内存状态，不删除数据库记录
   Future<void> _clearUploadTasks() async {
     try {
@@ -440,65 +381,6 @@ class _UserInfoPageState extends State<UserInfoPage> {
     }
   }
 
-  // ✅ 新增：取消所有正在进行的下载任务
-  Future<void> _cancelAllDownloads() async {
-    try {
-      debugPrint('⏹️ 开始取消所有下载任务...');
-
-      final userId = MyInstance().user?.user?.id ?? 0;
-      final groupId = MyInstance().group?.groupId ?? 0;
-      final downloadDbHelper = DownloadTaskDbHelper.instance;
-
-      // 检查 DownloadQueueManager 是否有活跃任务
-      try {
-        final downloadManager = DownloadQueueManager.instance;
-
-        // 获取所有正在下载或等待中的任务
-        final activeTasks = downloadManager.downloadTasks.where(
-                (t) => t.status == DownloadTaskStatus.downloading ||
-                t.status == DownloadTaskStatus.pending
-        ).toList();
-
-        if (activeTasks.isNotEmpty) {
-          debugPrint('📥 发现 ${activeTasks.length} 个正在进行的下载任务');
-
-          // 遍历取消每个任务
-          for (final task in activeTasks) {
-            try {
-              // 1. 取消下载（停止下载、删除临时文件、更新状态）
-              await downloadManager.cancelDownload(task.taskId);
-              debugPrint('✅ 已取消下载: ${task.fileName}');
-            } catch (e) {
-              debugPrint('⚠️ 取消下载失败 (${task.fileName}): $e');
-
-              // 即使取消失败，也尝试更新数据库状态
-              if (userId > 0 && groupId > 0) {
-                try {
-                  await downloadDbHelper.updateStatus(
-                    taskId: task.taskId,
-                    userId: userId,
-                    groupId: groupId,
-                    status: DownloadTaskStatus.canceled,
-                  );
-                } catch (e2) {
-                  debugPrint('⚠️ 更新数据库状态失败: $e2');
-                }
-              }
-            }
-          }
-
-          debugPrint('✅ 所有下载任务已取消');
-        } else {
-          debugPrint('ℹ️ 没有正在进行的下载任务');
-        }
-      } catch (e) {
-        debugPrint('ℹ️ DownloadQueueManager 未初始化，跳过取消下载: $e');
-      }
-    } catch (e) {
-      debugPrint('❌ 取消下载任务失败: $e');
-      // 不抛出异常，继续执行后续清理操作
-    }
-  }
 
   // ✅ 新增：清除下载任务状态（只重置内存，保留数据库记录）
   Future<void> _clearDownloadTasks() async {

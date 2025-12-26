@@ -1,3 +1,4 @@
+import 'package:flutter/cupertino.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:path/path.dart';
 import '../models/local_file_item.dart';
@@ -208,6 +209,33 @@ class DatabaseHelper {
   Future<int> deleteFile(int id) async {
     final db = await instance.database;
     return await db.delete('files', where: 'id = ?', whereArgs: [id]);
+  }
+
+  /// 删除未完成的文件记录（status != 2）
+  /// 用于取消上传时清理中间状态的记录
+  Future<int> deleteIncompleteFiles(String userId, String deviceCode) async {
+    final db = await instance.database;
+
+    final count = await db.delete(
+      'files',
+      where: 'userId = ? AND deviceCode = ? AND status != ?',
+      whereArgs: [userId, deviceCode, 2],  // status=2 表示已完成
+    );
+
+    print('[DatabaseHelper] 删除了 $count 条未完成的文件记录 (userId=$userId, deviceCode=$deviceCode)');
+    return count;
+  }
+
+  /// 根据 MD5 删除文件记录
+  /// 用于重新上传前清理旧记录
+  Future<int> deleteFileByMd5(String md5Hash, String userId, String deviceCode) async {
+    final db = await instance.database;
+
+    return await db.delete(
+      'files',
+      where: 'md5Hash = ? AND userId = ? AND deviceCode = ?',
+      whereArgs: [md5Hash, userId, deviceCode],
+    );
   }
 
   Future close() async {
