@@ -1,17 +1,19 @@
 // services/sync_status_service.dart
+import 'dart:async';
 import 'dart:io';
-import 'dart:typed_data';
+
 import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 import '../album/provider/album_provider.dart';
-import '../user/models/resource_list_model.dart';
-import '../user/models/recycle_resource_model.dart';
 
 /// 同步状态服务 - 通过比对服务端 resId 与本地文件 MD5 判断同步状态
 class SyncStatusService {
   static final SyncStatusService _instance = SyncStatusService._internal();
   static SyncStatusService get instance => _instance;
   SyncStatusService._internal();
+
+  // ✅ 新增：初始化完成的 Completer
+  Completer<void>? _initCompleter;
 
   final AlbumProvider _albumProvider = AlbumProvider();
 
@@ -53,8 +55,15 @@ class SyncStatusService {
       return;
     }
 
-    if (_isLoading) return;
+    // ✅ 如果已经在加载中，等待现有的初始化完成
+    if (_isLoading && _initCompleter != null) {
+      debugPrint('[SyncStatusService] 等待现有初始化完成...');
+      await _initCompleter!.future;
+      return;
+    }
+
     _isLoading = true;
+    _initCompleter = Completer<void>();  // ✅ 创建新的 Completer
 
     try {
       final resIds = <String>{};
@@ -77,6 +86,8 @@ class SyncStatusService {
       debugPrint('[SyncStatusService] 初始化失败: $e');
     } finally {
       _isLoading = false;
+      _initCompleter?.complete();  // ✅ 通知所有等待者
+      _initCompleter = null;
     }
   }
 
@@ -246,6 +257,12 @@ class SyncStatusService {
     } finally {
       await raf.close();
     }
+  }
+
+  /// 根据 MD5 判断是否已同步（直接查内存缓存，不计算文件 MD5）
+  bool isSyncedByMd5(String md5) {
+    if (!_isInitialized) return false;
+    return _serverResIds.contains(md5);
   }
 
   // ═══════════════════════════════════════════════════════════════

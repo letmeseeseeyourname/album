@@ -19,6 +19,7 @@ import '../../minio/mc_service.dart';
 import '../../minio/minio_service.dart';
 import '../../network/constant_sign.dart';
 import '../../network/network.dart';
+import '../../services/sync_status_service.dart';
 import '../../services/thumbnail_helper.dart';
 import '../../services/transfer_speed_service.dart';
 import '../../user/my_instance.dart';
@@ -46,6 +47,7 @@ class LocalFolderUploadManager extends ChangeNotifier {
   UploadFileTaskManager taskManager = UploadFileTaskManager.instance;
   AlbumProvider provider = AlbumProvider();
 
+  final SyncStatusService _syncService = SyncStatusService.instance;
   // ✅ 新增：字节进度追踪
   int _globalTotalBytes = 0;        // 所有待上传文件的总字节数
   int _completedBytes = 0;          // 已完成文件的累计字节数
@@ -347,8 +349,10 @@ class LocalFolderUploadManager extends ChangeNotifier {
           failedFiles++;
         }
       }
-
-      // 3. 批量查询数据库，过滤已上传的文件
+      // ═══════════════════════════════════════════════════════════════
+      // ✅ 双重去重检查
+      // ═══════════════════════════════════════════════════════════════
+      // 3.1. 批量查询数据库，过滤已上传的文件
       final md5List = filesWithMd5.map((e) => e.value).toList();
       final existingFilesMap = await dbHelper.queryFilesByMd5HashList(
         "$userId",
@@ -356,16 +360,36 @@ class LocalFolderUploadManager extends ChangeNotifier {
         md5List,
       );
 
+      // 3.2. 确保服务端状态已加载
+      if (!_syncService.isInitialized) {
+        try {
+          await _syncService.initialize();
+        } catch (e) {
+          LogUtil.log("[UploadManager] SyncStatusService 初始化失败，仅使用本地判断");
+        }
+      }
+      // 3.3. 过滤已上传的文件
       final newFiles = <MapEntry<LocalFileInfo, String>>[];
       for (var entry in filesWithMd5) {
+        final md5 = entry.value;
+        final fileName = entry.key.fileName;
+
         final existingFile = existingFilesMap[entry.value];
+        // 检查本地数据库（当前设备）
         if (existingFile != null && existingFile.status == 2) {
           LogUtil.log(
-              "[UploadManager] File already uploaded: ${entry.key.fileName}");
+              "[UploadManager] File already uploaded: $fileName");
           uploadedFiles++;
-        } else {
-          newFiles.add(entry);
+          continue;
         }
+        // 检查服务端状态（跨设备）
+        if (_syncService.isSyncedByMd5(md5)) {
+          LogUtil.log("[UploadManager] File already uploaded (server): $fileName");
+          uploadedFiles++;
+          continue;
+        }
+
+        newFiles.add(entry);
       }
 
       if (newFiles.isEmpty) {

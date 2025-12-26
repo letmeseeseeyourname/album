@@ -185,7 +185,7 @@ class _MainFolderPageState extends State<MainFolderPage> with UploadCoordinatorM
 
         if (isDuplicate) {
           final existingFolder = folders.firstWhere((folder) => folder.path == selectedDirectory);
-          _showWarningDialog('该文件夹已添加', '文件夹 "${existingFolder.name}" 已经在列表中，无需重复添加。');
+          _showWarningDialog('该文件夹已存在', '文件夹 "${existingFolder.name}" 已经在列表中，无需重复添加。');
           return;
         }
 
